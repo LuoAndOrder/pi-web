@@ -129,3 +129,60 @@ implementation.
 The single-file `index.html` is the visual contract; `DATA-MODEL-AND-API.md` is the binding
 contract. Build #1–#2 against the spec, keep #3 behind the proposed band, and resolve the queue
 chip to converge the mockup itself.
+
+---
+
+## Reliable convergence run (pipeline fixed)
+
+The run above stalled on a *pipeline* defect, not a design one. This section records the re-run
+after that pipeline was repaired, and is the honest accounting of whether the fix held.
+
+### Root cause of the prior desync
+
+The earlier run kept **multiple physical copies of `index.html` in play at once**: the builder
+wrote into a worktree checkout, the critics read whichever copy their cwd resolved to, and the
+synthesis/judge step graded a third. Because nothing forced these to be the same inode, the
+builder's "verified fixes" and the four lens critiques routinely described a file that was never
+persisted to the path being shipped — line numbers drifted 50–87 lines, flagship functions
+(`loopElapsed()` / `proposedLoop()`) appeared in the critique but not on disk, and deleted code
+(`loopHealth()`) read as still-live. The loop burned iterations 1, 2, 3, and 6 reconciling a
+phantom build. **Critics and synth were grading different files**, so high lens scores never
+translated into real convergence.
+
+### The fix
+
+1. **One canonical file, edited in place.** All builders, critics, and the judge operate on the
+   single on-disk path `docs/dashboard-designs-final/index.html` in the main repo. **No worktrees,
+   no copies** — there is exactly one inode for everyone to read and write.
+2. **A deterministic verifier gate.** Before any iteration is allowed to converge, a verifier
+   re-greps the committed on-disk file for every critical marker and emits `integrityPass` plus a
+   `discrepancies` array. Convergence is gated on `integrityPass === true` **and**
+   `discrepancies.length === 0`, independent of the (subjective) lens averages. Lens scores can no
+   longer wave a phantom build through.
+
+### Per-iteration table (this run)
+
+| Iter | Commit    | integrityPass | Discrepancies | Satisfaction | Lens avg | High-sev | Ungrounded LIVE | Regressions | Converged |
+| ---- | --------- | ------------- | ------------- | ------------ | -------- | -------- | --------------- | ----------- | --------- |
+| 1    | `2b8d629` | true          | 0             | 9            | 9.3      | 0        | 0               | 0           | yes       |
+
+One iteration, zero changes applied: the canonical file was already at final form when the
+verifier and the four lenses (Calm 9 / Feasibility 10 / Scale-stress 9 / Kevin's-eyes 9)
+re-graded the *actual* committed bytes. The judge independently re-grepped the on-disk file
+(2661 lines, clean at HEAD `2b8d629`) and confirmed every critical marker: `queueStart` = 0
+occurrences, the `3 → 17` queue delta = 0, "merged to mainline" = 0, "merged into local main"
+= 38, within-budget = 0, `loopHealth(` = 1 (the DELETED comment, zero call sites), exactly one
+`<h2>Awaiting your sign-off</h2>`, and `--accent #8ea2f0` distinct from `--st-run #7dd3fc`.
+
+### Final verdict: CONVERGED (honestly this time)
+
+Yes — it converged, and the difference from the prior run is that the grade is now provably about
+the shipped file. `integrityPass` was true with an **empty** discrepancies array, every lens scored
+≥ 8 with empty `regressions` and empty `ungroundedLiveElements`, there were **zero** high-severity
+issues, and the two historical hard cases (dense and scale) passed in every lens. The artifact at
+`docs/dashboard-designs-final/index.html` is committed clean at HEAD `2b8d629` — the fact that **no
+recovery from a side commit was needed** is itself the proof the desync is fixed. The remaining nits
+are all severity-low and explicitly fixture-only or future-production-port notes (the `loopMinutes`
+text-parse fallback marked "must never ship", the `srcFamily`/`sessFamily` substring heuristic, the
+proposed-band placeholder numbers, and a possible nudge affordance for the idle bucket); each is
+already disclosed with a guard comment and none gate FINAL.
