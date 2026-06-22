@@ -814,3 +814,55 @@ folders) · loop (queue 3→17 chip, elapsed-only badge, proposed band for telem
 → "reviewed", "Archive" not merge) · mixed ("k of n SESSIONS done" gauge, never a blended percent).
 Expand → workstream → sessions and open-session (composer ready, chips prefill) both verified;
 walkthrough re-recorded against the patched file.
+
+## Iteration 1 — reliability / converge run
+
+Goal of this run: (1) prove the build/review pipeline is reliable now that the verifier, critics,
+synth, and builder all read ONE canonical file (`docs/dashboard-designs-final/index.html`, edited
+in place, no worktree), and (2) close any genuine remaining low-severity issue to reach a clean,
+verified converged verdict. Started from the shipping artifact (already convergence-quality) and
+reconciled the change against the **actual on-disk file** first: every integrity marker was
+re-grepped on disk BEFORE touching anything, then re-grepped AFTER, so no claim rests on a builder
+narrative. No rebuild — every prior win preserved (cardLive names the blocker, single sign-off
+action heading, honest k-of-n rings, answer-is-continue, attention-driven disclosure, no
+instrument-panel wall, elapsed-only loop badge, proposed-only loop telemetry).
+
+### Verified already-clean on disk (the convergence bar, re-confirmed by grep)
+
+- `queueStart` = 0 · `queue 3→17` growth delta = 0 (the loop card shows a grounded, hedged
+  `~17 queued` / `~2 queued` from `plannedQueue.total`, muted grey — a count, not a status hue).
+- `merged to mainline` = 0 · `merged into local main` = 37 (receipts are local-only, honest).
+- `within budget` on a live surface = 0.
+- `loopHealth(` = 1 (the DELETED comment only; zero call sites) — no stall/over-budget verdict can
+  flow onto a live surface.
+- `iterSparkHtml` renders ONLY inside `proposedLoop()` (the muted, dashed "— not live yet" band);
+  `.iterspark.live` has zero live call sites (CSS/comment only).
+- exactly ONE `<h2>Awaiting your sign-off</h2>` heading (no duplicate band).
+- `--accent #8ea2f0` (soft indigo), distinct from running-cyan `--st-run #7dd3fc`.
+- `cardLive` names the blocker in the block branch (`{ws} needs your input — {live}`), never showing
+  a running task while a blocker hides.
+
+### What changed this iteration (genuine low-severity polish)
+
+1. **Deleted three dead helpers/rules that could let a FORBIDDEN live control re-enter.** The durable
+   Pause control was deliberately removed (carry-fwd #D — Pause needs an orchestrator pi can't
+   ground), but its glyph and styling survived as dead code: `pauseIcon()` (0 call sites) and its
+   `.btn.pause` CSS (0 consumers). Both deleted, plus `historyIcon()` (0 call sites). This mirrors
+   the iteration-3 dead-CSS sweep (`.badge.paused` / `.pill.warn` / `.loopBadge.warn` / `.budget*`)
+   whose whole rationale was that a leftover rule is one render path from silently reintroducing a
+   forbidden live element. Each deletion left a `(#it1-rel) … DELETED` comment so the intent is
+   legible and the helper isn't innocently re-added. Verified: `pauseIcon` / `historyIcon` /
+   `btn.pause` each grep to exactly ONE hit — the DELETED comment — with zero functions, call sites,
+   or CSS rules remaining. `node --check` of the inline app JS passes; 0 console errors across all
+   scenarios at 1440×900.
+
+### Scenarios re-verified live (1440×900, 0 console errors)
+
+default ("2 things need you", cardLive names the Plaid blocker, "1 may be waiting" soft tally) ·
+scale (51 projects, attention cards + grouped Running + dormant, no instrument wall) · dense
+(8 ws / 40 sessions, calm) · calm ("Nothing needs you. 2 loops running … close this tab", only
+cyan) · blocked ("6 things need you", destructive migration first by blast radius, top-2 + "+4 more
+need you") · empty (Project › Workstream › Session › DoD onboarding) · loop (grounded `~17 queued`
+chip muted grey, elapsed-only `∞ looping` badge, telemetry only in the proposed band) · expand
+(card → workstream → sessions) · continue (the "transactions only" quick-reply chip prefills the
+composer = answer-is-continue, confirmed by reading the textarea value before/after the click).
