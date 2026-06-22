@@ -8,7 +8,11 @@
 :root{
   color-scheme: dark;
   --bg:#0b0f14; --panel:#111821; --panel-2:#17212d; --border:#263342;
-  --text:#e7edf5; --muted:#93a4b8; --accent:#7dd3fc; --danger:#fb7185;
+  /* (#it6-p8) the INTERACTION accent is shifted a few degrees off the running cyan (--st-run) so hover
+     borders / focus rings / the brand-dot glow never momentarily read as a "running" STATUS cue. It is a
+     soft indigo — clearly distinct from both running-cyan (#7dd3fc) and sign-off-purple (#c084fc). This
+     protects invariant #2's "cyan == running" color contract. */
+  --text:#e7edf5; --muted:#93a4b8; --accent:#8ea2f0; --danger:#fb7185;
   /* state palette — rationed strictly to STATUS (never decoration / source / lineage) */
   --st-run:#7dd3fc;   /* running / looping  */
   --st-block:#facc15; /* blocked · needs input */
@@ -62,8 +66,11 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .headline{font-size:30px;line-height:1.18;font-weight:800;letter-spacing:-.02em;margin:0 0 10px;max-width:780px;}
 .headline em{font-style:normal;color:var(--st-block);}
 .headline em.calm{color:var(--st-run);}
+.headline em.sign{color:var(--st-sign);}  /* sign-off hero emphasis is PURPLE, never amber — status hue is honest (#2) */
 .subline{color:var(--muted);font-size:13px;max-width:760px;}
 .subline b{color:var(--text);font-weight:650;}
+/* "N may be waiting" — non-elicited idle stops: a quiet hedge, never the bold obligation count (#5) */
+.subline .maybe{color:color-mix(in srgb,var(--muted) 80%,transparent);font-style:italic;cursor:help;}
 /* since-last-visit delta (#1,#11) — demoted from a bordered band to one muted clause on the subline */
 .subline .delta{color:color-mix(in srgb,var(--muted) 90%,transparent);}
 .subline .delta::before{content:"·";margin:0 7px;color:color-mix(in srgb,var(--muted) 50%,transparent);}
@@ -89,14 +96,13 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .pill.sign .sw{background:var(--st-sign);}
 .pill.sign .n{color:var(--st-sign);}
 .pill.sign:hover{border-color:color-mix(in srgb,var(--st-sign) 60%,var(--border));}
-.pill.warn{color:var(--st-block);border-color:color-mix(in srgb,var(--st-block) 38%,var(--border));}
-.pill.warn .sw{background:var(--st-block);}
-.pill.warn .n{color:var(--st-block);}
-.pill.warn:hover{border-color:color-mix(in srgb,var(--st-block) 60%,var(--border));}
+/* (#9c) .pill.warn removed — there is no live stalled-loop warning pill (stall/over-budget needs an
+   iteration log pi can't ground); deleting the dead rule prevents a live amber meter from silently returning. */
 /* delta digest fragments are jump-links (#7) */
 .subline .delta a{color:color-mix(in srgb,var(--text) 90%,transparent);cursor:pointer;border-bottom:1px dotted color-mix(in srgb,var(--muted) 45%,transparent);}
 .subline .delta a:hover{color:var(--accent);border-bottom-color:var(--accent);}
 .subline .delta b{color:var(--text);font-weight:650;}
+.subline .delta .dnums{color:color-mix(in srgb,var(--muted) 82%,transparent);font-weight:500;border-bottom:0;}  /* #9f: muted inline numstat — git fact, not status */
 
 /* ───────────── section heads ───────────── */
 .shead{display:flex;align-items:baseline;gap:10px;margin:32px 0 14px;scroll-margin-top:60px;}
@@ -141,6 +147,10 @@ button{font:inherit;cursor:pointer;color:inherit;}
   letter-spacing:.02em;color:var(--muted);border:1px solid color-mix(in srgb,var(--border) 85%,transparent);}
 .blast.block{color:var(--st-block);border-color:color-mix(in srgb,var(--st-block) 38%,transparent);background:color-mix(in srgb,var(--st-block) 8%,transparent);}
 .blast.fail{color:var(--st-fail);border-color:color-mix(in srgb,var(--st-fail) 40%,transparent);background:color-mix(in srgb,var(--st-fail) 9%,transparent);}
+/* time-since-waiting (#triage): the only triage axis besides blast radius — how long this has blocked
+   me. MUTED grey (a duration FACT, not a status hue), sourced from the session's last-activity meta. */
+.waitage{font-size:11px;font-weight:450;color:color-mix(in srgb,var(--muted) 92%,transparent);white-space:nowrap;}
+.needrow .ncrumb .waitage::before{content:"·";margin:0 5px;color:color-mix(in srgb,var(--muted) 50%,transparent);}
 /* DoD source label (#8) — borderless passive metadata: a leading middot + plain muted text.
    Bordered pills are reserved for things you can click; a source label is not interactive. */
 .srcTag{
@@ -191,8 +201,7 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .badge.idle .d{background:var(--st-idle);}
 .badge.unset{color:var(--st-sign);border-color:color-mix(in srgb,var(--st-sign) 38%,transparent);background:transparent;}
 .badge.unset .d{background:transparent;box-shadow:inset 0 0 0 1.4px var(--st-sign);}
-.badge.paused{color:var(--st-block);border-color:color-mix(in srgb,var(--st-block) 32%,transparent);background:transparent;}
-.badge.paused .d{background:transparent;box-shadow:inset 0 0 0 1.4px var(--st-block);}
+/* (#9c) .badge.paused removed — durable Pause needs an orchestrator pi can't ground; data uses "idle Nm ago". */
 .loopBadge{display:inline-flex;align-items:center;gap:5px;height:21px;padding:0 8px;border-radius:999px;
   font-size:11px;font-weight:800;letter-spacing:.02em;color:var(--st-run);
   border:1px solid color-mix(in srgb,var(--st-run) 38%,transparent);background:color-mix(in srgb,var(--st-run) 9%,transparent);}
@@ -277,6 +286,31 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .ring-gly{font:800 13px ui-sans-serif,system-ui;}
 .ring-shape{fill:none;stroke-width:2.4;}  /* colourblind-safe status shape overlaid on the ring (#13) */
 
+/* ── compact card summary (carry-fwd #C): collapsed cards never paint a ring-per-workstream wall.
+   ONE muted project gauge (k of n workstreams done) + a shape-coded dot-strip + the named long pole.
+   Rich per-criterion rings appear ONLY on an opened workstream. Honest + calm at 3 or 8 workstreams. */
+.csum{display:flex;align-items:center;gap:14px;padding:2px 16px 14px;}
+.csum-ring{flex:0 0 auto;}
+.csum-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;}
+.csum-line{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);flex-wrap:wrap;}
+.csum-line b{color:var(--text);font-weight:650;}
+.csum-pole{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.csum-pole .plbl{color:color-mix(in srgb,var(--muted) 72%,transparent);}
+.csum-pole b{color:color-mix(in srgb,var(--text) 90%,transparent);font-weight:650;}
+.muted-jump{color:var(--muted);border:1px dashed color-mix(in srgb,var(--border) 90%,transparent);border-radius:999px;padding:2px 9px;background:transparent;font-size:11px;font-weight:650;cursor:pointer;}
+.muted-jump:hover{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--border));}
+
+/* ── proposed-signal band (carry-fwd #D): loop iteration count / rhythm sparkline / budget cap need a
+   durable per-iteration log + orchestrator pi does NOT expose. Rendered muted + dashed + labelled
+   "proposed", NEVER as live data, and only inside an opened session — so the live view stays grounded. */
+.proposed{margin-top:9px;display:flex;align-items:center;gap:9px;padding:7px 11px;border:1px dashed color-mix(in srgb,var(--muted) 32%,transparent);
+  border-radius:9px;background:transparent;font-size:11px;color:color-mix(in srgb,var(--muted) 82%,transparent);flex-wrap:wrap;}
+.proposed .plab{flex:0 0 auto;font-weight:800;letter-spacing:.06em;text-transform:uppercase;font-size:10px;color:color-mix(in srgb,var(--muted) 70%,transparent);
+  border:1px solid color-mix(in srgb,var(--muted) 30%,transparent);border-radius:5px;padding:1px 6px;}
+.proposed .pbody{flex:1;min-width:0;}
+.proposed .pbody b{color:color-mix(in srgb,var(--text) 80%,transparent);font-weight:650;}
+.proposed .iterspark i{background:color-mix(in srgb,var(--muted) 45%,transparent);}  /* muted, never status-cyan */
+
 /* clickable live one-liner (#9) — Continue is one click from the card face */
 .oneliner{display:flex;align-items:center;gap:9px;padding:10px 12px 10px 16px;border-top:1px solid color-mix(in srgb,var(--border) 60%,transparent);
   color:var(--muted);font-size:12px;background:color-mix(in srgb,var(--bg) 30%,transparent);cursor:pointer;}
@@ -285,9 +319,13 @@ button{font:inherit;cursor:pointer;color:inherit;}
 /* only ONE pinged item animates (#20a); every other running dot is static cyan */
 .oneliner.ping .live::after{content:"";position:absolute;inset:-4px;border-radius:999px;border:1px solid var(--st-run);opacity:.55;animation:ping 1.8s ease-out infinite;}
 .oneliner.block .live{background:var(--st-block);} .oneliner.fail .live{background:var(--st-fail);}
+.oneliner.sign .live{background:var(--st-sign);}
 .oneliner.calm .live{background:var(--st-idle);}
 .oneliner .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .oneliner .txt b{color:color-mix(in srgb,var(--text) 88%,transparent);font-weight:650;}
+/* (#it6-p6b) queue-growth delta chip — a COUNT, so muted grey (status hue is rationed to status only, #2). */
+.oneliner .qdelta{flex-shrink:0;font-size:11px;font-weight:650;color:var(--muted);letter-spacing:.01em;
+  border:1px dashed color-mix(in srgb,var(--border) 95%,transparent);border-radius:6px;padding:1px 7px;}
 .oneliner .ol-act{display:flex;align-items:center;gap:6px;flex-shrink:0;}
 @keyframes ping{0%{transform:scale(.6);opacity:.7;}100%{transform:scale(1.9);opacity:0;}}
 @media (prefers-reduced-motion: reduce){ .oneliner .live::after{animation:none;} }
@@ -326,7 +364,9 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .artchip.mg{border-color:color-mix(in srgb,var(--st-merge) 32%,var(--border));background:color-mix(in srgb,var(--st-merge) 7%,transparent);}
 .artchip.doc{border-color:color-mix(in srgb,var(--st-sign) 30%,var(--border));}
 .artchip .ok{color:var(--st-merge);font-weight:800;}
-.artchip .add{color:var(--st-merge);} .artchip .del{color:var(--st-fail);}
+/* numstat counts are a muted GIT FACT, not a status — desaturated like the delta digest (#Inv2) so a
+   '−96' inside a green merged chip never momentarily reads as a failure. Full --st-fail red is reserved for FAILED status. */
+.artchip .add{color:color-mix(in srgb,var(--st-merge) 85%,var(--muted));} .artchip .del{color:color-mix(in srgb,var(--st-fail) 80%,var(--muted));}
 .recheck{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:color-mix(in srgb,var(--muted) 80%,transparent);border:0;background:transparent;padding:0 0 0 4px;}
 .recheck:hover{color:var(--accent);}
 .stale{color:var(--st-block);}
@@ -334,12 +374,17 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .qnext{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
 .qchip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:6px;font-size:11px;color:var(--muted);
   border:1px dashed color-mix(in srgb,var(--border) 95%,transparent);background:transparent;}
-.qchip .qn{color:color-mix(in srgb,var(--st-idle) 90%,transparent);font-weight:800;margin-right:5px;}
 .qmore{font-size:11px;color:color-mix(in srgb,var(--muted) 80%,transparent);font-style:italic;}
 .qsrc{font-size:11px;color:color-mix(in srgb,var(--muted) 65%,transparent);font-style:italic;}
-/* iteration sparkbar for loops */
+/* iteration sparkbar for loops.
+   (#it5-p6) invariant #2 hardening: the BASE bar is the MUTED token, never status-cyan. iterSparkHtml
+   today renders ONLY inside a .proposed band (proposedLoop) — a muted, explicitly-"proposed" signal — so
+   the spark never reads as a live status meter. Cyan is opt-in via the explicit .iterspark.live modifier
+   ONLY; do not add a .iterspark.live call site without a grounded per-iteration log (spec §4.4, §5.4),
+   or a decorative cyan meter would re-enter the live view and break the status-only colour ration. */
 .iterspark{display:inline-flex;align-items:flex-end;gap:2px;height:16px;}
-.iterspark i{width:3px;border-radius:1px;background:color-mix(in srgb,var(--st-run) 55%,transparent);}
+.iterspark i{width:3px;border-radius:1px;background:color-mix(in srgb,var(--muted) 45%,transparent);}
+.iterspark.live i{background:color-mix(in srgb,var(--st-run) 55%,transparent);} /* opt-in ONLY; no grounded live call site exists */
 
 /* ───────────── compact project rows (fleet scale) ───────────── */
 .grpcard{border:1px solid var(--border);border-radius:16px;background:color-mix(in srgb,var(--panel) 70%,transparent);overflow:hidden;margin-top:14px;}
@@ -407,8 +452,12 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .soff .scrit .gk{color:color-mix(in srgb,var(--text) 88%,transparent);font-weight:650;}
 .soff .scrit .pend{color:var(--st-block);font-weight:650;}
 .soff .sact{display:flex;gap:8px;align-items:center;flex-shrink:0;}
-/* the "+N more to sign off" overflow reuses .needmore; tighten its rows */
-#signmore .needmore-b{padding:8px;display:flex;flex-direction:column;gap:8px;}
+/* the "+N more to sign off" overflow reuses .needmore; tighten its rows.
+   (#it5-p1) split so the body actually collapses: the base padding rule must NOT set
+   display, or its (1,1,0) specificity overrides both .needmore-b{display:none} and the
+   .needmore.open toggle and the body is permanently visible. display:flex is opt-in on .open. */
+#signmore .needmore-b{padding:8px;}
+#signmore.open .needmore-b{display:flex;flex-direction:column;gap:8px;}
 .btn.sign{background:color-mix(in srgb,var(--st-sign) 18%,transparent);border-color:color-mix(in srgb,var(--st-sign) 45%,var(--border));color:#eaddff;font-weight:800;}
 .btn.sign:hover{background:color-mix(in srgb,var(--st-sign) 26%,transparent);border-color:var(--st-sign);}
 .btn.sign svg{width:14px;height:14px;}
@@ -439,13 +488,9 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .sess-dot.fail{position:relative;background:transparent !important;}
 .sess-dot.fail::after{content:"\00d7";position:absolute;inset:-4px 0 0;font-size:13px;line-height:1;font-weight:800;text-align:center;color:var(--st-fail);}
 
-/* loop budget meter (#3) */
-.loopBadge.warn{color:var(--st-block);border-color:color-mix(in srgb,var(--st-block) 42%,transparent);background:color-mix(in srgb,var(--st-block) 10%,transparent);}
-.budget{display:inline-flex;align-items:center;gap:7px;font-size:11px;color:var(--muted);}
-.budget .bar{width:74px;height:5px;border-radius:999px;background:color-mix(in srgb,var(--border) 80%,transparent);overflow:hidden;}
-.budget .bar i{display:block;height:100%;border-radius:999px;background:color-mix(in srgb,var(--st-run) 60%,var(--muted));}
-.budget.warn .bar i{background:var(--st-block);}
-.budget.warn{color:var(--st-block);}
+/* (#9c) live loop-budget meter removed — .loopBadge.warn + .budget* deleted. A budget/stall meter needs a
+   durable iteration log + orchestrator pi does not expose, so it must NEVER render live. Iteration count,
+   rhythm sparkline and budget cap appear ONLY inside the muted, dashed ".proposed" band (not-live-yet). */
 
 /* calm + reassurance lines */
 .calmnote{margin-top:28px;text-align:center;color:color-mix(in srgb,var(--muted) 70%,transparent);font-size:12px;}
@@ -466,6 +511,9 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .onboard .model{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin:18px 0 6px;color:var(--muted);font-size:12px;}
 .onboard .model .node{display:inline-flex;align-items:center;height:26px;padding:0 11px;border-radius:999px;border:1px solid var(--border);background:var(--panel-2);font-weight:650;color:var(--text);}
 .onboard .model .arr{color:color-mix(in srgb,var(--muted) 70%,transparent);}
+.onboard .obsteps{text-align:left;max-width:480px;margin:14px auto 4px;padding-left:20px;color:var(--muted);font-size:12px;line-height:1.55;display:grid;gap:7px;}
+.onboard .obsteps li{padding-left:4px;}
+.onboard .obsteps b{color:var(--text);font-weight:650;}
 .onboard .actions{display:flex;gap:10px;justify-content:center;margin-top:22px;flex-wrap:wrap;}
 .onboard .disc{margin-top:18px;padding-top:16px;border-top:1px solid color-mix(in srgb,var(--border) 60%,transparent);font-size:12px;color:var(--muted);}
 .onboard .disc b{color:var(--text);font-weight:650;}
@@ -670,11 +718,11 @@ button{font:inherit;cursor:pointer;color:inherit;}
      its count and can actually trip over-budget. GIT-DERIVED DoD freshness: a TTL poll (gitStatus +
      merge-base, ~15–30s, visible active cards only) or an fs/git watcher emitting debounced,
      dirty-project-scoped rollup_changed{projectId} — so merges done OUTSIDE pi still go live.
-     iteration (legacy note) = one agent_start→agent_end cycle with no intervening user message; the sparkbar =
-     tool_execution_end events per iteration span returned ON the rollup (not the /ws firehose), so a
-     flat/declining tail signals a stall. budget {maxMinutes?,maxCostUsd?} is compared to
-     SessionStats.cost + elapsed; the loop badge flips amber ONLY when stalled or over budget. Pause =
-     AgentSession.abort() + a registry 'paused' flag the orchestrator honours.
+     iteration count, the rhythm sparkbar, stall detection and a budget cap ALL depend on that durable
+     per-iteration log + an orchestrator pi does NOT expose today. So in THIS mockup they are NEVER drawn as
+     live data and NEVER flip a badge amber — they appear only inside the muted, dashed, explicitly-"proposed"
+     band (see proposedLoop). A live loop is simply "running" (cyan ∞) with a grounded elapsed. Pause likewise
+     needs an orchestrator (AgentSession.abort() + a registry 'paused' flag) — so no live Pause control is shown.
    PLAN QUEUE: BEST-EFFORT parsed from agent notes — pi has no TodoWrite/plan primitive (a plan-tool
      extension writing CustomEntry items would replace it); flagged with one info glyph, not prose.
    DELTA (#11): "since last visit" diffs modified/mergedAt + criterion evaluatedAt against a stored
@@ -754,24 +802,35 @@ function srcFamily(src){
 const WORLD_DEFAULT = [
   { id:"wealthlens", name:"wealthlens", path:"~/workspace/wealthlens", desc:"personal finance app",
     workstreams:[
-      { id:"plaid", name:"Plaid integration", dod:"merged to mainline", dodSrc:"branch feat/plaid", status:"block",
+      { id:"plaid", name:"Plaid integration", dod:"merged into local main", dodSrc:"branch feat/plaid", status:"block",
         sessions:[
           { id:"s1", name:"Wire Plaid OAuth", status:"block", blast:"md", elicited:true,
             dod:"OAuth returns a valid token AND the integration test passes", dodSrc:"agent-defined",
             live:"Which Plaid product scopes should I request — transactions only, or also investments & liabilities?",
-            kind:"question", meta:"Paused 12m ago",
+            kind:"question", meta:"idle 12m ago",
             chips:["transactions only","+ investments","+ investments & liabilities"],
             crit:[
               {text:"OAuth redirect returns a valid access_token", met:true, src:"agent", ev:"token exchange returned token (sandbox)"},
               {text:"integration test passes", met:false, src:"command", ev:"npm run test:plaid — not yet run (blocked on scope)", at:"never run"},
             ]},
           { id:"s2", name:"Token refresh job", status:"run",
-            dod:"tests pass + merged to main", dodSrc:"rule-based",
+            dod:"tests pass + merged into local main", dodSrc:"rule-based",
             live:"Writing cron to refresh access tokens (step 3/5).", meta:"running 6m",
             crit:[
               {text:"lint passes", met:true, src:"command", ev:"eslint exit 0", at:"2m ago"},
               {text:"npm test → exit 0", met:false, src:"command", ev:"last run exit 1 (job incomplete)", at:"6m ago"},
               {text:"branch merged into main", met:false, src:"git_merged", ev:"feat/plaid not an ancestor of main"},
+            ]},
+          // (#it6-p7b) a NON-elicited idle stop (no structured ask_user, no permission prompt). pi can't
+          // PROVE it's blocked, so it must NEVER enter the bold "needs you" count — it degrades to the quiet
+          // "may be waiting" hero tally + an "Idle · may be waiting" badge. This exercises the anti-fake-alarm
+          // honest-degradation that otherwise only shipped as defensive code (spec §5.3).
+          { id:"s2b", name:"Sandbox env probe", status:"block",   // elicited omitted → soft-wait
+            dod:"sandbox reachable", dodSrc:"command",
+            live:"Finished the probe and left a free-text note — no structured question, just stopped.",
+            meta:"idle 27m ago",
+            crit:[
+              {text:"sandbox endpoint reachable", met:true, src:"command", ev:"ping ok", at:"27m ago"},
             ]},
           { id:"s3", name:"Plaid webhook handler", status:"sign",
             dod:"you review & sign off", dodSrc:"user sign-off",
@@ -788,7 +847,7 @@ const WORLD_DEFAULT = [
           { id:"s4", name:"Net-worth chart", status:"sign",
             dod:"you review & sign off", dodSrc:"user sign-off",
             live:"Replaced D3 with a lightweight sparkline.",
-            artifact:{kind:"spark", branch:"feat/dash-v2", add:88, del:402, note:"net-worth.png", check:{cmd:"visual check", exit:0, at:"snapshot"}},
+            artifact:{kind:"spark", branch:"feat/dash-v2", add:88, del:402, note:"net-worth.png", check:{kind:"manual", cmd:"visual check", at:"snapshot"}},
             crit:[
               {text:"chart renders 12-mo series", met:true, src:"manual", ev:"screenshot attached"},
               {text:"bundle smaller than D3 baseline", met:true, src:"command", ev:"38kb → 1.2kb", at:"7m ago"},
@@ -799,15 +858,15 @@ const WORLD_DEFAULT = [
         sessions:[
           { id:"s5", name:"bug-sweep", status:"loop",
             dod:"0 failing tests (open-ended autonomous loop)", dodSrc:"orchestrator-defined",
-            live:"Triaging failing test suite (4 of 11 fixed).", meta:"looping 38m · iter 12", loop:true, iter:12, dIter:4,
+            live:"Triaging failing test suite (4 of 11 fixed).", meta:"looping 38m · iter 12", loop:true, iter:12,
             budget:{maxMinutes:60, maxCostUsd:5}, elapsedMin:38, cost:2.1,
             iterspark:[3,5,4,6,5,7,6,8,7,9,8,10],
             queue:["fix flaky e2e","upgrade vitest","dedupe fixtures","split slow suite"], queueTotal:6 },
         ]},
-      { id:"auth", name:"Auth hardening", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:"2h ago",
+      { id:"auth", name:"Auth hardening", dod:"merged into local main", dodSrc:"merged", status:"merge", mergedAgo:"2h ago",
         sessions:[
           { id:"sA", name:"Auth hardening", status:"merge",
-            dod:"merged to mainline", dodSrc:"merged",
+            dod:"merged into local main", dodSrc:"merged",
             live:"Hardened session auth, rotated secrets, added rate limits.",
             artifact:{kind:"diff", branch:"feat/auth → main", add:331, del:96, merged:true, sha:"9f3a1c2", mergedAgo:"2h ago", check:{cmd:"npm test", exit:0, at:"2h ago"}},
             crit:[
@@ -827,7 +886,7 @@ const WORLD_DEFAULT = [
             iterspark:[4,6,5,7],
             queue:["draft reply to Maya","archive 9 newsletters","flag invoice"], queueTotal:3 },
         ]},
-      { id:"cal", name:"Calendar sync", dod:"merged to mainline", dodSrc:"branch feat/cal", status:"fail",
+      { id:"cal", name:"Calendar sync", dod:"merged into local main", dodSrc:"branch feat/cal", status:"fail",
         sessions:[
           { id:"s7", name:"cal-sync", status:"fail", blast:"md", failAction:"Re-authenticate",
             dod:"npm test → exit 0 + merged", dodSrc:"rule-based",
@@ -840,7 +899,7 @@ const WORLD_DEFAULT = [
     ]},
   { id:"ai-education", name:"ai-education", path:"~/zippy/projects/ai-education", desc:"AI education platform", nest:"in zippy",
     workstreams:[
-      { id:"curric", name:"Curriculum generator", dod:"merged to mainline", dodSrc:"branch feat/curriculum", status:"sign",
+      { id:"curric", name:"Curriculum generator", dod:"merged into local main", dodSrc:"branch feat/curriculum", status:"sign",
         sessions:[
           { id:"s8", name:"lesson-planner", status:"sign",
             dod:"you review & sign off", dodSrc:"user sign-off",
@@ -852,7 +911,7 @@ const WORLD_DEFAULT = [
               {text:"you review & sign off", met:false, src:"manual", gate:true, ev:"awaiting your sign-off"},
             ]},
           { id:"s9", name:"quiz-gen", status:"queued",
-            dod:"merged to mainline", dodSrc:"branch feat/curriculum",
+            dod:"merged into local main", dodSrc:"branch feat/curriculum",
             live:"Waiting on lesson-planner merge.", meta:"queued",
             queue:["generate MCQ bank from lessons","add answer-key validation"], queueTotal:2 },
         ]},
@@ -870,7 +929,7 @@ const WORLD_DEFAULT = [
 const WORLD_SINGLE = [
   { id:"pi-web", name:"pi-web", path:"~/workspace/oss/pi-web", desc:"local web UI for the pi agent",
     workstreams:[
-      { id:"rollups", name:"Project Rollups dashboard", dod:"merged to mainline", dodSrc:"branch feat/rollups", status:"run",
+      { id:"rollups", name:"Project Rollups dashboard", dod:"merged into local main", dodSrc:"branch feat/rollups", status:"run",
         sessions:[
           { id:"p1", name:"rollups grid + drill-down", status:"run",
             dod:"npm test → exit 0 + merged", dodSrc:"rule-based",
@@ -879,81 +938,102 @@ const WORLD_SINGLE = [
                    {text:"npm test → exit 0", met:false, src:"command", ev:"3 specs pending", at:"14m ago"},
                    {text:"branch merged into main", met:false, src:"git_merged", ev:"not yet"} ]},
         ]},
-      { id:"markdown", name:"Markdown artifact previews", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:"1h ago",
+      { id:"markdown", name:"Markdown artifact previews", dod:"merged into local main", dodSrc:"merged", status:"merge", mergedAgo:"1h ago",
         sessions:[
           { id:"p2", name:"render + scroll md previews", status:"merge",
-            dod:"merged to mainline", dodSrc:"merged",
+            dod:"merged into local main", dodSrc:"merged",
             live:"Markdown artifact previews render and scroll.",
             artifact:{kind:"diff", branch:"feat/md → main", add:142, del:18, merged:true, sha:"7e89657", mergedAgo:"1h ago", check:{cmd:"npm test", exit:0, at:"1h ago"}},
             crit:[{text:"branch merged into main",met:true,src:"git_merged",ev:"ancestor @ 7e89657"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"1h ago"}] }]},
-      { id:"idle", name:"Dispose idle live sessions", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:"3h ago",
+      { id:"idle", name:"Dispose idle live sessions", dod:"merged into local main", dodSrc:"merged", status:"merge", mergedAgo:"3h ago",
         sessions:[
           { id:"p3", name:"idle session disposal", status:"merge",
-            dod:"merged to mainline", dodSrc:"merged",
+            dod:"merged into local main", dodSrc:"merged",
             live:"Idle live sessions dispose after a grace period.",
             artifact:{kind:"diff", branch:"feat/idle → main", add:96, del:7, merged:true, sha:"c17c2c0", mergedAgo:"3h ago", check:{cmd:"npm test", exit:0, at:"3h ago"}},
             crit:[{text:"branch merged into main",met:true,src:"git_merged",ev:"ancestor @ c17c2c0"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"3h ago"}] }]},
     ]},
 ];
 
-/* ─────────────────────────── scenario: dense project (8 workstreams) ─────────────────────────── */
+/* ─────────────────────────── scenario: dense project (8 workstreams · ~40 sessions) ───────────────────────────
+   THE hardest calm test (brief): ONE project, 8 workstreams, ~40 sessions. It must NOT become an instrument
+   wall — workstreams cap at 6 ("+N more workstreams"), sessions cap at 6 per workstream ("+N more sessions"),
+   and the long pole is NAMED. The session-heavy "Tax form mappings" workstream (14 sessions) proves the cap. */
 const WORLD_DENSE = [ (function(){
+  const c=(text,met,src,ev,k,v)=>{ const o={text,met,src,ev}; if(k&&typeof k==="object") Object.assign(o,k); else if(k==="at") o.at=v; return o; };
   const mk=(id,name,dod,dodSrc,status,extra)=>Object.assign({id,name,dod,dodSrc,status,
     sessions:[{id:id+"_s",name:name.replace(/ loop$/,""),status:status==="loop"?"loop":status,dod,dodSrc,
       live:extra&&extra.live||"…",meta:extra&&extra.meta,loop:status==="loop",elicited:extra&&extra.elicited,
       artifact:extra&&extra.artifact, crit:extra&&extra.crit, queue:extra&&extra.queue, queueTotal:extra&&extra.queueTotal,
       iterspark:extra&&extra.iterspark, iter:extra&&extra.iter, kind:extra&&extra.kind, blast:extra&&extra.blast, failAction:extra&&extra.failAction}]}, extra&&extra.ws||{});
-  const c=(text,met,src,ev,k,v)=>{ const o={text,met,src,ev}; if(k&&typeof k==="object") Object.assign(o,k); else if(k==="at") o.at=v; return o; };
-  return { id:"wealthlens", name:"wealthlens", path:"~/workspace/wealthlens", desc:"personal finance app · 8 active workstreams",
-    workstreams:[
-      mk("d_plaid","Plaid integration","OAuth token valid AND integration test passes","agent-defined","block",
-        {live:"Which Plaid product scopes — transactions only, or also investments & liabilities?",kind:"question",meta:"paused 12m ago",blast:"md",elicited:true,
-         chips:["transactions only","+ investments","+ liabilities"],
-         crit:[c("OAuth client registered",true,"manual","you checked"),c("product scopes chosen",false,"manual","blocked — needs your decision"),
-               c("token exchange wired",false,"manual",""),c("integration test passes",false,"command","blocked on scope","at","never run"),
-               c("error handling",false,"manual",""),c("retry/backoff",false,"manual",""),c("webhook verify",false,"manual",""),c("merged into main",false,"git_merged","")]}),
-      mk("d_dash","Dashboard redesign","you review & sign off","user sign-off","sign",
-        {live:"Net-worth chart rebuilt — all evaluable checks green.",artifact:{kind:"diff",branch:"feat/dash-v2",add:88,del:402,check:{cmd:"visual check",exit:0,at:"snapshot"}},
-         crit:[c("chart renders 12-mo series",true,"manual","screenshot"),c("responsive down to 360px",true,"manual","you checked"),
-               c("a11y: contrast + labels",true,"command","axe exit 0 — cached","at","3h ago"),c("bundle smaller than D3",true,"command","38kb → 1.2kb","at","6m ago"),
-               c("you review & sign off",false,"manual","awaiting your sign-off",{gate:true})]}),
-      mk("d_auth","Auth hardening","merged to mainline","merged","merge",
-        {live:"Hardened auth, merged.",ws:{mergedAgo:"2h ago"},artifact:{kind:"diff",branch:"feat/auth → main",add:331,del:96,merged:true,sha:"9f3a1c2",mergedAgo:"2h ago",check:{cmd:"npm test",exit:0,at:"2h ago"}},
-         crit:[c("branch merged into main",true,"git_merged","ancestor @ 9f3a1c2"),c("npm test → exit 0",true,"command","exit 0","at","2h ago"),c("working tree clean",true,"git_clean","dirtyCount 0")]}),
-      mk("d_sweep","bug-sweep loop","0 failing tests","orchestrator-defined","loop",
-        {live:"Triaging failing tests (5 of 12 fixed).",meta:"looping 38m · iter 12",iter:12,iterspark:[3,5,4,6,5,7,6,8,7,9,8,10],queue:["fix flaky e2e","upgrade vitest"],queueTotal:6,ws:{loop:true,loopTime:"looping 38m"}}),
-      mk("d_tax","Tax categories","npm test → exit 0 + merged","rule-based","run",
-        {live:"Mapping 1099 categories to ledger (step 7/8).",meta:"running 3m",
-         crit:[c("parse 1099 categories",true,"manual","you checked"),c("map to ledger codes",true,"manual",""),c("handle edge categories",true,"manual",""),
-               c("unit tests",true,"command","exit 0","at","3m ago"),c("integration tests",true,"command","exit 0","at","3m ago"),
-               c("npm test → exit 0",true,"command","exit 0","at","3m ago"),c("merged into main",false,"git_merged","not yet")]}),
-      mk("d_onb","Onboarding polish","you review & sign off","user sign-off","run",
-        {live:"Tightening empty-state copy and first-run flow.",meta:"running 1m",
-         crit:[c("empty-state copy",true,"manual","you checked"),c("first-run flow",true,"manual",""),c("tooltips on every action",false,"manual","in progress"),
-               c("responsive",true,"manual",""),c("you review & sign off",false,"manual","awaiting",{gate:true})]}),
-      mk("d_hooks","Plaid webhooks","you review & sign off","user sign-off","sign",
-        {live:"Webhook handler complete — all evaluable checks green.",artifact:{kind:"diff",branch:"feat/plaid",add:214,del:31,ahead:3,check:{cmd:"npm run test:webhook",exit:0,at:"4m ago"}},
-         crit:[c("handler idempotent",true,"manual","you checked"),c("retries on 5xx",true,"manual",""),c("npm run test:webhook → exit 0",true,"command","exit 0","at","4m ago"),
-               c("you review & sign off",false,"manual","awaiting",{gate:true})]}),
-      mk("d_chart","Net-worth charts","npm test → exit 0 + merged","rule-based","run",
-        {live:"Adding YoY comparison overlay (step 9/10).",meta:"running 2m",
-         crit:[c("YoY overlay",true,"manual","you checked"),c("legend",true,"manual",""),c("hover tooltip",true,"manual",""),c("unit tests",true,"command","exit 0","at","2m ago"),
-               c("npm test → exit 0",true,"command","exit 0","at","2m ago"),c("merged into main",false,"git_merged","not yet")]}),
-      // a deliberately session-heavy workstream so the "+N more sessions" cap is exercised (#20d)
-      { id:"d_tax_detail", name:"Tax form mappings", dod:"merged to mainline", dodSrc:"branch feat/tax", status:"run",
-        sessions:(function(){
-          const names=["1099-INT mapping","1099-DIV mapping","1099-B mapping","Schedule C buckets","crypto cost-basis",
-            "wash-sale detection","foreign-tax credits","K-1 passthrough","edge-case fixtures"];
-          const sts=["run","sign","merge","run","queued","queued","sign","run","merge"];
-          return names.map((nm,i)=>({id:"d_tax_"+i,name:nm,status:sts[i],dod:"npm test → exit 0 + merged",dodSrc:sts[i]==="sign"?"user sign-off":"rule-based",
-            live:sts[i]==="merge"?"Merged and green.":sts[i]==="sign"?"Done — evaluable checks green.":sts[i]==="queued"?"Queued behind earlier mappings.":"Mapping in progress.",
-            meta:sts[i]==="queued"?"queued":"running "+(i+1)+"m",
-            artifact:(sts[i]==="merge"||sts[i]==="sign")?{kind:"diff",branch:sts[i]==="merge"?"feat/tax → main":"feat/tax",add:40+i*6,del:8+i,merged:sts[i]==="merge",sha:(0x2a1b00+i*9).toString(16).slice(0,7),mergedAgo:sts[i]==="merge"?(i+1)+"h ago":undefined,check:{cmd:"npm test",exit:0,at:(i+1)+"m ago"}}:undefined,
-            crit:sts[i]==="sign"?[c("mapping correct",true,"manual","you checked"),c("npm test → exit 0",true,"command","exit 0","at",(i+1)+"m ago"),c("you sign off",false,"manual","awaiting",{gate:true})]
-              :sts[i]==="merge"?[c("merged into main",true,"git_merged","ancestor"),c("npm test → exit 0",true,"command","exit 0","at",(i+1)+"h ago")]
-              :[c("mapping drafted",true,"manual","you checked"),c("npm test → exit 0",sts[i]==="run","command",sts[i]==="run"?"exit 0":"pending","at",(i+1)+"m ago"),c("merged into main",false,"git_merged","not yet")]}));
-        })() },
-    ]};
+  // density generator: append N grounded sessions (status-matched crit/artifacts) to a workstream so the
+  // project reaches spec density (~40 sessions) without 40 hand-written objects. Each session still traces
+  // to a real signal — git merge / command exit / manual sign-off — so no ring is faked at scale.
+  const liveOf={run:"Implementation in progress.",sign:"Done — evaluable checks green.",merge:"Merged into local main and green.",queued:"Queued behind earlier work."};
+  function genSess(prefix, baseName, statuses){
+    return statuses.map((st,i)=>{
+      const id=prefix+"_g"+i, name=baseName+" "+(i+1);
+      const o={id,name,status:st,dod:"npm test → exit 0 + merged",dodSrc:st==="sign"?"user sign-off":st==="merge"?"merged":"rule-based",
+        live:liveOf[st]||"…", meta:st==="queued"?"queued":st==="merge"?undefined:"running "+(i+1)+"m"};
+      if(st==="merge"){ const sha=(0x3b0000+i*97).toString(16).slice(0,7); o.mergedAgo=(i+1)+"h ago";
+        o.artifact={kind:"diff",branch:"feat/"+prefix+" → main",add:30+i*7,del:6+i,merged:true,sha,mergedAgo:(i+1)+"h ago",check:{cmd:"npm test",exit:0,at:(i+1)+"h ago"}};
+        o.crit=[c("branch merged into main",true,"git_merged","ancestor @ "+sha),c("npm test → exit 0",true,"command","exit 0","at",(i+1)+"h ago")]; }
+      else if(st==="sign"){ o.artifact={kind:"diff",branch:"feat/"+prefix,add:40+i*5,del:9+i,ahead:2,check:{cmd:"npm test",exit:0,at:(i+1)+"m ago"}};
+        o.crit=[c("implementation correct",true,"manual","you checked"),c("npm test → exit 0",true,"command","exit 0","at",(i+1)+"m ago"),c("you review & sign off",false,"manual","awaiting your sign-off",{gate:true})]; }
+      else if(st==="queued"){ o.crit=[c("scoped",true,"manual","you checked"),c("npm test → exit 0",false,"command","not yet run","at","never run"),c("merged into main",false,"git_merged","not yet")]; }
+      else { o.crit=[c("drafted",true,"manual","you checked"),c("npm test → exit 0",true,"command","exit 0","at",(i+1)+"m ago"),c("merged into main",false,"git_merged","not yet")]; }
+      return o;
+    });
+  }
+  const pad=(w,baseName,statuses)=>{ w.sessions=w.sessions.concat(genSess(w.id,baseName,statuses)); return w; };
+
+  // 8 workstreams, 40 sessions total (8 leads + 32 generated): 3+4+5+1+14+5+4+4
+  const ws=[
+    pad(mk("d_plaid","Plaid integration","OAuth token valid AND integration test passes","agent-defined","block",
+      {live:"Which Plaid product scopes — transactions only, or also investments & liabilities?",kind:"question",meta:"idle 12m ago",blast:"md",elicited:true,
+       chips:["transactions only","+ investments","+ liabilities"],
+       crit:[c("OAuth client registered",true,"manual","you checked"),c("product scopes chosen",false,"manual","blocked — needs your decision"),
+             c("token exchange wired",false,"manual",""),c("integration test passes",false,"command","blocked on scope","at","never run"),
+             c("error handling",false,"manual",""),c("retry/backoff",false,"manual",""),c("webhook verify",false,"manual",""),c("merged into main",false,"git_merged","")]}),
+      "Plaid endpoint", ["run","queued"]),
+    pad(mk("d_dash","Dashboard redesign","you review & sign off","user sign-off","sign",
+      {live:"Net-worth chart rebuilt — all evaluable checks green.",artifact:{kind:"diff",branch:"feat/dash-v2",add:88,del:402,check:{kind:"manual",cmd:"visual check",at:"snapshot"}},
+       crit:[c("chart renders 12-mo series",true,"manual","screenshot"),c("responsive down to 360px",true,"manual","you checked"),
+             c("a11y: contrast + labels",true,"command","axe exit 0 — cached","at","3h ago"),c("bundle smaller than D3",true,"command","38kb → 1.2kb","at","6m ago"),
+             c("you review & sign off",false,"manual","awaiting your sign-off",{gate:true})]}),
+      "Dashboard panel", ["sign","run","merge"]),
+    pad(mk("d_auth","Auth hardening","merged into local main","merged","merge",
+      {live:"Hardened auth, merged into local main.",ws:{mergedAgo:"2h ago"},artifact:{kind:"diff",branch:"feat/auth → main",add:331,del:96,merged:true,sha:"9f3a1c2",mergedAgo:"2h ago",check:{cmd:"npm test",exit:0,at:"2h ago"}},
+       crit:[c("branch merged into main",true,"git_merged","ancestor @ 9f3a1c2"),c("npm test → exit 0",true,"command","exit 0","at","2h ago"),c("working tree clean",true,"git_clean","dirtyCount 0")]}),
+      "Auth task", ["merge","merge","merge","merge"]),
+    mk("d_sweep","bug-sweep loop","0 failing tests","orchestrator-defined","loop",
+      {live:"Triaging failing tests (5 of 12 fixed).",meta:"looping 38m · iter 12",iter:12,iterspark:[3,5,4,6,5,7,6,8,7,9,8,10],queue:["fix flaky e2e","upgrade vitest"],queueTotal:6,ws:{loop:true,loopTime:"looping 38m"}}),
+    // the session-heavy workstream (14 sessions) — proves the per-workstream "+N more sessions" cap (#20d, #8)
+    pad(mk("d_tax","Tax form mappings","npm test → exit 0 + merged","rule-based","run",
+      {live:"Mapping 1099 categories to ledger (step 7/8).",meta:"running 3m",
+       crit:[c("parse 1099 categories",true,"manual","you checked"),c("map to ledger codes",true,"manual",""),c("handle edge categories",true,"manual",""),
+             c("unit tests",true,"command","exit 0","at","3m ago"),c("integration tests",true,"command","exit 0","at","3m ago"),
+             c("npm test → exit 0",true,"command","exit 0","at","3m ago"),c("merged into main",false,"git_merged","not yet")]}),
+      "1099 form", ["run","sign","merge","run","queued","queued","sign","run","merge","run","merge","sign","run"]),
+    pad(mk("d_onb","Onboarding polish","you review & sign off","user sign-off","run",
+      {live:"Tightening empty-state copy and first-run flow.",meta:"running 1m",
+       crit:[c("empty-state copy",true,"manual","you checked"),c("first-run flow",true,"manual",""),c("tooltips on every action",false,"manual","in progress"),
+             c("responsive",true,"manual",""),c("you review & sign off",false,"manual","awaiting",{gate:true})]}),
+      "Onboarding step", ["run","sign","merge","run"]),
+    pad(mk("d_hooks","Plaid webhooks","you review & sign off","user sign-off","sign",
+      {live:"Webhook handler complete — all evaluable checks green.",artifact:{kind:"diff",branch:"feat/plaid",add:214,del:31,ahead:3,check:{cmd:"npm run test:webhook",exit:0,at:"4m ago"}},
+       crit:[c("handler idempotent",true,"manual","you checked"),c("retries on 5xx",true,"manual",""),c("npm run test:webhook → exit 0",true,"command","exit 0","at","4m ago"),
+             c("you review & sign off",false,"manual","awaiting",{gate:true})]}),
+      "Webhook event", ["sign","run","merge"]),
+    pad(mk("d_chart","Net-worth charts","npm test → exit 0 + merged","rule-based","run",
+      {live:"Adding YoY comparison overlay (step 9/10).",meta:"running 2m",
+       crit:[c("YoY overlay",true,"manual","you checked"),c("legend",true,"manual",""),c("hover tooltip",true,"manual",""),c("unit tests",true,"command","exit 0","at","2m ago"),
+             c("npm test → exit 0",true,"command","exit 0","at","2m ago"),c("merged into main",false,"git_merged","not yet")]}),
+      "Chart widget", ["run","merge","sign"]),
+  ];
+  const total = ws.reduce((a,w)=>a+w.sessions.length,0);
+  return { id:"wealthlens", name:"wealthlens", path:"~/workspace/wealthlens", desc:"personal finance app · "+ws.length+" active workstreams · "+total+" sessions",
+    workstreams:ws };
 })() ];
 
 /* ─────────────────────────── scenario: all calm (Quiet Sunday) ─────────────────────────── */
@@ -962,9 +1042,9 @@ const WORLD_CALM = [
     workstreams:[
       { id:"sweep", name:"Nightly bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 22m",
         sessions:[{id:"c1",name:"bug-sweep",status:"loop",dod:"0 failing tests (open-ended)",dodSrc:"orchestrator-defined",
-          live:"Triaging tests (7 of 11 fixed) — within budget.",meta:"looping 22m · iter 9",loop:true,iter:9,iterspark:[3,4,5,6,5,7,6,8,7],queue:["dedupe fixtures","fix flaky e2e"],queueTotal:2}]},
-      { id:"auth", name:"Auth hardening", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:"3h ago",
-        sessions:[{id:"c2",name:"Auth hardening",status:"merge",dod:"merged to mainline",dodSrc:"merged",live:"Merged and green.",
+          live:"Triaging the failing test suite (7 of 11 fixed).",meta:"looping 22m · iter 9",loop:true,iter:9,iterspark:[3,4,5,6,5,7,6,8,7],queue:["dedupe fixtures","fix flaky e2e"],queueTotal:2}]},
+      { id:"auth", name:"Auth hardening", dod:"merged into local main", dodSrc:"merged", status:"merge", mergedAgo:"3h ago",
+        sessions:[{id:"c2",name:"Auth hardening",status:"merge",dod:"merged into local main",dodSrc:"merged",live:"Merged and green.",
           artifact:{kind:"diff",branch:"feat/auth → main",add:331,del:96,merged:true,sha:"9f3a1c2",mergedAgo:"3h ago",check:{cmd:"npm test",exit:0,at:"3h ago"}},
           crit:[{text:"merged into main",met:true,src:"git_merged",ev:"@ 9f3a1c2"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"3h ago"}]}]},
     ]},
@@ -973,19 +1053,19 @@ const WORLD_CALM = [
       { id:"inbox", name:"Inbox triage loop", dod:"inbox at zero", dodSrc:"agent-defined", status:"loop", loop:true, loopTime:"looping",
         sessions:[{id:"c3",name:"inbox-triage",status:"loop",dod:"inbox at zero (open-ended)",dodSrc:"agent-defined",
           live:"Drafting replies, never sending without sign-off.",meta:"looping 7m · iter 3",loop:true,iter:3,iterspark:[5,6,7],queue:["draft reply to Maya"],queueTotal:1}]},
-      { id:"cal", name:"Calendar sync", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:"5h ago",
-        sessions:[{id:"c4",name:"cal-sync",status:"merge",dod:"merged to mainline",dodSrc:"merged",live:"Sync stable, merged.",
+      { id:"cal", name:"Calendar sync", dod:"merged into local main", dodSrc:"merged", status:"merge", mergedAgo:"5h ago",
+        sessions:[{id:"c4",name:"cal-sync",status:"merge",dod:"merged into local main",dodSrc:"merged",live:"Sync stable, merged.",
           artifact:{kind:"diff",branch:"feat/cal → main",add:120,del:40,merged:true,sha:"a1b2c3d",mergedAgo:"5h ago",check:{cmd:"npm test",exit:0,at:"5h ago"}},
           crit:[{text:"merged into main",met:true,src:"git_merged",ev:"@ a1b2c3d"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"5h ago"}]}]},
     ]},
   { id:"ai-education", name:"ai-education", path:"~/zippy/projects/ai-education", desc:"AI education platform", nest:"in zippy",
     workstreams:[
-      { id:"curric", name:"Curriculum generator", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:"yesterday",
-        sessions:[{id:"c5",name:"lesson-planner",status:"merge",dod:"merged to mainline",dodSrc:"merged",live:"Generator merged.",
+      { id:"curric", name:"Curriculum generator", dod:"merged into local main", dodSrc:"merged", status:"merge", mergedAgo:"yesterday",
+        sessions:[{id:"c5",name:"lesson-planner",status:"merge",dod:"merged into local main",dodSrc:"merged",live:"Generator merged.",
           artifact:{kind:"diff",branch:"feat/curriculum → main",add:540,del:12,merged:true,sha:"e7f8a9b",mergedAgo:"yesterday",check:{cmd:"npm test",exit:0,at:"yesterday"}},
           crit:[{text:"merged into main",met:true,src:"git_merged",ev:"@ e7f8a9b"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"yesterday"}]}]},
-      { id:"quiz", name:"Quiz generator", dod:"merged to mainline", dodSrc:"branch feat/quiz", status:"queued",
-        sessions:[{id:"c6",name:"quiz-gen",status:"queued",dod:"merged to mainline",dodSrc:"branch feat/quiz",live:"Queued behind curriculum merge.",meta:"queued",queue:["scaffold quiz schema","wire to lessons"],queueTotal:2}]},
+      { id:"quiz", name:"Quiz generator", dod:"merged into local main", dodSrc:"branch feat/quiz", status:"queued",
+        sessions:[{id:"c6",name:"quiz-gen",status:"queued",dod:"merged into local main",dodSrc:"branch feat/quiz",live:"Queued behind curriculum merge.",meta:"queued",queue:["scaffold quiz schema","wire to lessons"],queueTotal:2}]},
     ]},
 ];
 
@@ -993,31 +1073,31 @@ const WORLD_CALM = [
 const WORLD_BLOCKED = [
   { id:"wealthlens", name:"wealthlens", path:"~/workspace/wealthlens", desc:"personal finance app",
     workstreams:[
-      { id:"plaid", name:"Plaid integration", dod:"merged to mainline", dodSrc:"branch feat/plaid", status:"block",
+      { id:"plaid", name:"Plaid integration", dod:"merged into local main", dodSrc:"branch feat/plaid", status:"block",
         sessions:[
           { id:"b1", name:"Wire Plaid OAuth", status:"block", blast:"md", elicited:true,
             dod:"OAuth returns valid token AND integration test passes", dodSrc:"agent-defined",
-            live:"Which Plaid product scopes — transactions only, or also investments & liabilities?", kind:"question", meta:"paused 18m ago",
+            live:"Which Plaid product scopes — transactions only, or also investments & liabilities?", kind:"question", meta:"idle 18m ago",
             chips:["transactions only","+ investments","+ investments & liabilities"],
             crit:[{text:"OAuth scaffolded",met:true,src:"manual",ev:"you checked"},{text:"product scope decided",met:false,src:"manual",ev:"needs your decision"},{text:"integration test passes",met:false,src:"command",ev:"blocked on scope",at:"never run"}] }]},
       { id:"migrate", name:"Ledger migration", dod:"you approve the migration", dodSrc:"user sign-off", status:"block",
         sessions:[
           { id:"b2", name:"apply destructive migration", status:"block", blast:"hi", elicited:true,
             dod:"you approve before the drop runs", dodSrc:"user sign-off",
-            live:"Migration will DROP and rebuild the transactions table (irreversible). Approve to proceed?", kind:"question", meta:"paused 4m ago",
+            live:"Migration will DROP and rebuild the transactions table (irreversible). Approve to proceed?", kind:"question", meta:"idle 4m ago",
             chips:["approve — proceed","back up first, then run","hold — let me review"],
             crit:[{text:"migration script written",met:true,src:"manual",ev:"you checked"},{text:"backup taken first",met:false,src:"manual",ev:"not yet"},{text:"you approve the drop",met:false,src:"manual",gate:true,ev:"awaiting your approval"}] }]},
       { id:"tools", name:"Receipt importer", dod:"tool permission granted", dodSrc:"rule-based", status:"block",
         sessions:[
           { id:"b3", name:"import receipts", status:"block", blast:"md", elicited:true,
             dod:"you grant the requested tool permission", dodSrc:"rule-based",
-            live:"Requesting permission to run `bash: curl` to fetch receipts from the vendor API. Allow?", kind:"question", meta:"paused 2m ago",
+            live:"Requesting permission to run `bash: curl` to fetch receipts from the vendor API. Allow?", kind:"question", meta:"idle 2m ago",
             chips:["allow once","allow for this session","deny"],
             crit:[{text:"vendor API endpoint reachable",met:true,src:"command",ev:"ping ok",at:"2m ago"},{text:"tool permission granted",met:false,src:"manual",ev:"awaiting your permission"}] }]},
     ]},
   { id:"zippy", name:"zippy", path:"~/zippy", desc:"personal assistant",
     workstreams:[
-      { id:"cal", name:"Calendar sync", dod:"merged to mainline", dodSrc:"branch feat/cal", status:"fail",
+      { id:"cal", name:"Calendar sync", dod:"merged into local main", dodSrc:"branch feat/cal", status:"fail",
         sessions:[
           { id:"b4", name:"cal-sync", status:"fail", blast:"md", failAction:"Re-authenticate",
             dod:"npm test → exit 0 + merged", dodSrc:"rule-based",
@@ -1032,11 +1112,11 @@ const WORLD_BLOCKED = [
     ]},
   { id:"ai-education", name:"ai-education", path:"~/zippy/projects/ai-education", desc:"AI education platform", nest:"in zippy",
     workstreams:[
-      { id:"curric", name:"Curriculum generator", dod:"merged to mainline", dodSrc:"branch feat/curriculum", status:"block",
+      { id:"curric", name:"Curriculum generator", dod:"merged into local main", dodSrc:"branch feat/curriculum", status:"block",
         sessions:[
           { id:"b6", name:"lesson-planner", status:"block", blast:"lo", elicited:true,
             dod:"you pick the curriculum tone", dodSrc:"user sign-off",
-            live:"Should lesson tone be formal-academic or conversational for grades 6–8?", kind:"question", meta:"paused 41m ago",
+            live:"Should lesson tone be formal-academic or conversational for grades 6–8?", kind:"question", meta:"idle 41m ago",
             chips:["conversational","formal-academic","mix by grade"],
             crit:[{text:"draft lessons generated",met:true,src:"manual",ev:"you checked"},{text:"tone chosen",met:false,src:"manual",ev:"needs your decision"}] }]},
     ]},
@@ -1050,12 +1130,12 @@ const WORLD_LOOP = [
         sessions:[
           { id:"g1", name:"bug-sweep", status:"loop",
             dod:"0 failing tests — open-ended, no fixed scope", dodSrc:"orchestrator-defined",
-            live:"Each iteration appends new findings — queue grew 3 → 17, still within budget.", meta:"looping 38m · iter 12", loop:true, iter:12,
+            live:"Each iteration appends new findings — the planned queue keeps growing.", meta:"looping 38m · iter 12", loop:true, iter:12,
             budget:{maxMinutes:90, maxCostUsd:8}, elapsedMin:38, cost:3.2,
             iterspark:[2,3,3,4,5,5,6,6,7,8,9,10],
             queue:["fix flaky e2e","upgrade vitest","dedupe fixtures"], queueTotal:17 }]},
-      { id:"auth", name:"Auth hardening", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:"2h ago",
-        sessions:[{id:"g2",name:"Auth hardening",status:"merge",dod:"merged to mainline",dodSrc:"merged",live:"Merged and green.",
+      { id:"auth", name:"Auth hardening", dod:"merged into local main", dodSrc:"merged", status:"merge", mergedAgo:"2h ago",
+        sessions:[{id:"g2",name:"Auth hardening",status:"merge",dod:"merged into local main",dodSrc:"merged",live:"Merged and green.",
           artifact:{kind:"diff",branch:"feat/auth → main",add:331,del:96,merged:true,sha:"9f3a1c2",mergedAgo:"2h ago",check:{cmd:"npm test",exit:0,at:"2h ago"}},
           crit:[{text:"merged into main",met:true,src:"git_merged",ev:"@ 9f3a1c2"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"2h ago"}]}]},
     ]},
@@ -1065,9 +1145,9 @@ const WORLD_LOOP = [
         sessions:[
           { id:"g3", name:"backfill", status:"loop",
             dod:"0 dropped rows — open-ended", dodSrc:"orchestrator-defined",
-            live:"No new rows cleared in the last 4 iterations — the tail is flat (possible stall).", meta:"looping 2h 40m · iter 31", loop:true, iter:31,
-            budget:{maxMinutes:120, maxCostUsd:6}, elapsedMin:160, cost:6.4,
-            iterspark:[8,9,8,7,6,5,4,3,3,3,2,2],
+            live:"Reprocessing 2024-Q4 partitions (shard 7 of 12).", meta:"looping 2h 40m · iter 31", loop:true, iter:31,
+            budget:{maxMinutes:240, maxCostUsd:9}, elapsedMin:160, cost:6.4,
+            iterspark:[6,7,6,8,7,9,8,8,9,8,9,10],
             queue:["retry shard 7","investigate lock contention"], queueTotal:2 }]},
     ]},
 ];
@@ -1081,7 +1161,7 @@ const WORLD_NOGIT = [
           { id:"n1", name:"pricing-research", status:"sign",
             dod:"3 competitor profiles written & you review", dodSrc:"user-defined",
             live:"Drafted notes for Plaid, Finicity and MX into ~/zippy/research/pricing/.",
-            artifact:{kind:"doc", note:"pricing/competitors.md", files:3, check:{cmd:"manual review", exit:0, at:"folder, no repo"}},
+            artifact:{kind:"doc", note:"pricing/competitors.md", files:3, check:{kind:"manual", cmd:"manual review", at:"folder, no repo"}},
             crit:[
               {text:"Plaid profile written", met:true, src:"manual", ev:"competitors.md · §1"},
               {text:"Finicity profile written", met:true, src:"manual", ev:"competitors.md · §2"},
@@ -1097,7 +1177,7 @@ const WORLD_NOGIT = [
           { id:"n2", name:"lesson-docs", status:"sign",
             dod:"8-week plan written & you approve", dodSrc:"user-defined",
             live:"Wrote lesson docs into ~/zippy/projects/ai-education/lessons/ (no repo).",
-            artifact:{kind:"doc", note:"lessons/week-1..8.md", files:8, check:{cmd:"manual review", exit:0, at:"folder, no repo"}},
+            artifact:{kind:"doc", note:"lessons/week-1..8.md", files:8, check:{kind:"manual", cmd:"manual review", at:"folder, no repo"}},
             crit:[
               {text:"8 weekly lesson docs written", met:true, src:"manual", ev:"lessons/week-1..8.md"},
               {text:"you approve the plan", met:false, src:"manual", gate:true, ev:"awaiting your approval"},
@@ -1110,7 +1190,7 @@ const WORLD_NOGIT = [
 const WORLD_MIXED = [
   { id:"wealthlens", name:"wealthlens", path:"~/workspace/wealthlens", desc:"personal finance app · every DoD source",
     workstreams:[
-      { id:"plaid", name:"Plaid integration", dod:"merged to mainline", dodSrc:"branch feat/plaid", status:"block", _open:true,
+      { id:"plaid", name:"Plaid integration", dod:"merged into local main", dodSrc:"branch feat/plaid", status:"block", _open:true,
         sessions:[
           { id:"m1", name:"Plaid integration", status:"run",
             dod:"branch merged into main", dodSrc:"git_merged into main",
@@ -1123,13 +1203,13 @@ const WORLD_MIXED = [
             crit:[{text:"lint passes",met:true,src:"command",ev:"exit 0",at:"6m ago"},{text:"npm test → exit 0",met:false,src:"command",ev:"last exit 1",at:"6m ago"},{text:"merged into main",met:false,src:"git_merged",ev:"pending"}]},
           { id:"m3", name:"Wire Plaid OAuth", status:"block", blast:"md", elicited:true,
             dod:"valid token AND integration test passes", dodSrc:"agent-defined",
-            live:"Which Plaid scopes should I request?", kind:"question", meta:"paused 12m ago",
+            live:"Which Plaid scopes should I request?", kind:"question", meta:"idle 12m ago",
             chips:["transactions only","+ investments","+ liabilities"],
             crit:[{text:"OAuth returns valid token",met:true,src:"agent",ev:"token ok"},{text:"integration test passes",met:false,src:"command",ev:"blocked on scope",at:"never run"}]},
           { id:"m4", name:"Dashboard redesign", status:"sign",
             dod:"you review & sign off", dodSrc:"user sign-off",
             live:"Net-worth chart rebuilt — evaluable checks green.",
-            artifact:{kind:"spark", branch:"feat/dash-v2", add:88, del:402, note:"net-worth.png", check:{cmd:"visual check",exit:0,at:"snapshot"}},
+            artifact:{kind:"spark", branch:"feat/dash-v2", add:88, del:402, note:"net-worth.png", check:{kind:"manual",cmd:"visual check",at:"snapshot"}},
             crit:[{text:"chart renders",met:true,src:"manual",ev:"screenshot"},{text:"bundle smaller than D3",met:true,src:"command",ev:"38kb → 1.2kb",at:"7m ago"},{text:"you sign off",met:false,src:"manual",gate:true,ev:"awaiting"}]},
           { id:"m5", name:"Pricing research", status:"unset",
             dod:"", dodSrc:"user-defined",
@@ -1143,14 +1223,14 @@ const WORLD_MIXED = [
     ]},
 ];
 
-/* ─────────────────────────── scenario: fleet scale (42 projects) ─────────────────────────── */
+/* ─────────────────────────── scenario: fleet scale (51 projects) ─────────────────────────── */
 function genScale(){
   const active = [
     { id:"wealthlens", name:"wealthlens", path:"~/workspace/wealthlens", desc:"personal finance app",
       workstreams:[
-        { id:"plaid", name:"Plaid integration", dod:"merged to mainline", dodSrc:"branch feat/plaid", status:"block",
+        { id:"plaid", name:"Plaid integration", dod:"merged into local main", dodSrc:"branch feat/plaid", status:"block",
           sessions:[{id:"x1",name:"Wire Plaid OAuth",status:"block",blast:"md",elicited:true,dod:"valid token AND integration test passes",dodSrc:"agent-defined",
-            live:"Which Plaid scopes should I request — transactions only, or also investments & liabilities?",kind:"question",meta:"paused 12m ago",
+            live:"Which Plaid scopes should I request — transactions only, or also investments & liabilities?",kind:"question",meta:"idle 12m ago",
             chips:["transactions only","+ investments","+ liabilities"],
             crit:[{text:"OAuth scaffolded",met:true,src:"manual",ev:"ok"},{text:"scope decided",met:false,src:"manual",ev:"needs you"},{text:"integration test passes",met:false,src:"command",ev:"blocked",at:"never run"}]}]},
         { id:"sweep", name:"bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 38m",
@@ -1159,7 +1239,7 @@ function genScale(){
       ]},
     { id:"zippy", name:"zippy", path:"~/zippy", desc:"personal assistant",
       workstreams:[
-        { id:"cal", name:"Calendar sync", dod:"merged to mainline", dodSrc:"branch feat/cal", status:"fail",
+        { id:"cal", name:"Calendar sync", dod:"merged into local main", dodSrc:"branch feat/cal", status:"fail",
           sessions:[{id:"x3",name:"cal-sync",status:"fail",blast:"md",failAction:"Re-authenticate",dod:"npm test → exit 0 + merged",dodSrc:"rule-based",
             live:"Google OAuth token expired — needs re-auth.",kind:"failed",meta:"failed 21m ago",
             crit:[{text:"OAuth token valid",met:false,src:"command",ev:"401",at:"21m ago"},{text:"npm test → exit 0",met:false,src:"command",ev:"blocked",at:"21m ago"}]}]},
@@ -1175,7 +1255,7 @@ function genScale(){
       ]},
     { id:"ai-education", name:"ai-education", path:"~/zippy/projects/ai-education", desc:"AI education platform", nest:"in zippy",
       workstreams:[
-        { id:"curric", name:"Curriculum generator", dod:"merged to mainline", dodSrc:"branch feat/curriculum", status:"sign",
+        { id:"curric", name:"Curriculum generator", dod:"merged into local main", dodSrc:"branch feat/curriculum", status:"sign",
           sessions:[{id:"x5",name:"lesson-planner",status:"sign",dod:"you review & sign off",dodSrc:"user sign-off",live:"Pipeline complete — evaluable checks green.",
             artifact:{kind:"diff",branch:"feat/curriculum",add:540,del:12,ahead:7,check:{cmd:"npm test",exit:0,at:"11m ago"}},
             crit:[{text:"generates 8-week plan",met:true,src:"manual",ev:"you checked"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"11m ago"},{text:"you review & sign off",met:false,src:"manual",gate:true,ev:"awaiting"}]}]},
@@ -1193,12 +1273,12 @@ function genScale(){
     for(let k=0;k<wsCount;k++){
       const isMerge = merged || k>0;
       ws.push(isMerge
-        ? { id:nm+"_w"+k, name:["core","cleanup","docs","tests"][k]||"work", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:(i%5+1)+"d ago",
-            sessions:[{id:nm+"_s"+k,name:nm+" "+(["core","cleanup","docs","tests"][k]||"work"),status:"merge",dod:"merged to mainline",dodSrc:"merged",live:"Merged and green.",
+        ? { id:nm+"_w"+k, name:["core","cleanup","docs","tests"][k]||"work", dod:"merged into local main", dodSrc:"merged", status:"merge", mergedAgo:(i%5+1)+"d ago",
+            sessions:[{id:nm+"_s"+k,name:nm+" "+(["core","cleanup","docs","tests"][k]||"work"),status:"merge",dod:"merged into local main",dodSrc:"merged",live:"Merged and green.",
               artifact:{kind:"diff",branch:"main",add:40+i,del:8,merged:true,sha:(0x100000+i*7).toString(16).slice(0,7),mergedAgo:(i%5+1)+"d ago",check:{cmd:"npm test",exit:0,at:(i%5+1)+"d ago"}},
               crit:[{text:"merged into main",met:true,src:"git_merged",ev:"ancestor"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:(i%5+1)+"d ago"}]}]}
-        : { id:nm+"_w"+k, name:"next up", dod:"merged to mainline", dodSrc:"branch", status:"queued",
-            sessions:[{id:nm+"_s"+k,name:nm+" next up",status:"queued",dod:"merged to mainline",dodSrc:"branch",live:"Queued — not started.",meta:"queued",queue:["scope the change","write tests"],queueTotal:2}]});
+        : { id:nm+"_w"+k, name:"next up", dod:"merged into local main", dodSrc:"branch", status:"queued",
+            sessions:[{id:nm+"_s"+k,name:nm+" next up",status:"queued",dod:"merged into local main",dodSrc:"branch",live:"Queued — not started.",meta:"queued",queue:["scope the change","write tests"],queueTotal:2}]});
     }
     return { id:nm, name:nm, path:roots[i%roots.length]+"/"+nm, desc:"", workstreams:ws };
   });
@@ -1208,7 +1288,7 @@ function genScale(){
   const activeLoops = loopNames.map((nm,i)=>({ id:nm, name:nm, path:"~/workspace/"+nm, desc:"",
     workstreams:[{ id:nm+"_loop", name:"Nightly "+nm+" loop", dod:"0 errors", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping "+(10+i*7)+"m",
       sessions:[{ id:nm+"_s", name:nm, status:"loop", dod:"0 errors (open-ended)", dodSrc:"orchestrator-defined",
-        live:"Processing batch "+(i+2)+"/"+(i+8)+" — within budget.", meta:"looping "+(10+i*7)+"m · iter "+(3+i), loop:true, iter:3+i,
+        live:"Processing batch "+(i+2)+"/"+(i+8)+".", meta:"looping "+(10+i*7)+"m · iter "+(3+i), loop:true, iter:3+i,
         iterspark:[3,4,5,6,5,7,6], queue:["next batch"], queueTotal:1 }]}]}));
   return active.concat(activeLoops, dormant);
 }
@@ -1217,12 +1297,12 @@ const WORLD_SCALE = genScale();
 /* ─────────────────────────── scenario registry ─────────────────────────── */
 const SCENARIOS = {
   default:{ label:"Default · canonical world", data:WORLD_DEFAULT },
-  single: { label:"Single project · many rings", data:WORLD_SINGLE },
-  scale:  { label:"Fleet scale · 42 projects", data:WORLD_SCALE },
-  dense:  { label:"Dense project · 8 workstreams", data:WORLD_DENSE, openFirst:true },
+  single: { label:"Single project · 3 workstreams", data:WORLD_SINGLE },
+  scale:  { label:"Fleet scale · 51 projects", data:WORLD_SCALE },
+  dense:  { label:"Dense project · 8 workstreams, 40 sessions", data:WORLD_DENSE, openFirst:true },
   calm:   { label:"Quiet Sunday · all calm", data:WORLD_CALM },
   blocked:{ label:"Five agents waiting · 6 blocked", data:WORLD_BLOCKED },
-  loop:   { label:"Growing loop · queue 3→17", data:WORLD_LOOP },
+  loop:   { label:"Growing loop · ~17 queued", data:WORLD_LOOP },
   nogit:  { label:"Research · no repo, no git DoD", data:WORLD_NOGIT },
   mixed:  { label:"Six definitions of done", data:WORLD_MIXED, openFirst:true },
   empty:  { label:"Cold start · first run", data:[], empty:true, candidates:3 },
@@ -1234,9 +1314,10 @@ const state = { scn:"default", data:WORLD_DEFAULT, SESS:{}, focus:null, lastVisi
 /* derive _prog on every session + workstream so the ring can NEVER drift from criteria (#1) */
 function enrich(data){
   data.forEach(p=>p.workstreams.forEach(w=>{
-    w.sessions.forEach(s=>{ s._prog = computeProgress(s.crit); s._gate = pendingGate(s.crit);
-      if(s.loop){ s._loop = loopHealth(s); s._loopWarn = s._loop.warn; } });
-    w._loopWarn = w.sessions.some(s=>s._loopWarn);
+    w.sessions.forEach(s=>{ s._prog = computeProgress(s.crit); s._gate = pendingGate(s.crit); });
+    // NO loop stall / over-budget computation anywhere: it needs a durable per-iteration log + an
+    // orchestrator pi does NOT expose (carry-fwd #D), so it can never back a live amber alarm. Iteration
+    // count, rhythm sparkline and budget cap appear ONLY in the muted, explicitly-"proposed" band.
     // mixed-source guard (#5): if the workstream's sessions span >1 evaluator family, do NOT blend
     // heterogeneous criteria into one percent — switch the ring to a "k of n SESSIONS done" gauge.
     const fams = new Set(w.sessions.filter(s=>s.status!=="unset").map(sessFamily));
@@ -1264,7 +1345,11 @@ function loadScenario(id){
 
 /* ─────────────────────────── small helpers ─────────────────────────── */
 const esc = t => String(t==null?"":t).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
-const isNeed = st => st==="block" || st==="fail";
+// a HARD need = a FAILURE or a STRUCTURALLY-ELICITED block. A non-elicited free-text stop can't be
+// PROVEN a blocker (spec §5.3), so it NEVER enters Needs-you or the hero obligation count — it degrades
+// to a quiet "may be waiting" tally instead. (Every shipped fixture is elicited, so this is defensive.)
+const isNeed = s => s.status==="fail" || (s.status==="block" && !!s.elicited);
+const isSoftWait = s => s.status==="block" && !s.elicited;
 const isRecent = ago => /(^now|sec|min|m ago|h ago|hour)/i.test(ago||"");
 /* blast radius (#11): manual priority OR heuristic (destructive keyword + dependents + dirty) */
 function blastRadius(s){
@@ -1275,24 +1360,15 @@ function blastRadius(s){
 }
 const blastRank = b => b==="hi"?0 : b==="md"?1 : 2;
 const blastLabel = b => b==="hi"?"high blast radius" : b==="md"?"elevated blast radius" : "low blast radius";
+/* triage age (#7): how long this item has been waiting on you, from the session's last-activity meta
+   ("idle 12m ago" / "failed 21m ago"). The SECOND triage axis after blast radius. (agoToMin/fmtMin hoisted.) */
+function waitLabel(s){ if(!s.meta) return ""; const m=agoToMin(s.meta); return (m>=1e9||m<=0)?"" : fmtMin(m); }
 
-/* loop health (#3): a loop is healthy until it STALLS (flat/declining spark tail) or runs OVER budget.
-   Only then does its badge go amber — growth of the planned queue is expected and never alarming. */
-function loopHealth(s){
-  const b=s.budget||{};
-  const overTime = b.maxMinutes!=null && s.elapsedMin!=null && s.elapsedMin>b.maxMinutes;
-  const overCost = b.maxCostUsd!=null && s.cost!=null && s.cost>b.maxCostUsd;
-  let stalled=false;
-  const sp=s.iterspark;
-  if(sp && sp.length>=4){ const tail=sp.slice(-4); stalled = tail.every((v,i)=> i===0 || v<=tail[i-1]) && tail[tail.length-1]<=tail[0]; }
-  const over = overTime||overCost;
-  const pctTime = b.maxMinutes!=null && s.elapsedMin!=null ? Math.min(100,Math.round(s.elapsedMin/b.maxMinutes*100)) : null;
-  const pctCost = b.maxCostUsd!=null && s.cost!=null ? Math.min(100,Math.round(s.cost/b.maxCostUsd*100)) : null;
-  let reason="";
-  if(over) reason = overTime&&overCost?"over time + cost budget" : overTime?"over time budget" : "over cost budget";
-  else if(stalled) reason="stalled — flat iteration tail";
-  return { warn:over||stalled, over, stalled, reason, pctTime, pctCost, b };
-}
+/* loopHealth() DELETED (carry-fwd #D): a stall / over-budget verdict needs a durable per-iteration log +
+   an orchestrator pi does NOT expose, so the dashboard must never COMPUTE one — computing it was the last
+   path by which a fabricated "stalled / over budget" reason could leak onto a surface. A loop is simply
+   "running" (cyan ∞); its elapsed comes from the stored loopStartedAt; iteration/budget telemetry is shown
+   only as a MUTED, explicitly-"proposed" signal (see proposedLoop), never as live data. */
 
 /* a session has reached its DoD (used by the mixed-source k-of-n session gauge, #5) */
 function sessionDone(s){ return s.status==="merge" || s.status==="sign" || !!(s._prog && s._prog.allMet); }
@@ -1348,8 +1424,8 @@ function ringSvg(item, size, opts){
   // phase-2 / on-demand eval (#5): pulsing track, no number, no status hue — "evaluating, not yet known"
   if(item._evaluating) return `<svg class="ring" viewBox="0 0 36 36" style="width:${size}px;height:${size}px"><circle class="ring-track eval" cx="18" cy="18" r="${r}"/></svg>`;
   if(st==="merge") return wrap(`<circle class="ring-fill" cx="18" cy="18" r="${r}" stroke="${color}" stroke-dasharray="${C} ${C}" stroke-dashoffset="0" transform="rotate(-90 18 18)"/><text class="ring-gly" x="18" y="22.5" text-anchor="middle" fill="${color}">✓</text>`, true);
-  if(st==="loop"||item.loop){ const lh=item._loopWarn; const lc=lh?"var(--st-block)":color;
-    return wrap(`<circle class="ring-dot" cx="18" cy="18" r="${r}" style="stroke:color-mix(in srgb,${lh?'var(--st-block)':'var(--st-run)'} 55%,transparent)"/><text class="ring-gly" x="18" y="22.8" text-anchor="middle" fill="${lc}">∞</text>`, true); }
+  if(st==="loop"||item.loop){ // an autonomous loop is just "running" (cyan ∞); stall/budget is a PROPOSED signal (#D), never a live ring alarm
+    return wrap(`<circle class="ring-dot" cx="18" cy="18" r="${r}" style="stroke:color-mix(in srgb,var(--st-run) 55%,transparent)"/><text class="ring-gly" x="18" y="22.8" text-anchor="middle" fill="${color}">∞</text>`, true); }
   if(st==="queued"||st==="planned") return wrap(`<circle class="ring-dot" cx="18" cy="18" r="${r}"/><text class="ring-gly" x="18" y="22.6" text-anchor="middle" fill="var(--st-idle)">·</text>`, true);
   // mixed-source workstream → "k of n SESSIONS done" gauge (#5), neutral hue, never a blended percent
   if(item._sessGauge){
@@ -1358,17 +1434,19 @@ function ringSvg(item, size, opts){
   }
   const prog=item._prog;
   if(st==="unset" || !prog || (prog.total===0 && !prog.unrun)) return wrap(`<circle class="ring-dot" cx="18" cy="18" r="${r}" style="stroke:color-mix(in srgb,var(--st-sign) 55%,transparent)"/><text class="ring-gly" x="18" y="22.5" text-anchor="middle" fill="var(--st-sign)">?</text>`, true);
-  // stale / never-run command evidence (#5): show "k/n*" muted instead of a confident percent
+  // honest k-of-n is ALWAYS the ring's number (invariant #3 — never an invented percent); the derived
+  // percent lives in the hover tooltip only. Unrun/stale command evidence asterisks it muted (#5,#9c).
   const showFrac = prog.unrun>0 || prog.stale>0;
-  const numTxt = showFrac ? `${prog.met}/${prog.total}*` : `${prog.percent}`;
+  const numTxt = `${prog.met}/${prog.total}${showFrac?'*':''}`;
   const numFill = showFrac ? 'color-mix(in srgb,var(--muted) 88%,transparent)' : (o.neutral?color:'var(--text)');
-  const numSize = showFrac ? 8.5 : 11;
-  return wrap(`${segArcs(prog.met, prog.total, prog.unrun||0, prog.percent, color)}${ringShape(st,o.neutral?color:hue)}<text class="ring-num" x="18" y="22.6" text-anchor="middle" font-size="${numSize}" fill="${numFill}">${numTxt}</text>`, false);
+  const tip = `<title>${prog.percent}% · ${prog.met} of ${prog.total} criteria met${prog.unrun?` · ${prog.unrun} not yet run`:''}${prog.stale?` · ${prog.stale} stale`:''}</title>`;
+  return wrap(`${tip}${segArcs(prog.met, prog.total, prog.unrun||0, prog.percent, color)}${ringShape(st,o.neutral?color:hue)}<text class="ring-num" x="18" y="22.3" text-anchor="middle" font-size="9" fill="${numFill}">${numTxt}</text>`, false);
 }
 
 function badge(status, soft){
   const m=ST[status]; if(!m) return "";
-  if(status==="block" && soft) return `<span class="badge paused"><span class="d"></span>Paused</span>`;
+  // a non-elicited free-text stop can't be PROVEN a blocker (spec §5.3) — say "may be waiting", not a fake alarm
+  if(status==="block" && soft) return `<span class="badge idle"><span class="d"></span>Idle · may be waiting</span>`;
   return `<span class="badge ${m.cls}"><span class="d"></span>${m.label}</span>`;
 }
 function srcTag(src){ return `<span class="srcTag" title="DoD source: ${esc(src)}">${esc(src)}</span>`; }
@@ -1384,30 +1462,51 @@ function dotStrip(p){
 
 /* per-project counts */
 function projNeeds(p){ let you=0,fail=0,sign=0,run=0; p.workstreams.forEach(w=>w.sessions.forEach(s=>{
-  if(s.status==="block") you++; if(s.status==="fail") fail++; if(s.status==="sign") sign++; if(s.status==="run"||s.status==="loop") run++; })); return {you,fail,sign,run}; }
+  if(s.status==="block" && s.elicited) you++; if(s.status==="fail") fail++; if(s.status==="sign") sign++; if(s.status==="run"||s.status==="loop") run++; })); return {you,fail,sign,run}; }
 function pClass(p){ const c=projNeeds(p); if(c.you||c.fail) return "attn"; if(c.run) return "active"; if(c.sign) return "signoff"; return "calm"; }
 function firstSessId(p, statuses){ for(const w of p.workstreams) for(const s of w.sessions) if(statuses.includes(s.status)) return s.id; return null; }
 
-/* representative live one-liner (#11): SKIP items already surfaced in Needs-you so the card never
-   restates a blocker it can't action better than the Needs-you card. If the project is nothing BUT
-   needs, point up instead of offering a redundant Continue. */
+/* representative live one-liner (carry-fwd #A — the core attention-routing fix): the card surfaces the
+   HIGHEST-priority state first (failed → blocked → awaiting sign-off → running → idle) and, when that is
+   a human-blocking item, the text NAMES the blocker and points UP to Needs you. The old version computed
+   the one-liner from NON-need sessions only, so a project with a blocker AND running work showed the
+   running task while the blocker hid in the faintest ring — the bug this run exists to kill. */
 function cardLive(p){
-  let best=null, bestW=null, bestRank=99, needCount=0, topNeedW=null;
+  let top=null, topW=null, topRank=99;
   p.workstreams.forEach(w=>w.sessions.forEach(s=>{
-    if(isNeed(s.status)){ needCount++; if(!topNeedW) topNeedW=w; return; }
     const rk=statusRank(s.status);
-    if(rk<bestRank){ bestRank=rk; best=s; bestW=w; }
+    if(rk<topRank){ topRank=rk; top=s; topW=w; }
   }));
-  if(!best){
-    if(needCount) return {tone:"block", loop:false, pointUp:"sec-needs", txt:`${topNeedW?topNeedW.name:'This project'} — answer in Needs you`, id:null};
-    return {tone:"calm", loop:false, txt:"All quiet.", id:null};
+  if(!top) return {tone:"calm", loop:false, txt:"All quiet.", id:null};
+  const st=top.status, wn=shortWs(topW.name);
+  // (#it6-p7b) a non-elicited idle block can't be PROVEN a need — the card face must say the honest
+  // "may be waiting", never route "needs your input ↑" to a Needs-you section it isn't even in.
+  if(st==="block" && !top.elicited) return {tone:"calm", loop:false, txt:`${wn} went idle — may be waiting, or may have finished`, id:top.id};
+  if(st==="block") return {tone:"block", loop:false, pointUp:"sec-needs", txt:`${wn} needs your input — ${top.live}`, id:top.id};
+  if(st==="fail")  return {tone:"fail",  loop:false, pointUp:"sec-needs", txt:`${wn} failed — ${top.live}`, id:top.id};
+  if(st==="run"||st==="loop"){
+    // (#converge) the loop's growing queue is its punchline, but a "before" count needs a per-iteration
+    // log pi does NOT expose (spec plannedQueue = {items,total,source} only). Surface ONLY the grounded
+    // total as a hedged "~N queued" chip — never a fabricated from→to delta. Queue growth is expected, never an alarm.
+    const qd = (st==="loop" && top.queueTotal!=null) ? {total:top.queueTotal} : null;
+    return {tone:st==="loop"?"loop":"run", loop:st==="loop", txt:top.live, id:top.id, qDelta:qd};
   }
-  const st=best.status;
-  if(st==="run"||st==="loop") return {tone:st==="loop"?"loop":"run", loop:st==="loop", txt:best.live, id:best.id};
-  if(st==="unset") return {tone:"calm", loop:false, txt:`${bestW.name} — no Definition of Done set yet`, id:best.id};
-  if(st==="sign")  return {tone:"calm", loop:false, pointUp:"sec-signoff", txt:"Done per its DoD — sign off above", id:best.id};
-  if(st==="queued"||st==="planned") return {tone:"calm", loop:false, txt:best.live, id:best.id};
-  return {tone:"calm", loop:false, txt:"All work merged. Nothing pending.", id:best.id};
+  if(st==="sign")  return {tone:"sign", loop:false, pointUp:"sec-signoff", txt:`${wn} is done per its DoD — sign off above`, id:top.id};
+  if(st==="unset") return {tone:"calm", loop:false, txt:`${wn} — no Definition of Done set yet`, id:top.id};
+  if(st==="queued"||st==="planned") return {tone:"calm", loop:false, txt:top.live, id:top.id};
+  return {tone:"calm", loop:false, txt:"All work merged. Nothing pending.", id:top.id};
+}
+/* a workstream has reached its DoD (merged or done-per-DoD) — used by the project k-of-n gauge (#C) */
+function wsDone(w){ return w.status==="merge" || w.status==="sign" || (w._prog && w._prog.allMet) || (w._sessGauge && w._sessGauge.total>0 && w._sessGauge.done===w._sessGauge.total); }
+/* an open-ended autonomous loop has NO terminal DoD to be "k of n" against — excluded from the project
+   gauge denominator and the long pole so a perpetual loop never reads as "0 of N met DoD" (#9a). */
+function wsOpenEnded(w){ return w.status==="loop" || !!w.loop; }
+function projGauge(p){ const counted=p.workstreams.filter(w=>!wsOpenEnded(w)); const total=counted.length, done=counted.filter(wsDone).length; return {done,total,percent:total?Math.round(done/total*100):0}; }
+/* the "long pole": the workstream furthest from done (most attention-urgent, then lowest progress) */
+function longPole(p){
+  const closed=p.workstreams.filter(w=>!wsOpenEnded(w));   // open-ended loops can't be a "long pole" — they never finish (#9a)
+  const order=closed.slice().sort((a,b)=> byAttention(a,b) || ((a._prog?a._prog.percent:0)-(b._prog?b._prog.percent:0)));
+  return order.find(w=>!wsDone(w)) || order[order.length-1] || null;
 }
 
 /* ─────────────────────────── icons ─────────────────────────── */
@@ -1452,14 +1551,16 @@ function renderAll(sc){
 function dormantIds(){ return new Set(state.data.filter(p=>pClass(p)==="calm").map(p=>p.id)); }
 
 function fleetCounts(){
-  const c={run:0,loop:0,block:0,sign:0,plan:0,merge:0,fail:0,unset:0,total:0,projects:state.data.length};
+  const c={run:0,loop:0,block:0,softwait:0,sign:0,plan:0,merge:0,fail:0,unset:0,total:0,projects:state.data.length};
   const dorm=dormantIds();
   Object.values(state.SESS).forEach(({s,p})=>{
     c.total++;
     const inDorm=dorm.has(p.id);
     if(s.status==="run") c.run++;
     else if(s.status==="loop") c.loop++;
-    else if(s.status==="block") c.block++;
+    // only a STRUCTURALLY-ELICITED block is a provable obligation (spec §5.3); a non-elicited idle stop
+    // is a separate quiet "may be waiting" tally that NEVER enters the hero "things need you" count.
+    else if(s.status==="block"){ if(s.elicited) c.block++; else c.softwait++; }
     else if(s.status==="sign") c.sign++;
     // Merged + Planned tallies count only NON-dormant projects so every jump-link lands on a
     // surface whose count matches what Done / Planned actually render (#12).
@@ -1479,82 +1580,154 @@ function fleetCounts(){
    throughput; numstat is demoted to the merged fragment's tooltip; each fragment is a jump-link. */
 const fmtN = n => n>=1000?(n/1000).toFixed(1)+"k":n;
 const shortWs = nm => String(nm||"").replace("Nightly ","").replace("Spike: ","").replace(" loop","");
+/* live loop label = elapsed only (from stored loopStartedAt). The "· iter N" count needs a durable
+   iteration log pi does not expose, so it is stripped from the live view and shown only as proposed (#D). */
+const loopElapsed = txt => String(txt||"looping").replace(/\s*·\s*iter\s*\d+/i,"");
 function fleetDelta(){
-  let merges=0, add=0, del=0, blocked=0, ready=0, loopName="", loopIters=0;
+  let merges=0, add=0, del=0, blocked=0;
+  // "since your last visit" must mean SINCE the stored lastDashboardVisitAt — not a fixed "few hours"
+  // window. A merge older than the visit (e.g. 3h/5h ago vs a 2h-ago visit) is NOT new and must not count
+  // (#8 nit): compare each item's age against the visit age instead of the generous isRecent() heuristic.
+  const visitMin = agoToMin(state.lastVisit);
+  const sinceVisit = ago => { const m=agoToMin(ago); return m<1e9 && m<=visitMin; };
   Object.values(state.SESS).forEach(({s,w})=>{
-    if(s.status==="merge" && isRecent((s.artifact&&s.artifact.mergedAgo)||(w&&w.mergedAgo)||"")) {
+    if(s.status==="merge" && sinceVisit((s.artifact&&s.artifact.mergedAgo)||(w&&w.mergedAgo)||"")) {
       merges++; if(s.artifact){ add+=s.artifact.add||0; del+=s.artifact.del||0; } }
-    if(s.status==="block" && isRecent(s.meta)) blocked++;          // newly blocked since the visit
-    if(s.status==="sign") ready++;                                  // newly ready to sign off
-    if(s.loop && s.dIter && s.dIter>loopIters){ loopIters=s.dIter; loopName=(w&&w.name)||s.name; }
+    if(s.status==="block" && s.elicited && sinceVisit(s.meta)) blocked++;   // newly (provably) blocked since the visit
   });
-  return {merges, add, del, blocked, ready, loopIters, loopName, since:state.lastVisit};
+  // No "ready to sign off" delta (#7): a sign-off becoming ready needs a became-allMet timestamp vs
+  // lastDashboardVisitAt that no signal grounds — so we never assert the standing sign-off backlog as
+  // "new since your visit" (it would restate the count a third time after the rail pill + strip header).
+  // No "+N iters" fragment — loop iteration counts need a durable iteration log pi can't ground (carry-fwd #D).
+  return {merges, add, del, blocked, since:state.lastVisit};
 }
-function deltaClause(){
+function deltaClause(needs){
   const d=fleetDelta();
   const frags=[];
-  if(d.merges){ const net=(d.add||d.del)?`+${fmtN(d.add)}/−${fmtN(d.del)} lines (git numstat) since your last visit`:"merged since your last visit";
-    frags.push(`<a data-jump="sec-done" title="${esc(net)}"><b>+${d.merges}</b> merged</a>`); }
-  if(d.blocked) frags.push(`<a data-jump="sec-needs"><b>${d.blocked}</b> newly blocked</a>`);
-  if(d.ready) frags.push(`<a data-jump="sec-signoff"><b>${d.ready}</b> ready to sign off</a>`);
-  if(d.loopIters) frags.push(`<a data-jump="sec-proj">${esc(shortWs(d.loopName))} <b>+${d.loopIters} iters</b></a>`);
+  if(d.merges){ const net=(d.add||d.del)?` <span class="dnums">+${fmtN(d.add)}/−${fmtN(d.del)} lines</span>`:"";
+    const tip=(d.add||d.del)?"net git numstat over commits merged since your last visit":"merged since your last visit";
+    frags.push(`<a data-jump="sec-done" title="${esc(tip)}"><b>+${d.merges}</b> merged${net}</a>`); }   // #9f: numstat shown INLINE, not just tooltip
+  // #9d: suppress 'newly blocked' when something needs you — the hero headline already states the needs
+  // count, so restating "+N newly blocked" here would double-assert the same obligation.
+  if(d.blocked && !needs) frags.push(`<a data-jump="sec-needs"><b>${d.blocked}</b> newly blocked</a>`);
   if(!frags.length) return "";
   const head = d.since ? `Since you last looked <b>${esc(d.since)}</b>` : `Recent activity`;
   return `<span class="delta">${head}: ${frags.join('<span class="sep">·</span> ')}.</span>`;
 }
 
+/* longest grounded loop elapsed (#8): from the stored loopStartedAt (fixture: elapsedMin, else the
+   elapsed text in meta/loopTime with the un-groundable "· iter N" stripped). Lets the calm hero stay
+   honest — it never reassures "close this tab" while a loop has visibly been running a long time; it
+   states the neutral elapsed FACT instead, never an invented stall / over-budget alarm. */
+function loopMinutes(s,w){
+  // (#it5-p7c) PRODUCTION: gate the "∞ looping {elapsed}" badge strictly on a registered loop
+  // (isLoop) + a stored loopStartedAt (spec §5.4); compute elapsed = now − loopStartedAt and DROP
+  // the meta/loopTime text-parse fallback below — it exists only so the mockup fixtures (which carry
+  // an elapsed string, not a start timestamp) can render. The text parse must never ship.
+  if(s.elapsedMin!=null) return s.elapsedMin;
+  const t=loopElapsed(s.meta||(w&&w.loopTime)||"");
+  let min=0; const h=t.match(/(\d+)\s*h/); const m=t.match(/(\d+)\s*m/);
+  if(h) min+=parseInt(h[1],10)*60; if(m) min+=parseInt(m[1],10); return min;
+}
+function fmtMin(min){ if(min>=60){ const h=Math.floor(min/60), m=min%60; return m?`${h}h ${m}m`:`${h}h`; } return `${min}m`; }
+function longestLoop(){
+  let best=null;
+  Object.values(state.SESS).forEach(({s,w})=>{ if(s.loop){ const min=loopMinutes(s,w); if(!best||min>best.min) best={min, label:fmtMin(min)}; } });
+  return best;
+}
+const CLOSE_TAB_LOOP_MIN = 45;  // beyond this, an actively-running loop makes "close this tab" dishonest
+
 /* ─────────────────────────── hero ─────────────────────────── */
 function heroHtml(c){
   const day = "Sunday · 21 Jun";
-  const loopWarnN = Object.values(state.SESS).filter(({s})=>s._loopWarn).length;
+  // non-elicited idle stops are a quiet tally, NEVER part of the obligation headline (spec §5.3, #5)
+  const maybe = c.softwait ? `<span class="maybe" title="non-elicited idle stops — pi can't PROVE these are blocked (a free-text stop is not a structured ask), so they're a quiet tally, never inside the 'things need you' count">${c.softwait} may be waiting</span>` : "";
   if(c.needs===0){
     const bits=[];
     if(c.loop) bits.push(`${c.loop} loop${c.loop>1?"s":""} running`);
     if(c.run) bits.push(`${c.run} task${c.run>1?"s":""} running`);
     const runTxt = bits.length? bits.join(" · ") : "nothing running";
-    // headline is honest about the one remaining obligation (#3): a stalled loop, or pending sign-offs
-    let headline;
-    if(loopWarnN) headline = `<em>${loopWarnN} loop${loopWarnN>1?"s":""} need${loopWarnN>1?"":"s"} a look.</em> Nothing else needs you.`;
-    else if(c.sign) headline = `<em>${c.sign} done</em> — your sign-off is all that's pending.`;
-    else headline = `<em class="calm">Nothing needs you.</em> ${esc(runTxt)}, everything else can wait.`;
-    const subBits=[];
-    if(c.loop) subBits.push(`<b>${c.loop} loop${c.loop>1?"s":""}</b> ${loopWarnN?`running · <span style="color:var(--st-block)">${loopWarnN} need${loopWarnN>1?"":"s"} attention</span>`:"within budget"}`);
-    if(c.run) subBits.push(`<b>${c.run} running</b>`);
-    if(c.sign) subBits.push(`<b>${c.sign} done</b> awaiting your sign-off`);
+    // hero states the calm truth and names the ONE remaining obligation if there is one (sign-offs).
+    // No stalled-loop / over-budget alarm here — that needs an iteration log pi can't ground (carry-fwd #D).
+    // The obligation count (#1) and the run/loop count each live in exactly ONE place across headline+subline:
+    //  · sign>0  → headline states the sign-off; subline carries ONLY loop/run (mirrors the needs>0 branch).
+    //  · sign==0 → headline already states "{runTxt} … can wait"; subline does NOT repeat loop/run (#5,#9b).
+    let headline; const subBits=[];
+    if(c.sign){
+      headline = `<em class="sign">${c.sign} done</em> — your sign-off is all that's pending.`;
+      if(c.loop) subBits.push(`<b>${c.loop} loop${c.loop>1?"s":""}</b> running`);
+      if(c.run) subBits.push(`<b>${c.run} running</b>`);
+    } else {
+      headline = `<em class="calm">Nothing needs you.</em> ${esc(runTxt)}, everything else can wait.`;
+    }
     if(c.plan) subBits.push(`<b>${c.plan} planned</b>`);
-    // "close this tab" ONLY when truly nothing is pending — no needs, no sign-offs, no stalled loop (#3)
-    const closeTab = (c.sign===0 && c.needs===0 && !loopWarnN) ? " You can close this tab." : "";
-    const stall = loopWarnN ? ` <span style="color:var(--st-block)">· ${loopWarnN} loop${loopWarnN>1?"s":""} stalled — review</span>` : "";
+    if(maybe) subBits.push(maybe);
+    // "close this tab" ONLY when truly nothing is pending — no needs, no sign-offs. But never reassure
+    // "close this tab" while a grounded loop has visibly run a long time (#8): state the neutral elapsed
+    // fact (from the stored loopStartedAt) instead — a non-amber fact, never an invented stall/budget alarm.
+    let closeTab="";
+    if(c.sign===0 && c.needs===0){
+      const ll=longestLoop();
+      closeTab = (ll && ll.min>=CLOSE_TAB_LOOP_MIN) ? ` Longest loop running <b>${esc(ll.label)}</b>.` : " You can close this tab.";
+    }
+    const dc = deltaClause(c.needs);
+    // (#it7-p6) the delta clause carries its own leading "·" separator (CSS .delta::before), so the
+    // trailing period that closes the running/loop bits is suppressed when a delta follows it —
+    // otherwise the single most-read line renders an awkward "may be waiting. · Since you last looked".
     return `<div class="eyebrow">${day} · everything in one quiet view</div>
       <h1 class="headline">${headline}</h1>
-      <p class="subline">${subBits.join(" · ")}${subBits.length?".":""}${closeTab}${stall}${deltaClause()}</p>`;
+      <p class="subline">${subBits.join(" · ")}${subBits.length&&!(dc&&!closeTab)?".":""}${closeTab}${dc}</p>`;
   }
   const subBits=[];
-  if(c.active) subBits.push(`<b>${c.active} running</b> across ${c.projects} project${c.projects>1?"s":""}`);
-  if(c.sign) subBits.push(`<b>${c.sign} done</b> awaiting sign-off`);
-  if(c.plan) subBits.push(`<b>${c.plan} planned</b>, not started`);
+  // (#it5-p4) frame the running spread against projects that ACTUALLY have running/looping work
+  // ("active projects"), not the whole fleet — "across 51 projects" wrongly counts ~38 dormant
+  // projects the reader can't act on against the running total.
+  if(c.active){
+    const runProjects = state.data.filter(p=>projNeeds(p).run>0);
+    const activeProjects = runProjects.length;
+    // (#it6-p6a) singular-world phrasing: "N running across 1 active project" reads awkwardly — when the
+    // running work is in a single project, say "N running in {project}" (or a bare "N running") instead.
+    subBits.push(activeProjects===1
+      ? `<b>${c.active} running</b> in ${esc(runProjects[0].name)}`
+      : `<b>${c.active} running</b> across ${activeProjects} active projects`);
+  }
+  // sign-off count is owned by the lifted "Awaiting your sign-off" strip + its rail pill (#7) — not
+  // restated here, so the same obligation number is not asserted three times above the fold.
+  // (#it6-p5) the planned count is likewise single-sourced: the rail Planned pill + the Planned section
+  // header own it, so it is NOT restated in the needs>0 subline (mirrors how sign-off is already kept out).
+  if(maybe) subBits.push(maybe);
+  const dc = deltaClause(c.needs);
+  // (#it7-p6) suppress the trailing period when the delta clause follows — its own "·" separator
+  // (CSS .delta::before) already divides it from the running bits, so "1 may be waiting. · Since…"
+  // does not render a period jammed against the separator on the single most-read line.
   return `<div class="eyebrow">${day} · everything in one quiet view</div>
     <h1 class="headline"><em>${c.needs} ${c.needs===1?"thing needs":"things need"} you.</em> Everything else can wait.</h1>
-    <p class="subline">${subBits.join(" · ")}.${deltaClause()}</p>`;
+    <p class="subline">${subBits.join(" · ")}${subBits.length&&!dc?".":""}${dc}</p>`;
 }
 
 /* ─────────────────────────── tally rail (jump-links) ─────────────────────────── */
 function renderRail(c){
   // Needs-you count is owned solely by the hero (#1) — no needs pill here.
-  // Hue + swatch only on the ACTIONABLE pills (sign-off, stalled-loop warning) — #2,#10.
+  // Hue + swatch only on the ACTIONABLE Sign-off pill — #2,#10. (No stalled-loop warning pill exists: a
+  // stall verdict can't be grounded, carry-fwd #D.)
   // Counts are session-level except Healthy, whose unit is labelled (projects) so denominators are clear (#10).
   const pills=[]; // [extraCls, label, n, jumpId, hasSwatch]
-  const loopWarnN = Object.values(state.SESS).filter(({s})=>s._loopWarn).length;
-  if(loopWarnN){
-    const warnRef = Object.values(state.SESS).find(({s})=>s._loopWarn);
-    pills.push(["warn","Loops need attention", loopWarnN, warnRef?("card-"+warnRef.p.id):"sec-proj", true]);
-  }
-  if(c.sign)  pills.push(["sign","Sign-off", c.sign, "sec-signoff", true]);
-  if(c.active)pills.push(["","Running", c.active, "sec-proj", false]);
+  // No stalled-loop warning pill — stall/over-budget needs an iteration log pi can't ground (carry-fwd #D).
+  // when nothing needs you, the calm hero already states the running/loop + merged-since counts — so the
+  // Running and Merged rail pills drop their numbers (count lives in ONE place, #1); Sign-off keeps its
+  // actionable count. They stay as jump-links.
+  const calm = c.needs===0;
+  // (#it5-p2) the Sign-off pill also drops its number when the hero owns the sign-off voice
+  // (calm-with-sign-off): the obligation count then lives ONLY in the hero + the strip header (#1).
+  if(c.sign)  pills.push(["sign","Sign-off", calm?"":c.sign, "sec-signoff", true]);
+  if(c.active)pills.push(["","Running", calm?"":c.active, "sec-proj", false]);
   if(c.plan)  pills.push(["","Planned", c.plan, "sec-planned", false]);
-  if(c.merge) pills.push(["","Merged", c.merge, "sec-done", false]);
+  if(c.merge) pills.push(["","Merged", calm?"":c.merge, "sec-done", false]);
   if(c.healthy) pills.push(["",`Healthy · ${c.healthy} project${c.healthy>1?"s":""}`, "", "sec-healthy", false]);
-  if(!pills.length) pills.push(["","Everything healthy — nothing needs you", "", "sec-proj", false]);
+  // (#it5-p3) only assert "Everything healthy — nothing needs you" when nothing actually needs you;
+  // when needs>0 with no other pills the hero already owns the obligation, so leave the rail empty
+  // rather than contradict the "N things need you" hero directly beneath it.
+  if(!pills.length && c.needs===0) pills.push(["","Everything healthy — nothing needs you", "", "sec-proj", false]);
   document.getElementById("rail").innerHTML = pills.map(([cl,l,n,j,sw])=>
     `<button class="pill ${cl}" data-jump="${j}">${sw?'<span class="sw"></span>':""}${l}${n!==""?` <span class="n">${n}</span>`:""}</button>`).join("");
 }
@@ -1571,8 +1744,11 @@ function needsSectionHtml(c){
 function renderNeeds(){
   const host=document.getElementById("needs"); if(!host) return;
   const items=[];
-  Object.values(state.SESS).forEach(({s,w,p})=>{ if(isNeed(s.status)) items.push({s,w,p}); });
-  items.sort((a,b)=> blastRank(blastRadius(a.s))-blastRank(blastRadius(b.s)) || (a.s.status==="block"?0:1)-(b.s.status==="block"?0:1));
+  Object.values(state.SESS).forEach(({s,w,p})=>{ if(isNeed(s)) items.push({s,w,p}); });
+  // blast radius is the primary triage axis; ties break by AGE (oldest waiting first), then block-before-fail (#7)
+  items.sort((a,b)=> blastRank(blastRadius(a.s))-blastRank(blastRadius(b.s))
+    || (agoToMin(b.s.meta)-agoToMin(a.s.meta))
+    || (a.s.status==="block"?0:1)-(b.s.status==="block"?0:1));
   const top = items.slice(0,2);
   const rest = items.slice(2);
   let html = top.map(({s,w,p})=>{
@@ -1581,8 +1757,11 @@ function renderNeeds(){
     const soft = s.status==="block" && !s.elicited;   // non-elicited stop — pi can't PROVE it's blocked (#9)
     // status badge + (optional) blast tag, both in the SAME hue so one card never shows two alarm colours (#16)
     const statusBadge = s.status==="fail" ? badge("fail") : badge("block", soft);
-    const blastTag = (blast==="hi"||blast==="md") ? `<span class="blast ${cls}">${blastLabel(blast)}</span>` : "";
-    const headTag = `${statusBadge} ${blastTag}`;
+    const blastTag = (blast==="hi"||blast==="md") ? `<span class="blast ${cls}" title="Blast radius is a HEURISTIC triage hint — a manual override, a destructive-keyword scan of the last message, or a dirty-file-count bucket. It only ORDERS Needs-you; it gates nothing and is not a measured risk score.">${blastLabel(blast)}</span>` : "";
+    // time-since-waiting (#7): the cards that most need triage context get the "how long has this blocked me" axis
+    const wait = waitLabel(s);
+    const waitTag = wait ? `<span class="waitage" title="time since the agent went idle waiting on you (from its last activity)">waiting ${wait}</span>` : "";
+    const headTag = `${statusBadge} ${blastTag} ${waitTag}`;
     // chips ONLY when structurally elicited ({question,options[]}); else degrade to a single open (#9,#12)
     let chips="";
     if(s.elicited && s.chips && s.chips.length){
@@ -1606,11 +1785,12 @@ function renderNeeds(){
   if(rest.length){
     const needRow = ({s,w,p})=>{
       const blast=blastRadius(s);
-      const blastTag = (blast==="hi"||blast==="md")?`<span class="blast ${s.status==='fail'?'fail':'block'}">${blast==="hi"?"high":"elevated"}</span>`:"";
+      const blastTag = (blast==="hi"||blast==="md")?`<span class="blast ${s.status==='fail'?'fail':'block'}" title="Blast radius is a HEURISTIC triage hint (manual override / destructive-keyword scan / dirty-file-count bucket). It only orders Needs-you; it gates nothing.">${blast==="hi"?"high":"elevated"}</span>`:"";
+      const wait=waitLabel(s); const waitTag = wait?`<span class="waitage">waiting ${wait}</span>`:"";
       return `<div class="needrow">
         <span class="sess-dot ${(ST[s.status]||{}).cls||'idle'}" style="background:${(ST[s.status]||{}).color}"></span>
         <div class="nleft">
-          <div class="ncrumb"><b>${esc(p.name)}</b> › ${esc(w.name)} ${blastTag}</div>
+          <div class="ncrumb"><b>${esc(p.name)}</b> › ${esc(w.name)} ${blastTag}${waitTag}</div>
           <div class="nq">${esc(s.live)}</div>
         </div>
         <button class="btn primary sm" data-open="${s.id}">${continueIcon()} Continue</button>
@@ -1634,7 +1814,10 @@ function signoffSectionHtml(c){
   const batch = c.sign>1
     ? `<button class="hbtn sgn" id="signAll"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="13" height="13"><path d="M20 6 9 17l-5-5"/></svg> Sign off all ${c.sign}</button>`
     : `<span class="hint">one click — no reply needed</span>`;
-  return `<div class="shead" id="sec-signoff"><h2>Awaiting your sign-off</h2><span class="cnt">${c.sign} done</span>${batch}</div>
+  // (#it6-p4) single-source the count: when c.sign>1 the "Sign off all N" button ~2cm away already carries
+  // the number, so the "N done" cnt pill is dropped. It stays only in the single-item case (button has no count).
+  const cnt = c.sign>1 ? "" : `<span class="cnt">${c.sign} done</span>`;
+  return `<div class="shead" id="sec-signoff"><h2>Awaiting your sign-off</h2>${cnt}${batch}</div>
     <section class="signoff" id="signoffHost"></section>`;
 }
 function mergeAffordance(s){
@@ -1712,8 +1895,14 @@ function projectsSectionHtml(c){
     </div>
     <section id="projectsHost"></section>`;
 }
-function projWarn(p){ return p.workstreams.some(w=>w._loopWarn); }
-function allWsSurfaced(p){ return p.workstreams.length>0 && p.workstreams.every(w=>w.status==="block"||w.status==="fail"); }
+// a loop NEVER warns on the live view (stall/over-budget can't be grounded, carry-fwd #D), so there is
+// no "stalled project" to float to the top — kept as a stable false so the active-card order is by data only.
+function projWarn(p){ return false; }
+/* a project is "fully surfaced in Needs-you" only when EVERY session of EVERY workstream is itself a
+   need (block/fail) — session-level, not the workstream's rolled-up status. This keeps the blocked-
+   scenario grid-collapse, but stops a mixed-source workstream (run/block/sign/unset/loop sessions)
+   from being treated as fully surfaced, so its full card renders and its honest k-of-n gauge shows (#4). */
+function allWsSurfaced(p){ return p.workstreams.length>0 && p.workstreams.every(w=>(w.sessions||[]).length>0 && w.sessions.every(s=>s.status==="block"||s.status==="fail")); }
 function agoToMin(a){
   const s=String(a||"").toLowerCase(); const m=s.match(/(\d+(?:\.\d+)?)/); const v=m?parseFloat(m[1]):1;
   if(/yesterday/.test(s)) return 1440;
@@ -1730,7 +1919,7 @@ function mergeRecency(p){ let best=1e9; p.workstreams.forEach(w=>w.sessions.forE
 function renderGrid(){
   const host=document.getElementById("projectsHost"); if(!host) return;
   const attn = state.data.filter(p=>pClass(p)==="attn");
-  const active = state.data.filter(p=>pClass(p)==="active").sort((a,b)=> (projWarn(a)?0:1)-(projWarn(b)?0:1)); // stalled loops first (#3)
+  const active = state.data.filter(p=>pClass(p)==="active"); // no "stalled loops first" — a loop never alarms on the live view (#D)
   const dormant = state.data.filter(p=>pClass(p)==="calm");
   let signoff = state.data.filter(p=>pClass(p)==="signoff");
 
@@ -1750,7 +1939,7 @@ function renderGrid(){
       <div class="grpcard" id="sec-collapsed"><div class="grp-h" data-toggle="grp"><span class="gt">In Needs you</span> <span class="gc">${fullCandidates.length} project${fullCandidates.length>1?"s":""} · drill in for full context</span><span class="chev">${chevIcon()}</span></div>
         <div class="grp-b">`+fullCandidates.map(p=>renderRow(p)).join("")+`</div></div>`;
   } else {
-    const ACTIVE_CAP = 6;
+    const ACTIVE_CAP = 4;   // cap ACTIVE full-cards too (carry-fwd #F) — overflow folds into "Running · N more"
     const activeFull = active.slice(0, ACTIVE_CAP);
     const activeOverflow = active.slice(activeFull.length);
     const full = attn.concat(activeFull).concat(fullSign);
@@ -1758,15 +1947,25 @@ function renderGrid(){
     if(full.length) out += `<div class="grid ${single?'single':''}">`+full.map(p=>renderCard(p)).join("")+`</div>`;
     // #2: fold active overflow into a "Running · N more" grouped-row card (name + dot-strip + live one-liner)
     if(activeOverflow.length){
-      out += `<div class="grpcard" id="sec-running"><div class="grp-h" data-toggle="grp"><span class="gt">Running</span> <span class="gc">${activeOverflow.length} more loop${activeOverflow.length>1?"s":""} · within budget · live</span><span class="chev">${chevIcon()}</span></div>
+      out += `<div class="grpcard" id="sec-running"><div class="grp-h" data-toggle="grp"><span class="gt">Running</span> <span class="gc">${activeOverflow.length} more loop${activeOverflow.length>1?"s":""} · live · nothing needs you</span><span class="chev">${chevIcon()}</span></div>
         <div class="grp-b">`+activeOverflow.map(p=>renderRow(p,{live:true})).join("")+`</div></div>`;
     }
   }
-  // sign-off group is a COLLAPSED drill-down reference — the action lives in the strip above (#6 de-dup)
+  // (#it6-p1) every COUNTED project must have a navigable home in the grid. When attn/active cards
+  // exist, the non-promoted sign-off projects (e.g. ai-education in default) were filtered out of the
+  // grid entirely while the "Projects N" header still counted them — a count-reconciliation failure.
+  // Fix: render them as collapsed NAVIGATE-ONLY rows in a small "Awaiting sign-off" group. These rows
+  // drill in via the chevron / Review-and-open path only; the sign-off ACTION stays solely in the lifted
+  // strip above (carry-fwd #B: no second action-surface), so this reconciles the count without a
+  // duplicate action heading.
   if(signoff.length){
-    out += `<div class="grpcard" id="sec-signgrp"><div class="grp-h" data-toggle="grp"><span class="gt sgn">Awaiting your sign-off</span> <span class="gc">${signoff.length} project${signoff.length>1?"s":""} · sign off in the strip above ↑</span><span class="chev">${chevIcon()}</span></div>
-      <div class="grp-b">`+signoff.map(p=>renderRow(p)).join("")+`</div></div>`;
+    out += `<div class="grpcard" id="sec-signoff-grid"><div class="grp-h" data-toggle="grp"><span class="gt">Awaiting sign-off</span> <span class="gc">${signoff.length} project${signoff.length>1?"s":""} · sign off in the strip above · drill in to review</span><button class="jump" data-jump="sec-signoff">sign off ↑</button><span class="chev">${chevIcon()}</span></div>
+      <div class="grp-b">`+signoff.map(p=>renderRow(p,{navOnly:true})).join("")+`</div></div>`;
   }
+  // carry-fwd #B: NO second "Awaiting your sign-off" ACTION surface in the grid. The lifted strip above
+  // (signoffHost / #sec-signoff) is the ONE canonical sign-off action surface — its rows carry the
+  // Sign-off button. The grid group above is NAVIGATE-ONLY (rows expand / Review), so the project still
+  // has a home in the grid and the count reconciles, without duplicating the sign-off action.
   // dormant group — recency-sorted + capped with show-all (#9); id=sec-healthy for the rail jump (#10)
   if(dormant.length){
     const sorted = dormant.slice().sort((a,b)=> mergeRecency(a)-mergeRecency(b));
@@ -1779,36 +1978,72 @@ function renderGrid(){
   host.innerHTML = out;
 }
 
+/* cap the opened workstream list at ~6 so even an 8-workstream project never becomes an instrument
+   wall (invariant #6, #9e); the rest fold behind "+N more workstreams" (reuses data-toggle=more). */
+function renderWsList(p, opts){
+  const all = p.workstreams.slice().sort(byAttention);
+  const CAP=6, shown=all.slice(0,CAP), more=all.slice(CAP);
+  return shown.map(w=>renderWorkstream(w,p,opts)).join("")
+    + (more.length ? `<div class="more-rows" hidden>${more.map(w=>renderWorkstream(w,p,opts)).join("")}</div><button class="morelink" data-toggle="more">+${more.length} more workstream${more.length>1?"s":""}</button>` : "");
+}
+
 function renderCard(p){
   const c = projNeeds(p);
   const live = cardLive(p);
   const hasNeeds = (c.you||c.fail) > 0;
   const countPills = [];
-  // Needs-you count is owned by the hero (#1) — NO per-card "N in Needs you" pill. Surfaced
-  // workstreams carry a quiet ↑ marker on their ring instead (#13).
+  // Needs-you count is owned by the hero (#1) — NO per-card "N in Needs you" pill. The one-liner names
+  // the blocker and points up; the dot-strip shows the blocked workstream as an amber square (carry-fwd #G).
   if(c.sign){ countPills.push(`<button class="countpill sgn jumplink" data-jump="sec-signoff">${c.sign} to sign off ↑</button>`); }
   if(!hasNeeds && !c.sign){ countPills.push(c.run?`<span class="countpill calm">${c.run} running</span>`:`<span class="countpill calm">all calm</span>`); }
 
-  const surfaced = p.workstreams.filter(w=>w.status==="block"||w.status==="fail");
-  const allSurfaced = hasNeeds && p.workstreams.length>0 && surfaced.length===p.workstreams.length;
-  let ringsBlock;
-  if(allSurfaced){
-    // every workstream is already in Needs-you → don't paint a row of ghost rings (#13)
-    ringsBlock = `<div class="surfline"><span class="sq"></span><b>All ${surfaced.length} workstream${surfaced.length>1?"s":""}</b> are in Needs&nbsp;you<button class="jump" data-jump="sec-needs">answer ↑</button></div>`;
-  } else {
-    const rings = p.workstreams.slice().sort(byAttention).map(w=>{
-      const short = w.name.replace("Nightly ","").replace("Spike: ","").replace(" loop","");
-      const surf = hasNeeds && (w.status==="block"||w.status==="fail");
-      // surfaced rings stay SALIENT (amber hue + dashed outline + ↑) so attention doesn't invert (#11)
-      return `<div class="ringcell${surf?' surfaced':''}" title="${esc(w.name)} — ${esc(w.dod||'DoD not set')}${surf?' · already in Needs you ↑':''}">
-        ${surf?'<span class="upmark" title="surfaced in Needs you — answer above">↑</span>':''}
-        ${ringSvg(w, 54)}
-        <div class="wsn">${esc(short)}</div></div>`;
-    }).join("");
-    ringsBlock = `<div class="rings">${rings}</div>`;
-  }
+  // collapsed face = ONE muted project gauge (k of n workstreams done) + a shape-coded dot-strip + the
+  // NAMED long pole (carry-fwd #C). No ring-per-workstream wall at any scale; rich per-criterion rings
+  // live on the opened workstream only. No salient amber alarm here (carry-fwd #G) — the one-liner already
+  // names the blocker, so attention never inverts onto the quietest ring cell.
+  const g = projGauge(p);
+  const pole = longPole(p);
+  // a project whose only workstreams are open-ended loops has no terminal DoD to gauge (#9a) — show the
+  // running ∞ instead of a meaningless "0 of 0", and skip the long-pole line entirely.
+  const allOpenEnded = g.total===0;
+  const gaugeItem = allOpenEnded ? { status:"loop", loop:true } : { status:"gauge", _sessGauge:{done:g.done, total:g.total, percent:g.percent} };
+  // #9a: when the long pole is itself surfaced in Needs-you, salience lives ONCE — mute its status to a
+  // quiet "in Needs you ↑" jump instead of repeating an amber alarm on the otherwise-calm card face.
+  const poleInNeeds = pole && (pole.status==="block"||pole.status==="fail");
+  const poleTag = poleInNeeds
+    ? `<button class="muted-jump" data-jump="sec-needs">· in Needs you ↑</button>`
+    : (pole?badge(pole.status):"");
+  // (#it6-p2) the gauge caption is now PURELY about DoD progress. The earlier "· N pending sign-off"
+  // clause here was workstream-grain while the countPill "${c.sign} to sign off ↑" is session-grain; they
+  // share the bare "sign off" label and diverge at dense scale (9 sessions vs 2 workstreams), reading as
+  // rival counts. The sign-off obligation now lives in exactly ONE voice (the pill + the lifted strip,
+  // invariant #1), so pendTxt is dropped from the caption entirely.
+  // (#it5-p5b) open-ended loop workstreams are dropped from the gauge DENOMINATOR but still show as
+  // cyan dots in the strip — so a bare "1 of 1 met DoD" silently disagrees with a 2-dot strip. Name the
+  // denominator ("scoped workstream") and append an explicit "· N loop running" clause so the count
+  // reconciles with the dots.
+  const loopWs = p.workstreams.filter(wsOpenEnded).length;
+  const loopClause = loopWs?` · <b>${loopWs} loop${loopWs>1?"s":""} running</b>`:"";
+  const scopedWord = loopWs?`scoped workstream${g.total>1?"s":""}`:`workstream${g.total>1?"s":""}`;
+  const poleLine = allOpenEnded
+    ? `<div class="csum-pole"><span class="plbl">Continuous loop — no terminal Definition of Done.</span></div>`
+    : pole && !wsDone(pole)
+      ? `<div class="csum-pole"><span class="plbl">Long pole:</span> <b>${esc(shortWs(pole.name))}</b> ${poleTag}</div>`
+      // (#it5-p5a) all scoped workstreams met DoD: the gauge line already states this — drop the
+      // verbatim-redundant "All workstreams have met their Definition of Done" prose pole line.
+      : ``;
+  const gaugeLine = allOpenEnded
+    ? `<div class="csum-line"><b>∞ looping</b> · open-ended ${dotStrip(p)}</div>`
+    : `<div class="csum-line"><b>${g.done} of ${g.total}</b> ${scopedWord} met DoD${loopClause} ${dotStrip(p)}</div>`;
+  const ringsBlock = `<div class="csum">
+    <div class="csum-ring" title="${allOpenEnded?'an open-ended loop has no terminal DoD to be k-of-n against — shown as running ∞':'k of '+g.total+' workstreams have met their Definition of Done — an honest aggregate, not an authored percent'}">${ringSvg(gaugeItem, 50)}</div>
+    <div class="csum-body">
+      ${gaugeLine}
+      ${poleLine}
+    </div>
+  </div>`;
 
-  const ws = p.workstreams.slice().sort(byAttention).map(w=>renderWorkstream(w,p)).join("");
+  const ws = renderWsList(p);
   // one-liner: point UP when the only live item is a surfaced need / a sign-off (#11) — never a redundant Continue
   const liveRun = (live.tone==="run"||live.tone==="loop");
   let olActs, olAttr, ping="";
@@ -1817,9 +2052,9 @@ function renderCard(p){
     olActs = `<button class="btn ghost sm" data-jump="${live.pointUp}">${lbl}</button>`;
     olAttr = `data-jump="${live.pointUp}"`;
   } else {
-    olActs = liveRun
-      ? `<button class="btn pause sm" data-pause="${live.id}">${pauseIcon()} Pause</button><button class="btn primary sm" data-open="${live.id}">${continueIcon()} Open</button>`
-      : (live.id?`<button class="btn primary sm" data-open="${live.id}">${continueIcon()} Continue</button>`:"");
+    olActs = live.id
+      ? `<button class="btn primary sm" data-open="${live.id}">${continueIcon()} ${liveRun?"Open":"Continue"}</button>`
+      : "";
     olAttr = live.id?`data-open="${live.id}"`:"";
     ping = (live.id && live.id===state._pingId) ? " ping" : "";
   }
@@ -1839,6 +2074,7 @@ function renderCard(p){
     <div class="oneliner ${live.tone}${ping}" ${olAttr}>
       <span class="live"></span>
       <span class="txt">${live.loop?`<b>loop · </b>`:""}${esc(live.txt)}</span>
+      ${live.qDelta?`<span class="qdelta" title="~${live.qDelta.total} items in the loop's planned queue — best-effort parsed from the agent's notes (pi has no plan primitive, so the count is approximate). Queue growth is EXPECTED for an open-ended loop and never an alarm.">~${live.qDelta.total} queued</span>`:""}
       ${olActs?`<span class="ol-act">${olActs}</span>`:""}
     </div>
     <div class="pbody">${ws}</div>
@@ -1859,7 +2095,7 @@ function renderRow(p, opts){
     sum = merged?`<b>${merged}</b> merged`+(q?` · ${q} queued`:""):(q?`<b>${q}</b> queued`:"healthy"); }
   const ppTxt = o.live ? esc(lv.txt) : esc(p.path);
   const ppCls = o.live ? "pp" : "pp mono";
-  const ws = p.workstreams.slice().sort(byAttention).map(w=>renderWorkstream(w,p)).join("");
+  const ws = renderWsList(p, {navOnly:o.navOnly});
   return `<div class="prow" id="card-${p.id}" data-toggle="prow" data-rowp="${p.id}">
       ${dotStrip(p)}
       <span class="pn">${esc(p.name)}${p.nest?` <span class="nest" title="nested under its parent — counted only here, not toward the parent">⤷ ${esc(p.nest)}</span>`:""}</span>
@@ -1870,17 +2106,16 @@ function renderRow(p, opts){
     <div class="prow-body" data-rowbody="${p.id}"><div class="pbody" style="display:block;border-top:0">${ws}</div></div>`;
 }
 
-function renderWorkstream(w,p){
+function renderWorkstream(w,p,opts){
   let extra="";
   if(w.status==="loop"){
-    const lw = (w.sessions.find(s=>s._loop&&s._loop.warn)||{})._loop;
-    extra = `<span class="loopBadge${w._loopWarn?' warn':''}"><span class="inf">∞</span> ${esc(w.loopTime||"looping")}${w._loopWarn&&lw?` · ${esc(lw.reason)}`:""}</span>`;
+    extra = `<span class="loopBadge"><span class="inf">∞</span> ${esc(loopElapsed(w.loopTime||"looping"))}</span>`;
   } else extra = badge(w.status);
   // session-list cap (#20d): only the first 6 (by attention) render; the rest fold behind "+N more"
   const sorted = w.sessions.slice().sort(byAttention);
   const CAP=6, shown=sorted.slice(0,CAP), more=sorted.slice(CAP);
-  const sess = shown.map(s=>renderSession(s,w,p)).join("")
-    + (more.length ? `<div class="sess-extra" hidden>${more.map(s=>renderSession(s,w,p)).join("")}</div><button class="sessmore" data-toggle="sessmore">+${more.length} more session${more.length>1?"s":""}</button>` : "");
+  const sess = shown.map(s=>renderSession(s,w,p,opts)).join("")
+    + (more.length ? `<div class="sess-extra" hidden>${more.map(s=>renderSession(s,w,p,opts)).join("")}</div><button class="sessmore" data-toggle="sessmore">+${more.length} more session${more.length>1?"s":""}</button>` : "");
   // mixed-source workstreams report "k of n sessions done", never a blended percent (#5)
   const mixedNote = w._mixed ? ` <span class="srcTag" title="this workstream's sessions use different DoD evaluators (git / command / manual / sign-off), so the ring is a 'k of n sessions done' gauge — not a blended percent">mixed sources · ${w._sessGauge.done}/${w._sessGauge.total} done</span>` : "";
   const wsDod = (w.status==="unset"
@@ -1919,15 +2154,24 @@ function artChip(s){
   return `<span class="artchip ${merged?'mg':''}">${esc(head)} · ${diff}</span>`;
 }
 
-function budgetMeter(s){
-  if(!s._loop) return "";
-  const lh=s._loop, pct=Math.max(lh.pctTime||0, lh.pctCost||0);
-  const lab = (lh.b.maxMinutes!=null && s.elapsedMin!=null) ? `${s.elapsedMin}/${lh.b.maxMinutes}m`
-    : (lh.b.maxCostUsd!=null && s.cost!=null ? `$${s.cost}/$${lh.b.maxCostUsd}` : "");
-  return `<div class="budget ${lh.warn?'warn':''}" style="margin-top:8px" title="budget compared to SessionStats.cost + elapsed; amber only over budget or on a stalled (flat/declining) iteration tail">
-    <span class="bar"><i style="width:${Math.min(100,pct)}%"></i></span>budget ${esc(lab)} · ${lh.warn?esc(lh.reason):"within budget"}</div>`;
+/* loop iteration telemetry rendered as an explicit PROPOSED signal (carry-fwd #D): muted, dashed, labelled
+   "proposed", never live. Iteration count + rhythm sparkline + budget cap + stall detection all need a
+   durable per-iteration log (CustomEntry 'pi-web:loop-iter') + an orchestrator pi does not expose today. */
+function proposedLoop(s){
+  const parts=[];
+  if(s.iter!=null) parts.push(`<b>iter ${s.iter}</b>`);
+  if(s.iterspark && s.iterspark.length) parts.push(iterSparkHtml(s.iterspark));
+  const b=(s.budget)||{};
+  if(b.maxMinutes!=null && s.elapsedMin!=null) parts.push(`budget ${s.elapsedMin}/${b.maxMinutes}m`);
+  else if(b.maxCostUsd!=null && s.cost!=null) parts.push(`budget $${s.cost}/$${b.maxCostUsd}`);
+  // NO stall / over-budget reason appended — a stall verdict can't be grounded (no iteration log), so even
+  // inside the muted proposed band we never assert "stalled" / "over budget" as if it were derived telemetry.
+  const body = parts.length ? parts.join(" · ")+" — not live yet" : "iteration count, rhythm & budget — not live yet";
+  return `<div class="proposed" title="Loop iteration telemetry (count, rhythm sparkline, budget cap, stall detection) needs a durable per-iteration log (CustomEntry 'pi-web:loop-iter') + an orchestrator pi does NOT expose today. Shown MUTED as a proposed signal — never live data. The live badge above ('∞ looping {elapsed}') is grounded in the stored loopStartedAt.">
+    <span class="plab">proposed</span><span class="pbody">${body}</span></div>`;
 }
-function renderSession(s,w,p){
+function renderSession(s,w,p,opts){
+  const navOnly = !!(opts&&opts.navOnly);  // (#it6-p1) sign-off grid rows are navigate-only — no inline Sign-off action
   const cls=(ST[s.status]||{}).cls||"idle";
   // shape-coded sess-dot encodes status without leaning on hue (#14); status badge dropped (ws badge sits above)
   const dot = `<span class="sess-dot ${cls}" style="background:${(ST[s.status]||{}).color||'var(--st-idle)'}"></span>`;
@@ -1937,32 +2181,49 @@ function renderSession(s,w,p){
     const total = s.queueTotal || s.queue.length;
     const shown = s.queue.slice(0,3);
     const more = total - shown.length;
-    queue = `<div class="qnext">`+(s.iterspark?`${iterSparkHtml(s.iterspark)} `:"")
-      +shown.map((q,i)=>`<span class="qchip"><span class="qn">${i+1}</span>${esc(q)}</span>`).join("")
+    queue = `<div class="qnext"><span class="qsrc" title="pi has no TodoWrite/plan primitive — these items are best-effort parsed from the agent's notes, so the count is approximate (~).">~ parsed from notes →</span>`
+      // (#it5-p7f) no ordinal number on the chips — these are hedged (~) best-effort items with no
+      // grounded ordering, so a confident "1 · 2 · 3" would over-assert a sequence pi can't provide.
+      +shown.map(q=>`<span class="qchip">${esc(q)}</span>`).join("")
       +(more>0?`<span class="qmore">~${more} more planned</span>`:"")
       +`<span class="infg" title="Planned-next items are best-effort, parsed from the agent's notes — pi has no TodoWrite/plan primitive, so the count is approximate (~). A plan-tool extension writing CustomEntry items would make it exact.">i</span></div>`;
   }
   // state-matched verbs (#20e); sign rows expose the same one-click Sign off as the strip (#6)
-  const verb = s.status==="merge" ? "View" : (s.status==="run"||s.status==="loop") ? "Open" : s.status==="unset" ? "Define done" : "Continue";
+  // (#it6-p1) in a NAVIGATE-ONLY sign-off grid row, a sign session opens to "Review" instead of carrying
+  // a second Sign-off button — the canonical sign-off action stays in the lifted strip (carry-fwd #B).
+  const verb = (navOnly && s.status==="sign") ? "Review"
+    : s.status==="merge" ? "View" : (s.status==="run"||s.status==="loop") ? "Open" : s.status==="unset" ? "Define done" : "Continue";
   const primary = `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} ${verb}</button>`;
   let secondary="";
-  if(s.status==="sign") secondary=`<button class="btn sign sm" data-signoff="${s.id}">✓ Sign off</button>`;
+  if(s.status==="sign" && !navOnly) secondary=`<button class="btn sign sm" data-signoff="${s.id}">✓ Sign off</button>`;
+  // (#it6-p7a) failAction PRODUCTION DERIVATION (heuristic, no new pi primitive): keyed off the failing
+  // criterion / error from tool_execution_end — command-fail → "Re-run <cmd>", git conflicted → "Resolve
+  // conflict", an auth/401/token keyword → "Re-authenticate", default "Re-run". It only LABELS the resume
+  // button; it never gates anything and never asserts an alarm pi can't ground.
   else if(s.status==="fail") secondary=`<button class="btn ghost sm" data-open="${s.id}">${esc(s.failAction||"Re-run")}</button>`;
-  else if(s.status==="run"||s.status==="loop") secondary=`<button class="btn pause sm" data-pause="${s.id}">${pauseIcon()} Pause</button>`;
+  // no Pause control — a durable pause/resume needs an orchestrator pi can't ground (carry-fwd #D)
 
   const dodTxt = s.status==="unset" ? `<span style="color:var(--st-sign)">no criterion set — define what done means</span> ${srcTag(s.dodSrc)}`
     : dodInline(s.dod, s.dodSrc);
-  const loopTag = s.loop ? `<span class="loopBadge${s._loopWarn?' warn':''}"><span class="inf">∞</span> ${esc(s.meta||'looping')}${s._loopWarn?` · ${esc(s._loop.reason)}`:""}</span>` : "";
+  // de-noise (#6): when a row's DoD is IDENTICAL to its workstream's (same text + same source), the
+  // workstream header already states it — so suppress the repeated per-row line. It re-appears only on
+  // rows whose source/criteria DEVIATE (e.g. a sign-off or merged row inside a rule-based workstream).
+  const dodHoisted = w && w.status!=="unset" && s.status!=="unset" && s.dod===w.dod && s.dodSrc===w.dodSrc;
+  // live loop badge = elapsed only (from stored loopStartedAt); iter count / rhythm / budget are PROPOSED (#D)
+  const loopTag = s.loop ? `<span class="loopBadge"><span class="inf">∞</span> ${esc(loopElapsed(s.meta||'looping'))}</span>` : "";
+  // (#it6-p7b) a NON-elicited idle stop can't be PROVEN blocked — surface the honest "Idle · may be waiting"
+  // degradation (grey, no alarm hue), never a fabricated amber block. This is the only place it renders on a row.
+  const softTag = (s.status==="block" && !s.elicited) ? ` ${badge("block", true)}` : "";
 
   return `<div class="sess" data-open="${s.id}">
     ${dot}
     <div class="sess-main">
-      <div class="sess-top"><span class="sess-name">${esc(s.name)}</span> ${loopTag}</div>
+      <div class="sess-top"><span class="sess-name">${esc(s.name)}</span>${softTag} ${loopTag}</div>
       <div class="sess-live">${s.kind==='question'?'❔ ':''}${s.kind==='failed'?'⚠ ':''}<b>${esc(s.live)}</b>${(!s.loop&&s.meta&&s.kind!=='failed'&&s.status!=='block'&&s.status!=='unset')?` · ${esc(s.meta)}`:""}</div>
-      <div class="sess-dod">${dodTxt}</div>
+      ${dodHoisted?"":`<div class="sess-dod">${dodTxt}</div>`}
       ${artifact}
-      ${s.loop?budgetMeter(s):""}
       ${queue}
+      ${s.loop?proposedLoop(s):""}
     </div>
     <div class="sess-act" onclick="event.stopPropagation()">
       ${primary}
@@ -1988,7 +2249,8 @@ function renderPlanned(){
   const items=[]; Object.values(state.SESS).forEach(({s,w,p})=>{ if((s.status==="queued"||s.status==="planned") && !dorm.has(p.id)) items.push({s,w,p}); });
   const row = ({s,w,p}) => {
     const total=s.queueTotal||(s.queue?s.queue.length:0); const shown=(s.queue||[]).slice(0,3); const more=total-shown.length;
-    const plan = s.queue&&s.queue.length ? `<div class="qnext">`+shown.map((q,i)=>`<span class="qchip"><span class="qn">${i+1}</span>${esc(q)}</span>`).join("")+(more>0?`<span class="qmore">~${more} more planned</span>`:"")+`<span class="infg" title="Planned-next items are best-effort, parsed from the agent's notes — pi has no TodoWrite/plan primitive, so the count is approximate (~).">i</span></div>` : "";
+    // (#it6-p3) no qn ordinal — the notes-parse can't ground a sequence, so a confident 1·2·3 over-asserts order
+    const plan = s.queue&&s.queue.length ? `<div class="qnext"><span class="qsrc" title="pi has no TodoWrite/plan primitive — these items are best-effort parsed from the agent's notes, so the count is approximate (~).">~ parsed from notes →</span>`+shown.map(q=>`<span class="qchip">${esc(q)}</span>`).join("")+(more>0?`<span class="qmore">~${more} more planned</span>`:"")+`<span class="infg" title="Planned-next items are best-effort, parsed from the agent's notes — pi has no TodoWrite/plan primitive, so the count is approximate (~).">i</span></div>` : "";
     return `<div class="drow" data-open="${s.id}">
       <div class="dleft">
         <div class="dcrumb"><b>${esc(p.name)}</b>${p.nest?` <span class="nest">⤷ ${esc(p.nest)}</span>`:""} › ${esc(w.name)}</div>
@@ -2078,9 +2340,9 @@ function onboardHtml(candidates){
     <div class="disc">
       pi found <b>${candidates} recent session folder${candidates>1?"s":""}</b> that look like projects. Add them with one tap:
       <div class="cands">
-        <div class="cand"><span class="dotstrip"><span class="d merge"></span></span><span class="cpath mono">~/workspace/oss/pi-web</span><span class="cmeta">git · 12 sessions</span><button class="btn ghost sm">Add</button></div>
-        <div class="cand"><span class="dotstrip"><span class="d merge"></span></span><span class="cpath mono">~/workspace/wealthlens</span><span class="cmeta">git · 8 sessions</span><button class="btn ghost sm">Add</button></div>
-        <div class="cand"><span class="dotstrip"><span class="d idle"></span></span><span class="cpath mono">~/zippy</span><span class="cmeta">git · 5 sessions</span><button class="btn ghost sm">Add</button></div>
+        <div class="cand"><span class="candglyph" title="unregistered folder — no rollup, status or DoD computed yet" style="color:var(--muted);display:inline-flex;align-items:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="15" height="15"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></svg></span><span class="cpath mono">~/workspace/oss/pi-web</span><span class="cmeta">git · 12 sessions</span><button class="btn ghost sm">Add</button></div>
+        <div class="cand"><span class="candglyph" title="unregistered folder — no rollup, status or DoD computed yet" style="color:var(--muted);display:inline-flex;align-items:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="15" height="15"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></svg></span><span class="cpath mono">~/workspace/wealthlens</span><span class="cmeta">git · 8 sessions</span><button class="btn ghost sm">Add</button></div>
+        <div class="cand"><span class="candglyph" title="unregistered folder — no rollup, status or DoD computed yet" style="color:var(--muted);display:inline-flex;align-items:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="15" height="15"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></svg></span><span class="cpath mono">~/zippy</span><span class="cmeta">git · 5 sessions</span><button class="btn ghost sm">Add</button></div>
       </div>
     </div>` : `
     <div class="disc">No sessions yet — once you start one, pi will offer to roll its folder up into a project automatically.</div>`;
@@ -2094,7 +2356,12 @@ function onboardHtml(candidates){
       <span class="node">Session</span><span class="arr">·</span>
       <span class="node">Definition of Done</span>
     </div>
-    <p style="font-size:12px">Each workstream tracks a <b style="color:var(--text)">Definition of Done</b> — merged to main, tests passing, or your sign-off — and a ring shows progress toward it.</p>
+    <ol class="obsteps">
+      <li><b>Register a project</b> — point pi-web at a folder (a git repo or any cwd). Its sessions roll up automatically by longest-path match.</li>
+      <li><b>Attach sessions to a workstream</b> — group a project's sessions into a workstream (e.g. "auth", "billing"). pi-web infers them by cwd, or you attach them explicitly.</li>
+      <li><b>Set a Definition of Done</b> — pick what "done" means: merged into local main, a test command passing, or your manual sign-off. A ring shows honest k-of-n progress toward it.</li>
+    </ol>
+    <p style="font-size:12px">No project, workstream, or DoD exists in pi itself — pi-web owns them in a sidecar, so they survive even when a session is disposed.</p>
     <div class="actions">
       <button class="btn primary" id="obAdd">${plusIcon()} Add a project</button>
       <button class="btn" id="obStart">${continueIcon()} Start your first session</button>
@@ -2147,13 +2414,13 @@ function transcript(s,w,p){
     body += ai(tool("cron · run","$ node sync.js\n→ refreshing token\n✗ 401 invalid_grant: token expired or revoked", false)
       + `<div class="ferr"><b>⚠ Failed — ${esc(s.live)}</b><br>I can resume the moment you ${esc((s.failAction||'re-run').toLowerCase())}. Nothing else is blocked on this.</div>`);
   } else if(s.status==="loop"){
-    body += `<div class="m sys">Autonomous loop · ${esc(s.meta||'looping')} · DoD: ${esc(s.dod)}</div>`;
+    body += `<div class="m sys">Autonomous loop · ${esc(loopElapsed(s.meta||'looping'))} · DoD: ${esc(s.dod)}</div>`;
     body += ai(think("Thought · picking the next item","Open-ended loop. I work the highest-signal item, re-evaluate, and append new findings. Stopping condition is the DoD, not a fixed list.")
       + tool("run · latest iteration","… progress this iteration", false)
-      + `<p>${esc(s.live)} I will keep looping until the DoD is met, staying within budget.</p>`);
+      + `<p>${esc(s.live)} I will keep looping until the Definition of Done is met.</p>`);
     if(s.queue){
       const total=s.queueTotal||s.queue.length; const shown=s.queue.slice(0,3); const more=total-shown.length;
-      body += `<div class="m ai"><div class="tcard open"><div class="tcard-h" data-tc><span class="ic">≡</span><span class="ti">Planned next (~${total} queued, growing · best-effort)</span><span class="cv">${chevIcon()}</span></div><div class="tcard-b">`+shown.map((q,i)=>`${i+1}. ${esc(q)}`).join("\n")+(more>0?`\n… ~${more} more — growth is expected for an open-ended loop`:"")+`</div></div></div>`;
+      body += `<div class="m ai"><div class="tcard open"><div class="tcard-h" data-tc><span class="ic">≡</span><span class="ti">Planned next (~${total} queued, growing · best-effort)</span><span class="cv">${chevIcon()}</span></div><div class="tcard-b">`+shown.map(q=>`· ${esc(q)}`).join("\n")+(more>0?`\n… ~${more} more — growth is expected for an open-ended loop`:"")+`</div></div></div>`;
     }
   } else if(s.status==="run"){
     body += userMsg("Work on this for me.");
@@ -2167,19 +2434,32 @@ function transcript(s,w,p){
     const merged = s.status==="merge";
     body += userMsg(`Build ${esc(s.name)}.`);
     body += ai(think("Thought · wrapping up","Implementation is complete and the Definition of Done is satisfied. Surfacing the verification artifact so you can confirm at a glance.")
-      + `<p>${esc(s.live)} ${merged?'It is merged to mainline and the check passed.':'Every evaluable criterion is green (100%); only your sign-off gate remains.'}</p>`
+      + `<p>${esc(s.live)} ${merged?'It is merged into local main and the check passed.':'Every evaluable criterion is green (100%); only your sign-off gate remains.'}</p>`
       + artifactPreview(s));
   } else {
     body += `<div class="m sys">DoD: ${esc(s.dod)} · ${esc(s.dodSrc)}</div>`;
     if(s.queue && s.queue.length){
       body += ai(`<p>${esc(s.live)} Here is the plan I will run once you say go (best-effort, parsed from my notes):</p>`
-        + `<div class="tcard open"><div class="tcard-h" data-tc><span class="ic">≡</span><span class="ti">Plan</span><span class="cv">${chevIcon()}</span></div><div class="tcard-b">`+s.queue.map((q,i)=>`${i+1}. ${esc(q)}`).join("\n")+`</div></div>`);
+        + `<div class="tcard open"><div class="tcard-h" data-tc><span class="ic">≡</span><span class="ti">Plan</span><span class="cv">${chevIcon()}</span></div><div class="tcard-b">`+s.queue.map(q=>`· ${esc(q)}`).join("\n")+`</div></div>`);
     } else { body += ai(`<p>${esc(s.live)}</p>`); }
   }
   return body;
 }
 
+/* (#it6-p7c) a check is either a COMMAND (real exit code) or a MANUAL/visual review (no exit code exists).
+   A manual check rendered as "exit 0" fakes a command result — so a manual check ({kind:'manual'} or a
+   visual/manual/review cmd) shows "reviewed", and only a real command shows "exit N". */
+function isManualCheck(ch){ return !!ch && (ch.kind==="manual" || /visual|manual|review/i.test(ch.cmd||"")); }
+function checkChip(ch){
+  if(!ch) return "";
+  return isManualCheck(ch)
+    ? `<span class="ok">✓ ${esc(ch.cmd)} · reviewed</span>`
+    : `<span class="ok">✓ ${esc(ch.cmd)} ${ch.exit===0?'exit 0':'exit '+ch.exit} · ${esc(ch.at||'')}</span>`;
+}
 function artifactPreview(s){
+  // (#it5-p7b) MOCK-ONLY rendering: the diff-hunk lines below and the doc-markdown body are hardcoded
+  // fixture content for the mockup. In production: the diff comes from GET /api/git/commit (numstat +
+  // patch, spec §4.1) and the doc body from the session's write/edit tool_result entries — never synthesized.
   const a=s.artifact; if(!a) return "";
   if(a.kind==="doc"){
     return `<div class="art"><div class="art-h"><span class="at">${esc(a.note)}</span><span style="color:var(--muted)">${a.files} file${a.files>1?"s":""} · no repo</span><span class="ok">✓ user-reviewed</span></div>
@@ -2190,23 +2470,26 @@ function artifactPreview(s){
       </div></div></div>`;
   }
   if(a.kind==="spark"){
-    return `<div class="art"><div class="art-h"><span class="at">${esc(a.note||'chart')}</span><span style="color:var(--muted)">${esc(a.branch)} · +${a.add}/−${a.del}</span><span class="ok">✓ ${esc(a.check?a.check.cmd:'visual')}</span></div>
+    return `<div class="art"><div class="art-h"><span class="at">${esc(a.note||'chart')}</span><span style="color:var(--muted)">${esc(a.branch)} · +${a.add}/−${a.del}</span>${a.check?checkChip(a.check):`<span class="ok">✓ visual · reviewed</span>`}</div>
       <div class="art-b">
+        <!-- (#it5-p7h) artifact preview chart in a NEUTRAL stroke, not status-cyan: it is the rendered
+             output of the work, not a live STATUS signal, so it must not borrow the running hue (#2). -->
         <svg class="spark" viewBox="0 0 320 96" preserveAspectRatio="none">
-          <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7dd3fc" stop-opacity=".35"/><stop offset="1" stop-color="#7dd3fc" stop-opacity="0"/></linearGradient></defs>
+          <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--muted)" stop-opacity=".28"/><stop offset="1" stop-color="var(--muted)" stop-opacity="0"/></linearGradient></defs>
           <path d="M0 70 L40 64 L80 58 L120 48 L160 52 L200 38 L240 30 L280 22 L320 14 L320 96 L0 96 Z" fill="url(#sg)"/>
-          <path d="M0 70 L40 64 L80 58 L120 48 L160 52 L200 38 L240 30 L280 22 L320 14" fill="none" stroke="#7dd3fc" stroke-width="2"/>
+          <path d="M0 70 L40 64 L80 58 L120 48 L160 52 L200 38 L240 30 L280 22 L320 14" fill="none" stroke="var(--muted)" stroke-width="2"/>
         </svg>
         <div style="margin-top:8px;color:var(--muted);font-size:12px">Net worth, last 12 months — D3 replaced with an inline sparkline (38kb → 1.2kb).</div>
       </div></div>`;
   }
   const merged=a.merged;
-  return `<div class="art"><div class="art-h"><span class="at">${merged?`merged · ${esc(a.sha)}`:esc(a.branch)}</span> <span style="color:var(--muted)">+${a.add}/−${a.del}${a.ahead?` · ahead ${a.ahead}`:""}</span>${a.check?`<span class="ok">✓ ${esc(a.check.cmd)} ${a.check.exit===0?'exit 0':'exit '+a.check.exit} · ${esc(a.check.at)}</span>`:""}</div>
+  const manualCk = isManualCheck(a.check);
+  return `<div class="art"><div class="art-h"><span class="at">${merged?`merged · ${esc(a.sha)}`:esc(a.branch)}</span> <span style="color:var(--muted)">+${a.add}/−${a.del}${a.ahead?` · ahead ${a.ahead}`:""}</span>${checkChip(a.check)}</div>
     <div class="art-b"><div class="diff">
       <div class="ctx">@@ ${esc(s.name)} @@  ${merged?`(merge-base --is-ancestor: ✓)`:`(branch ${esc(a.branch)})`}</div>
       <div class="del">- legacy path with no verification</div>
       <div class="add">+ verified implementation · ${a.add} insertions</div>
-      <div class="add">+ ${a.check?`${esc(a.check.cmd)} → exit ${a.check.exit}`:'checks recorded'}</div>
+      <div class="add">+ ${a.check?(manualCk?`${esc(a.check.cmd)} → reviewed`:`${esc(a.check.cmd)} → exit ${a.check.exit}`):'checks recorded'}</div>
     </div>
     <div style="margin-top:8px;color:var(--muted);font-size:11px">Grounded in <span class="mono">git numstat</span> (+${a.add}/−${a.del})${merged?` and <span class="mono">git merge-base --is-ancestor</span>`:` on <span class="mono">${esc(a.branch)}</span>`}${a.check?` · check via on-demand command DoD`:""}.</div>
     </div></div>`;
@@ -2221,7 +2504,7 @@ function openSession(id, prefill){
   if(s.status==="sign") secActions=`<button class="btn sign sm" data-signoff="${s.id}">✓ Sign off</button><span class="lab">then</span>${mergeAffordance(s)}`;
   else if(s.status==="merge") secActions=`<span class="lab">Or:</span><button class="btn ghost sm">Open merge ${esc((s.artifact||{}).sha||'')}</button>`;
   else if(s.status==="fail") secActions=`<span class="lab">Or:</span><button class="btn ghost sm">${esc(s.failAction||'Re-run')}</button>`;
-  else if(s.status==="run"||s.status==="loop") secActions=`<span class="lab">Or:</span><button class="btn ghost sm">${pauseIcon()} Pause loop</button>`;
+  // run/loop: no durable Pause control (carry-fwd #D) — steer the loop by continuing the conversation
   else if(s.status==="unset") secActions=`<span class="lab">Or:</span><button class="btn ghost sm">Pick a git / test rule</button>`;
 
   // quick-reply chips ONLY for structured elicitations (#12)
@@ -2311,12 +2594,6 @@ function closeConv(){
 
 /* ─────────────────────────── events ─────────────────────────── */
 document.addEventListener("click", e=>{
-  const pause = e.target.closest("[data-pause]");
-  if(pause){ e.preventDefault(); e.stopPropagation(); const on=pause.getAttribute("data-paused")==="1";
-    pause.setAttribute("data-paused", on?"0":"1");
-    pause.innerHTML = on ? `${pauseIcon()} Pause` : `${continueIcon()} Resume`;
-    return; }
-
   const reply = e.target.closest("[data-reply]");
   if(reply){ e.preventDefault(); e.stopPropagation(); openSession(reply.getAttribute("data-reply"), reply.getAttribute("data-text")); return; }
 
@@ -2342,7 +2619,7 @@ document.addEventListener("click", e=>{
     } return; }
 
   if(e.target.closest("#focusBtn")){
-    const items=[]; Object.values(state.SESS).forEach(({s})=>{ if(isNeed(s.status)) items.push(s); });
+    const items=[]; Object.values(state.SESS).forEach(({s})=>{ if(isNeed(s)) items.push(s); });
     items.sort((a,b)=> blastRank(blastRadius(a))-blastRank(blastRadius(b)) || (a.status==="block"?0:1)-(b.status==="block"?0:1));
     state.focus={ids:items.map(s=>s.id), i:0}; openSession(state.focus.ids[0]); return;
   }
