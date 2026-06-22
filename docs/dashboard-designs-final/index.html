@@ -1,0 +1,2382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>pi · home — Project Rollups</title>
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#0b0f14; --panel:#111821; --panel-2:#17212d; --border:#263342;
+  --text:#e7edf5; --muted:#93a4b8; --accent:#7dd3fc; --danger:#fb7185;
+  /* state palette — rationed strictly to STATUS (never decoration / source / lineage) */
+  --st-run:#7dd3fc;   /* running / looping  */
+  --st-block:#facc15; /* blocked · needs input */
+  --st-fail:#fb7185;  /* failed */
+  --st-sign:#c084fc;  /* done · awaiting sign-off */
+  --st-merge:#4ade80; /* completed · merged */
+  --st-idle:#7e93aa;  /* queued / planned / dormant */
+  --seg-off:rgba(125,146,170,.26); /* unmet criterion segment */
+}
+*{box-sizing:border-box;}
+html,body{margin:0;height:100%;}
+body{
+  background: radial-gradient(circle at 50% -8%, #142032 0, var(--bg) 46rem);
+  color:var(--text);
+  /* type scale: 11 / 12 / 13 / 15 / 20 / 30 · weights 450 / 650 / 800 */
+  font:13px/1.55 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight:450;
+  -webkit-font-smoothing:antialiased;
+  overflow-y:auto;
+}
+button{font:inherit;cursor:pointer;color:inherit;}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+
+/* ───────────── shell ───────────── */
+.topbar{
+  position:sticky;top:0;z-index:30;
+  display:flex;align-items:center;gap:10px;
+  height:46px;padding:0 26px;
+  background:color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid color-mix(in srgb,var(--border) 70%, transparent);
+}
+.brand{display:flex;align-items:center;gap:8px;font-weight:800;letter-spacing:.02em;font-size:15px;}
+.brand .dot{width:9px;height:9px;border-radius:999px;background:var(--accent);box-shadow:0 0 12px var(--accent);}
+.brand .sub{color:var(--muted);font-weight:650;font-size:11px;text-transform:uppercase;letter-spacing:.14em;}
+.topbar .spacer{flex:1;}
+.tbtn{display:inline-grid;place-items:center;width:30px;height:30px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);}
+.tbtn:hover{color:var(--accent);background:var(--panel-2);}
+.tbtn svg{width:16px;height:16px;}
+/* scenario switcher (mockup-only control) */
+.scn{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 6px 0 11px;border:1px solid var(--border);border-radius:8px;background:var(--panel-2);color:var(--muted);font-size:12px;font-weight:650;}
+.scn .lab{text-transform:uppercase;letter-spacing:.1em;font-size:11px;color:color-mix(in srgb,var(--muted) 70%,transparent);}
+.scn select{appearance:none;border:0;background:transparent;color:var(--text);font:inherit;font-weight:650;font-size:12px;padding:0 4px;outline:none;cursor:pointer;}
+.scn svg{width:13px;height:13px;color:var(--muted);}
+
+.wrap{max-width:1200px;margin:0 auto;padding:30px 26px 90px;}
+
+/* ───────────── hero ───────────── */
+.hero{margin:8px 0 18px;}
+.eyebrow{color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.22em;text-transform:uppercase;margin-bottom:12px;}
+.headline{font-size:30px;line-height:1.18;font-weight:800;letter-spacing:-.02em;margin:0 0 10px;max-width:780px;}
+.headline em{font-style:normal;color:var(--st-block);}
+.headline em.calm{color:var(--st-run);}
+.subline{color:var(--muted);font-size:13px;max-width:760px;}
+.subline b{color:var(--text);font-weight:650;}
+/* since-last-visit delta (#1,#11) — demoted from a bordered band to one muted clause on the subline */
+.subline .delta{color:color-mix(in srgb,var(--muted) 90%,transparent);}
+.subline .delta::before{content:"·";margin:0 7px;color:color-mix(in srgb,var(--muted) 50%,transparent);}
+.subline .delta b{color:var(--text);font-weight:650;}
+.subline .delta .sep{color:color-mix(in srgb,var(--muted) 50%,transparent);margin:0 2px;}
+.subline .delta .net{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;}
+.subline .delta .net .a{color:color-mix(in srgb,var(--st-merge) 85%,var(--muted));} .subline .delta .net .d{color:color-mix(in srgb,var(--st-fail) 80%,var(--muted));}
+/* tally rail — fleet summary that doubles as jump-links (Calm Console graft) */
+.rail{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;}
+.pill{
+  display:inline-flex;align-items:center;gap:7px;
+  height:28px;padding:0 11px;border:1px solid var(--border);border-radius:999px;
+  background:color-mix(in srgb,var(--panel) 70%, transparent);
+  color:var(--muted);font-size:12px;font-weight:650;transition:border-color .14s ease,color .14s ease;
+}
+.pill[data-jump]{cursor:pointer;}
+.pill[data-jump]:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--border));color:var(--text);}
+.pill .n{color:var(--text);font-weight:800;}
+/* swatch is decorative ink (#10): rendered ONLY on the pills that carry hue (sign, warn) */
+.pill .sw{width:8px;height:8px;border-radius:999px;background:var(--st-idle);}
+/* hue rationed (#2): only the ACTIONABLE Sign-off pill + a stalled-loop warning pill carry colour */
+.pill.sign{color:var(--st-sign);border-color:color-mix(in srgb,var(--st-sign) 34%,var(--border));}
+.pill.sign .sw{background:var(--st-sign);}
+.pill.sign .n{color:var(--st-sign);}
+.pill.sign:hover{border-color:color-mix(in srgb,var(--st-sign) 60%,var(--border));}
+.pill.warn{color:var(--st-block);border-color:color-mix(in srgb,var(--st-block) 38%,var(--border));}
+.pill.warn .sw{background:var(--st-block);}
+.pill.warn .n{color:var(--st-block);}
+.pill.warn:hover{border-color:color-mix(in srgb,var(--st-block) 60%,var(--border));}
+/* delta digest fragments are jump-links (#7) */
+.subline .delta a{color:color-mix(in srgb,var(--text) 90%,transparent);cursor:pointer;border-bottom:1px dotted color-mix(in srgb,var(--muted) 45%,transparent);}
+.subline .delta a:hover{color:var(--accent);border-bottom-color:var(--accent);}
+.subline .delta b{color:var(--text);font-weight:650;}
+
+/* ───────────── section heads ───────────── */
+.shead{display:flex;align-items:baseline;gap:10px;margin:32px 0 14px;scroll-margin-top:60px;}
+/* jump targets clear the sticky topbar (#9,#10) */
+.done,.grpcard,.pcard,.prow{scroll-margin-top:60px;}
+.shead h2{margin:0;font-size:13px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);}
+.shead .cnt{font-size:12px;color:color-mix(in srgb,var(--muted) 75%,transparent);}
+.shead .hint{margin-left:auto;font-size:12px;color:color-mix(in srgb,var(--muted) 65%,transparent);}
+.shead .hbtn{margin-left:auto;display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 11px;border-radius:999px;
+  border:1px solid color-mix(in srgb,var(--st-block) 40%,var(--border));background:color-mix(in srgb,var(--st-block) 9%,transparent);color:var(--st-block);font-size:12px;font-weight:650;}
+.shead .hbtn:hover{background:color-mix(in srgb,var(--st-block) 16%,transparent);}
+.shead .hbtn svg{width:13px;height:13px;}
+/* purple batch action for the sign-off section header (#1) */
+.shead .hbtn.sgn{border-color:color-mix(in srgb,var(--st-sign) 42%,var(--border));background:color-mix(in srgb,var(--st-sign) 10%,transparent);color:var(--st-sign);}
+.shead .hbtn.sgn:hover{background:color-mix(in srgb,var(--st-sign) 18%,transparent);}
+
+/* ───────────── needs you ───────────── */
+.needs{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+.needs.single{grid-template-columns:minmax(360px,620px);}  /* one need → natural width, no empty sibling (#19) */
+.need{
+  position:relative;border:1px solid var(--border);border-radius:14px;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--panel-2) 92%,transparent),var(--panel));
+  padding:15px 16px 14px;display:flex;flex-direction:column;gap:11px;
+  overflow:hidden;
+}
+.need::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;}
+.need.block::before{background:var(--st-block);}
+.need.fail::before{background:var(--st-fail);}
+.need .crumb{font-size:11px;color:var(--muted);}
+.need .crumb b{color:var(--text);font-weight:650;}
+.need .sname{font-size:15px;font-weight:800;letter-spacing:-.01em;display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
+.need .ask{
+  font-size:13px;color:var(--text);line-height:1.5;
+  padding:10px 12px;border-radius:10px;border:1px solid color-mix(in srgb,var(--border) 80%,transparent);
+  background:color-mix(in srgb,var(--bg) 55%,transparent);
+}
+.need.block .ask{border-color:color-mix(in srgb,var(--st-block) 34%,var(--border));}
+.need.fail  .ask{border-color:color-mix(in srgb,var(--st-fail) 34%,var(--border));color:#ffd9df;}
+/* blast tag (#16) — hue FOLLOWS the item's own status so one card never shows two alarm colours.
+   block item → amber, fail item → red; magnitude (high/elevated) lives in the LABEL, not a 3rd hue. */
+.blast{display:inline-flex;align-items:center;gap:5px;height:18px;padding:0 7px;border-radius:5px;font-size:11px;font-weight:650;
+  letter-spacing:.02em;color:var(--muted);border:1px solid color-mix(in srgb,var(--border) 85%,transparent);}
+.blast.block{color:var(--st-block);border-color:color-mix(in srgb,var(--st-block) 38%,transparent);background:color-mix(in srgb,var(--st-block) 8%,transparent);}
+.blast.fail{color:var(--st-fail);border-color:color-mix(in srgb,var(--st-fail) 40%,transparent);background:color-mix(in srgb,var(--st-fail) 9%,transparent);}
+/* DoD source label (#8) — borderless passive metadata: a leading middot + plain muted text.
+   Bordered pills are reserved for things you can click; a source label is not interactive. */
+.srcTag{
+  display:inline-flex;align-items:center;
+  font-size:12px;font-weight:450;letter-spacing:0;color:var(--muted);background:transparent;white-space:nowrap;
+}
+.srcTag::before{content:"·";margin:0 5px 0 1px;color:color-mix(in srgb,var(--muted) 50%,transparent);}
+.lbl{color:color-mix(in srgb,var(--muted) 80%,transparent);font-weight:800;text-transform:uppercase;letter-spacing:.05em;font-size:11px;}
+/* quick-reply chips — prefill the composer so answering IS continuing (Calm Console graft) */
+.qreply{display:flex;flex-wrap:wrap;gap:7px;align-items:center;}
+.qreply .qlbl{font-size:11px;color:color-mix(in srgb,var(--muted) 75%,transparent);margin-right:1px;font-weight:650;}
+.qreply button{border:1px solid var(--border);border-radius:999px;padding:5px 11px;font-size:12px;color:var(--text);background:var(--panel-2);font-weight:650;}
+.qreply button:hover{border-color:var(--accent);color:var(--accent);}
+.need .actions{display:flex;gap:8px;align-items:center;margin-top:2px;flex-wrap:wrap;}
+.degraded{font-size:11px;color:color-mix(in srgb,var(--muted) 80%,transparent);font-style:italic;}
+
+/* compact overflow need rows (the "+N more" stepper) */
+.needmore{margin-top:4px;border:1px dashed color-mix(in srgb,var(--border) 90%,transparent);border-radius:12px;overflow:hidden;}
+.needmore-h{display:flex;align-items:center;gap:9px;padding:11px 14px;cursor:pointer;color:var(--muted);font-size:12px;font-weight:650;}
+.needmore-h:hover{background:color-mix(in srgb,var(--text) 3%,transparent);}
+.needmore-h b{color:var(--text);font-weight:800;}
+.needmore-h .chev{margin-left:auto;}
+.needmore.open .needmore-h .chev{transform:rotate(90deg);}
+.needmore-b{display:none;padding:2px 8px 8px;}
+.needmore.open .needmore-b{display:block;}
+.needrow{display:flex;align-items:center;gap:11px;padding:10px 8px;border-top:1px solid color-mix(in srgb,var(--border) 50%,transparent);}
+.needrow:first-child{border-top:0;}
+.needrow .nleft{flex:1;min-width:0;}
+.needrow .ncrumb{font-size:11px;color:var(--muted);}
+.needrow .ncrumb b{color:var(--text);font-weight:650;}
+.needrow .nq{font-size:12px;color:color-mix(in srgb,var(--text) 88%,transparent);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+/* status badge */
+.badge{display:inline-flex;align-items:center;gap:6px;height:21px;padding:0 9px;border-radius:999px;
+  font-size:11px;font-weight:650;border:1px solid transparent;white-space:nowrap;}
+.badge .d{width:7px;height:7px;border-radius:999px;}
+.badge.block{color:var(--st-block);border-color:color-mix(in srgb,var(--st-block) 40%,transparent);background:color-mix(in srgb,var(--st-block) 11%,transparent);}
+.badge.block .d{background:var(--st-block);}
+.badge.fail{color:var(--st-fail);border-color:color-mix(in srgb,var(--st-fail) 42%,transparent);background:color-mix(in srgb,var(--st-fail) 11%,transparent);}
+.badge.fail .d{background:var(--st-fail);}
+.badge.run{color:var(--st-run);border-color:color-mix(in srgb,var(--st-run) 40%,transparent);background:color-mix(in srgb,var(--st-run) 10%,transparent);}
+.badge.run .d{background:var(--st-run);}
+.badge.sign{color:var(--st-sign);border-color:color-mix(in srgb,var(--st-sign) 42%,transparent);background:color-mix(in srgb,var(--st-sign) 11%,transparent);}
+.badge.sign .d{background:var(--st-sign);}
+.badge.merge{color:var(--st-merge);border-color:color-mix(in srgb,var(--st-merge) 42%,transparent);background:color-mix(in srgb,var(--st-merge) 11%,transparent);}
+.badge.merge .d{background:var(--st-merge);}
+.badge.idle{color:var(--st-idle);border-color:color-mix(in srgb,var(--st-idle) 38%,transparent);background:color-mix(in srgb,var(--st-idle) 9%,transparent);}
+.badge.idle .d{background:var(--st-idle);}
+.badge.unset{color:var(--st-sign);border-color:color-mix(in srgb,var(--st-sign) 38%,transparent);background:transparent;}
+.badge.unset .d{background:transparent;box-shadow:inset 0 0 0 1.4px var(--st-sign);}
+.badge.paused{color:var(--st-block);border-color:color-mix(in srgb,var(--st-block) 32%,transparent);background:transparent;}
+.badge.paused .d{background:transparent;box-shadow:inset 0 0 0 1.4px var(--st-block);}
+.loopBadge{display:inline-flex;align-items:center;gap:5px;height:21px;padding:0 8px;border-radius:999px;
+  font-size:11px;font-weight:800;letter-spacing:.02em;color:var(--st-run);
+  border:1px solid color-mix(in srgb,var(--st-run) 38%,transparent);background:color-mix(in srgb,var(--st-run) 9%,transparent);}
+.loopBadge .inf{font-size:13px;line-height:1;}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;border-radius:9px;
+  border:1px solid var(--border);background:var(--panel-2);color:var(--text);font-size:12px;font-weight:650;}
+.btn:hover{border-color:var(--accent);}
+.btn svg{width:14px;height:14px;}
+.btn.primary{background:#0f4c75;border-color:#256b97;color:#dff1ff;font-weight:800;}
+.btn.primary:hover{border-color:var(--accent);background:#125b8c;}
+.btn.ghost{background:transparent;color:var(--muted);}
+.btn.ghost:hover{color:var(--text);border-color:color-mix(in srgb,var(--border) 90%,transparent);}
+.btn.sm{height:29px;padding:0 10px;font-size:12px;}
+.btn.pause{background:transparent;color:var(--muted);border-style:dashed;}
+.btn.pause:hover{color:var(--st-run);border-color:color-mix(in srgb,var(--st-run) 40%,transparent);border-style:solid;}
+
+/* dot-strip (Status Lanes graft) — colourblind-safe via SHAPE channel (#15) */
+.dotstrip{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;}
+.dotstrip .d{position:relative;width:8px;height:8px;border-radius:999px;background:currentColor;color:var(--st-idle);}
+.dotstrip .d.run,.dotstrip .d.loop{color:var(--st-run);border-radius:999px;}     /* solid circle */
+.dotstrip .d.merge{color:var(--st-merge);border-radius:999px;}                    /* solid circle */
+.dotstrip .d.block{color:var(--st-block);border-radius:1px;}                      /* square */
+.dotstrip .d.sign{color:var(--st-sign);border-radius:1px;transform:rotate(45deg);} /* diamond */
+.dotstrip .d.idle{background:transparent;box-shadow:inset 0 0 0 1.6px currentColor;color:var(--st-idle);} /* hollow ring */
+.dotstrip .d.fail{color:var(--st-fail);background:transparent;}                   /* × glyph */
+.dotstrip .d.fail::after{content:"\00d7";position:absolute;inset:-3px 0 0;font-size:12px;line-height:1;font-weight:800;text-align:center;color:var(--st-fail);}
+
+/* ───────────── project grid ───────────── */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px;align-items:start;}
+.grid.single{grid-template-columns:minmax(360px,560px);justify-content:center;}
+.pcard{
+  border:1px solid var(--border);border-radius:16px;background:var(--panel);
+  overflow:hidden;transition:border-color .15s ease;
+}
+.pcard:hover{border-color:color-mix(in srgb,var(--accent) 30%,var(--border));}
+.pcard.open{border-color:color-mix(in srgb,var(--accent) 36%,var(--border));}
+.pcard-head{display:flex;align-items:flex-start;gap:12px;padding:16px 16px 12px;cursor:pointer;}
+.pcard-id{flex:1;min-width:0;}
+.pname{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:800;letter-spacing:-.01em;flex-wrap:wrap;}
+/* lineage badge neutral (#5) */
+.nest{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 7px;border-radius:5px;font-size:11px;font-weight:650;
+  letter-spacing:0;color:var(--muted);border:1px solid color-mix(in srgb,var(--border) 92%,transparent);background:transparent;}
+.ppath{font-size:12px;color:var(--muted);margin-top:3px;}
+.pcard-counts{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;}
+.chev{color:var(--muted);transition:transform .18s ease;display:inline-grid;place-items:center;width:20px;height:20px;}
+.pcard.open .chev{transform:rotate(90deg);}
+.countpill{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:999px;font-size:11px;font-weight:650;border:1px solid var(--border);background:transparent;color:var(--muted);}
+.countpill.sgn{color:var(--st-sign);border-color:color-mix(in srgb,var(--st-sign) 38%,transparent);background:color-mix(in srgb,var(--st-sign) 9%,transparent);}
+.countpill.run{color:var(--st-run);border-color:color-mix(in srgb,var(--st-run) 38%,transparent);background:color-mix(in srgb,var(--st-run) 9%,transparent);}
+.countpill.calm{color:var(--muted);}
+/* jump-link count pill — Needs-you owns the alarm, this just points there (#6) */
+.countpill.jump{cursor:pointer;color:var(--muted);border-style:dashed;}
+.countpill.jump:hover{color:var(--st-block);border-color:color-mix(in srgb,var(--st-block) 40%,transparent);}
+
+/* rings row (collapsed summary) */
+.rings{display:flex;gap:12px;padding:4px 16px 14px;flex-wrap:wrap;align-items:flex-start;}
+.ringcell{display:flex;flex-direction:column;align-items:center;gap:6px;width:70px;text-align:center;position:relative;}
+.ring{width:54px;height:54px;display:block;}  /* bumped 46→54 so 4–6 segments stay crisp (#15) */
+.ringcell .wsn{font-size:11px;line-height:1.2;color:var(--muted);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+/* surfaced (already in Needs-you): keep the ring SALIENT so attention doesn't invert onto the
+   quietest cell (#11) — dashed amber outline + amber label + an ↑ marker that jumps up. */
+.ringcell.surfaced .wsn{color:var(--st-block);font-weight:650;}
+.ringcell.surfaced .ring{outline:1.5px dashed color-mix(in srgb,var(--st-block) 55%,transparent);outline-offset:2px;border-radius:999px;}
+.upmark{position:absolute;top:-3px;right:2px;font-size:10px;font-weight:800;color:var(--st-block);background:var(--panel);
+  border:1px solid color-mix(in srgb,var(--st-block) 45%,var(--border));border-radius:7px;padding:0 4px;line-height:15px;}
+/* neutral 'evaluating' ring (#5) — phase-2 DoD stream / on-demand re-check: pulsing track, no number, no hue */
+.ring-track.eval{animation:ringpulse 1.3s ease-in-out infinite;stroke:color-mix(in srgb,var(--accent) 55%,var(--border));}
+@keyframes ringpulse{0%,100%{opacity:.3;}50%{opacity:.95;}}
+@media (prefers-reduced-motion: reduce){ .ring-track.eval{animation:none;opacity:.6;} }
+/* all workstreams surfaced → collapse the ghost-ring row to a single honest line (#13) */
+.surfline{display:flex;align-items:center;gap:9px;padding:6px 16px 14px;color:var(--muted);font-size:12px;}
+.surfline .sq{width:8px;height:8px;border-radius:2px;background:var(--st-block);flex-shrink:0;}
+.surfline b{color:var(--text);font-weight:650;}
+.surfline .jump{margin-left:auto;color:var(--muted);border:1px dashed var(--border);border-radius:999px;padding:3px 10px;background:transparent;font-size:11px;font-weight:650;}
+.surfline .jump:hover{color:var(--st-block);border-color:color-mix(in srgb,var(--st-block) 40%,transparent);}
+.ring-track{fill:none;stroke:color-mix(in srgb,var(--border) 90%,transparent);stroke-width:3.2;}
+.ring-fill{fill:none;stroke-width:3.4;stroke-linecap:round;transition:stroke-dashoffset .5s ease;}
+.ring-dot{fill:none;stroke:color-mix(in srgb,var(--st-idle) 60%,transparent);stroke-width:3.2;stroke-dasharray:0.1 5.6;stroke-linecap:round;}
+.ring-num{font:800 11px ui-sans-serif,system-ui;fill:var(--text);}
+.ring-gly{font:800 13px ui-sans-serif,system-ui;}
+.ring-shape{fill:none;stroke-width:2.4;}  /* colourblind-safe status shape overlaid on the ring (#13) */
+
+/* clickable live one-liner (#9) — Continue is one click from the card face */
+.oneliner{display:flex;align-items:center;gap:9px;padding:10px 12px 10px 16px;border-top:1px solid color-mix(in srgb,var(--border) 60%,transparent);
+  color:var(--muted);font-size:12px;background:color-mix(in srgb,var(--bg) 30%,transparent);cursor:pointer;}
+.oneliner:hover{background:color-mix(in srgb,var(--text) 4%,transparent);}
+.oneliner .live{position:relative;width:7px;height:7px;border-radius:999px;background:var(--st-run);flex-shrink:0;}
+/* only ONE pinged item animates (#20a); every other running dot is static cyan */
+.oneliner.ping .live::after{content:"";position:absolute;inset:-4px;border-radius:999px;border:1px solid var(--st-run);opacity:.55;animation:ping 1.8s ease-out infinite;}
+.oneliner.block .live{background:var(--st-block);} .oneliner.fail .live{background:var(--st-fail);}
+.oneliner.calm .live{background:var(--st-idle);}
+.oneliner .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.oneliner .txt b{color:color-mix(in srgb,var(--text) 88%,transparent);font-weight:650;}
+.oneliner .ol-act{display:flex;align-items:center;gap:6px;flex-shrink:0;}
+@keyframes ping{0%{transform:scale(.6);opacity:.7;}100%{transform:scale(1.9);opacity:0;}}
+@media (prefers-reduced-motion: reduce){ .oneliner .live::after{animation:none;} }
+
+/* expanded body: workstreams */
+.pbody{display:none;border-top:1px solid var(--border);padding:6px 0 8px;}
+.pcard.open .pbody{display:block;}
+.ws{border-top:1px solid color-mix(in srgb,var(--border) 55%,transparent);}
+.ws:first-child{border-top:0;}
+.ws-head{display:flex;align-items:center;gap:13px;padding:13px 16px;cursor:pointer;}
+.ws-head:hover{background:color-mix(in srgb,var(--text) 4%,transparent);}
+.ws-ring{width:42px;height:42px;flex-shrink:0;}
+.ws-id{flex:1;min-width:0;}
+.ws-name{font-size:13px;font-weight:650;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.ws-dod{font-size:12px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.ws-meta{display:flex;align-items:center;gap:9px;flex-shrink:0;}
+.ws-chev{color:var(--muted);transition:transform .16s ease;}
+.ws.open .ws-chev{transform:rotate(90deg);}
+.sess-list{display:none;padding:0 16px 8px 16px;}
+.ws.open .sess-list{display:block;}
+.ws-cnt{font-size:11px;color:var(--muted);}
+
+/* session row */
+.sess{display:flex;align-items:center;gap:12px;padding:11px 12px;margin:6px 0 0;border-radius:11px;
+  border:1px solid color-mix(in srgb,var(--border) 70%,transparent);background:color-mix(in srgb,var(--panel-2) 70%,transparent);cursor:pointer;}
+.sess:hover{border-color:color-mix(in srgb,var(--accent) 32%,var(--border));background:var(--panel-2);}
+.sess-dot{width:9px;height:9px;border-radius:999px;flex-shrink:0;}
+.sess-main{flex:1;min-width:0;}
+.sess-top{display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
+.sess-name{font-size:13px;font-weight:650;}
+.sess-live{font-size:12px;color:var(--muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sess-live b{color:color-mix(in srgb,var(--text) 86%,transparent);font-weight:450;}
+.sess-dod{font-size:12px;color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.artchip{display:inline-flex;align-items:center;gap:7px;height:23px;padding:0 9px;border-radius:7px;font-size:11px;font-weight:450;
+  border:1px solid color-mix(in srgb,var(--st-sign) 30%,var(--border));background:color-mix(in srgb,var(--st-sign) 7%,transparent);color:color-mix(in srgb,var(--text) 90%,transparent);}
+.artchip.mg{border-color:color-mix(in srgb,var(--st-merge) 32%,var(--border));background:color-mix(in srgb,var(--st-merge) 7%,transparent);}
+.artchip.doc{border-color:color-mix(in srgb,var(--st-sign) 30%,var(--border));}
+.artchip .ok{color:var(--st-merge);font-weight:800;}
+.artchip .add{color:var(--st-merge);} .artchip .del{color:var(--st-fail);}
+.recheck{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:color-mix(in srgb,var(--muted) 80%,transparent);border:0;background:transparent;padding:0 0 0 4px;}
+.recheck:hover{color:var(--accent);}
+.stale{color:var(--st-block);}
+.sess-act{display:flex;align-items:center;gap:7px;flex-shrink:0;}
+.qnext{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+.qchip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:6px;font-size:11px;color:var(--muted);
+  border:1px dashed color-mix(in srgb,var(--border) 95%,transparent);background:transparent;}
+.qchip .qn{color:color-mix(in srgb,var(--st-idle) 90%,transparent);font-weight:800;margin-right:5px;}
+.qmore{font-size:11px;color:color-mix(in srgb,var(--muted) 80%,transparent);font-style:italic;}
+.qsrc{font-size:11px;color:color-mix(in srgb,var(--muted) 65%,transparent);font-style:italic;}
+/* iteration sparkbar for loops */
+.iterspark{display:inline-flex;align-items:flex-end;gap:2px;height:16px;}
+.iterspark i{width:3px;border-radius:1px;background:color-mix(in srgb,var(--st-run) 55%,transparent);}
+
+/* ───────────── compact project rows (fleet scale) ───────────── */
+.grpcard{border:1px solid var(--border);border-radius:16px;background:color-mix(in srgb,var(--panel) 70%,transparent);overflow:hidden;margin-top:14px;}
+.grp-h{display:flex;align-items:center;gap:10px;padding:12px 16px;cursor:pointer;color:var(--muted);font-size:12px;font-weight:650;}
+.grp-h:hover{background:color-mix(in srgb,var(--text) 3%,transparent);}
+.grp-h .gt{letter-spacing:.05em;text-transform:uppercase;font-size:11px;font-weight:800;}
+.grp-h .gt.sgn{color:var(--st-sign);}
+.grp-h .gc{color:color-mix(in srgb,var(--muted) 75%,transparent);font-weight:450;}
+.grp-h .chev{margin-left:auto;}
+.grpcard.open .grp-h .chev{transform:rotate(90deg);}
+.grp-b{display:none;border-top:1px solid color-mix(in srgb,var(--border) 60%,transparent);}
+.grpcard.open .grp-b{display:block;}
+.prow{display:flex;align-items:center;gap:13px;padding:11px 16px;border-top:1px solid color-mix(in srgb,var(--border) 45%,transparent);cursor:pointer;}
+.prow:first-child{border-top:0;}
+.prow:hover{background:color-mix(in srgb,var(--text) 4%,transparent);}
+.prow .pn{font-size:13px;font-weight:650;flex:0 0 auto;min-width:130px;}
+.prow .pp{font-size:11px;color:color-mix(in srgb,var(--muted) 72%,transparent);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.prow .psum{font-size:12px;color:var(--muted);flex:0 0 auto;}
+.prow .psum b{color:color-mix(in srgb,var(--text) 85%,transparent);font-weight:650;}
+.prow.open{background:color-mix(in srgb,var(--panel-2) 60%,transparent);}
+.prow-body{display:none;background:color-mix(in srgb,var(--bg) 25%,transparent);border-top:1px solid color-mix(in srgb,var(--border) 45%,transparent);}
+.prow-body.open{display:block;}
+
+/* ───────────── done / planned surfaces ───────────── */
+.done{border:1px solid var(--border);border-radius:16px;background:var(--panel);overflow:hidden;}
+.done-head{display:flex;align-items:center;gap:11px;padding:14px 16px;cursor:pointer;}
+.done-head:hover{background:color-mix(in srgb,var(--text) 3%,transparent);}
+.done-title{font-size:13px;font-weight:800;letter-spacing:.04em;display:flex;align-items:center;gap:9px;}
+.done-sum{color:var(--muted);font-size:12px;}
+.done-sum b.s{color:var(--st-sign);} .done-sum b.m{color:var(--st-merge);} .done-sum b.p{color:var(--st-idle);}
+.done-head .chev{margin-left:auto;}
+.done.open .done-head .chev{transform:rotate(90deg);}
+.done-body{display:none;border-top:1px solid var(--border);}
+.done.open .done-body{display:block;}
+.done-grp{padding:6px 0;}
+.done-grp + .done-grp{border-top:1px solid color-mix(in srgb,var(--border) 55%,transparent);}
+.done-grp-h{padding:10px 16px 6px;font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;display:flex;align-items:center;gap:8px;color:var(--muted);}
+.done-grp-h .sw{width:7px;height:7px;border-radius:999px;display:inline-block;}
+.done-grp-h.sign{color:var(--st-sign);} .done-grp-h.sign .sw{background:var(--st-sign);}
+.done-grp-h.merge{color:var(--st-merge);} .done-grp-h.merge .sw{background:var(--st-merge);}
+.done-grp-h.merge.earlier{color:var(--muted);} .done-grp-h.merge.earlier .sw{background:var(--st-idle);}
+.done-grp-h.plan{color:var(--st-idle);} .done-grp-h.plan .sw{background:var(--st-idle);box-shadow:inset 0 0 0 1.4px var(--st-idle);background:transparent;}
+.drow{display:flex;align-items:center;gap:12px;padding:11px 16px;cursor:pointer;}
+.drow:hover{background:color-mix(in srgb,var(--text) 4%,transparent);}
+.drow .dleft{flex:1;min-width:0;}
+.drow .dcrumb{font-size:11px;color:var(--muted);}
+.drow .dcrumb b{color:var(--text);font-weight:650;}
+.drow .dname{font-size:13px;font-weight:650;margin-top:2px;display:flex;align-items:center;gap:9px;}
+.drow .dnote{font-size:12px;color:var(--muted);margin-top:4px;}
+.morelink{display:block;padding:10px 16px;font-size:12px;color:var(--muted);background:transparent;border:0;border-top:1px solid color-mix(in srgb,var(--border) 45%,transparent);text-align:left;width:100%;}
+.morelink:hover{color:var(--accent);}
+
+/* ───────────── sign-off — first-class to-do LIST (#1): single column of light rows,
+   flat panel-2 (no purple gradient / left bar), ONE purple per row (the Sign-off button) ───────────── */
+.signoff{display:flex;flex-direction:column;gap:8px;}
+.soff{border:1px solid var(--border);border-radius:12px;background:var(--panel-2);
+  padding:11px 14px;display:flex;align-items:center;gap:16px;overflow:hidden;}
+.soff:hover{border-color:color-mix(in srgb,var(--st-sign) 30%,var(--border));}
+.soff.gone{opacity:.5;}
+.soff .sleft{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
+.soff .scrumb{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.soff .scrumb b{color:var(--text);font-weight:650;}
+.soff .scrumb .sn{color:color-mix(in srgb,var(--text) 92%,transparent);font-weight:650;}
+.soff .scrit{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.soff .scrit .gk{color:color-mix(in srgb,var(--text) 88%,transparent);font-weight:650;}
+.soff .scrit .pend{color:var(--st-block);font-weight:650;}
+.soff .sact{display:flex;gap:8px;align-items:center;flex-shrink:0;}
+/* the "+N more to sign off" overflow reuses .needmore; tighten its rows */
+#signmore .needmore-b{padding:8px;display:flex;flex-direction:column;gap:8px;}
+.btn.sign{background:color-mix(in srgb,var(--st-sign) 18%,transparent);border-color:color-mix(in srgb,var(--st-sign) 45%,var(--border));color:#eaddff;font-weight:800;}
+.btn.sign:hover{background:color-mix(in srgb,var(--st-sign) 26%,transparent);border-color:var(--st-sign);}
+.btn.sign svg{width:14px;height:14px;}
+
+/* undo toast (optimistic sign-off flip) */
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);z-index:60;
+  display:flex;align-items:center;gap:13px;padding:11px 14px;border-radius:12px;border:1px solid color-mix(in srgb,var(--st-merge) 38%,var(--border));
+  background:color-mix(in srgb,var(--st-merge) 12%,var(--panel-2));color:var(--text);font-size:13px;box-shadow:0 16px 40px rgba(0,0,0,.4);
+  opacity:0;pointer-events:none;transition:opacity .2s ease,transform .2s ease;}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto;}
+.toast b{font-weight:650;}
+.toast .undo{border:1px solid var(--border);background:transparent;color:var(--accent);border-radius:8px;padding:5px 11px;font-weight:650;font-size:12px;}
+.toast .undo:hover{border-color:var(--accent);}
+
+/* one info glyph + tooltip replacing the repeated 'best-effort' caption (#14) */
+.infg{display:inline-grid;place-items:center;width:14px;height:14px;border-radius:999px;border:1px solid color-mix(in srgb,var(--muted) 50%,transparent);
+  color:color-mix(in srgb,var(--muted) 80%,transparent);font-size:9px;font-weight:800;cursor:help;line-height:1;}
+
+/* session-list cap expander (#20d) */
+.sessmore{display:block;width:100%;text-align:left;padding:9px 4px 4px;font-size:12px;color:var(--muted);background:transparent;border:0;}
+.sessmore:hover{color:var(--accent);}
+
+/* shape-coded session dot (#14) — status without leaning only on hue */
+.sess-dot.run,.sess-dot.loop,.sess-dot.merge{border-radius:999px;}
+.sess-dot.block{border-radius:2px;}
+.sess-dot.sign{border-radius:2px;transform:rotate(45deg);}
+.sess-dot.idle{background:transparent !important;box-shadow:inset 0 0 0 1.6px var(--st-idle);}
+.sess-dot.fail{position:relative;background:transparent !important;}
+.sess-dot.fail::after{content:"\00d7";position:absolute;inset:-4px 0 0;font-size:13px;line-height:1;font-weight:800;text-align:center;color:var(--st-fail);}
+
+/* loop budget meter (#3) */
+.loopBadge.warn{color:var(--st-block);border-color:color-mix(in srgb,var(--st-block) 42%,transparent);background:color-mix(in srgb,var(--st-block) 10%,transparent);}
+.budget{display:inline-flex;align-items:center;gap:7px;font-size:11px;color:var(--muted);}
+.budget .bar{width:74px;height:5px;border-radius:999px;background:color-mix(in srgb,var(--border) 80%,transparent);overflow:hidden;}
+.budget .bar i{display:block;height:100%;border-radius:999px;background:color-mix(in srgb,var(--st-run) 60%,var(--muted));}
+.budget.warn .bar i{background:var(--st-block);}
+.budget.warn{color:var(--st-block);}
+
+/* calm + reassurance lines */
+.calmnote{margin-top:28px;text-align:center;color:color-mix(in srgb,var(--muted) 70%,transparent);font-size:12px;}
+.calmline{display:flex;align-items:center;gap:10px;padding:14px 16px;border:1px solid color-mix(in srgb,var(--st-merge) 22%,var(--border));border-radius:14px;
+  background:color-mix(in srgb,var(--st-merge) 5%,transparent);color:var(--text);font-size:13px;}
+.calmline .ok{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:999px;flex-shrink:0;
+  color:var(--st-merge);border:1px solid color-mix(in srgb,var(--st-merge) 40%,transparent);background:color-mix(in srgb,var(--st-merge) 9%,transparent);font-weight:800;}
+.calmline b{font-weight:650;}
+.calmline .sub{color:var(--muted);font-size:12px;margin-left:2px;}
+
+/* ───────────── first-run onboarding ───────────── */
+.onboard{max-width:620px;margin:36px auto;border:1px solid var(--border);border-radius:18px;background:var(--panel);padding:30px 30px 26px;text-align:center;}
+.onboard .glyph{width:54px;height:54px;margin:0 auto 16px;display:grid;place-items:center;border-radius:14px;
+  border:1px solid color-mix(in srgb,var(--accent) 30%,var(--border));background:color-mix(in srgb,var(--accent) 8%,transparent);color:var(--accent);}
+.onboard .glyph svg{width:26px;height:26px;}
+.onboard h2{margin:0 0 10px;font-size:20px;font-weight:800;letter-spacing:-.01em;}
+.onboard p{margin:0 auto 8px;color:var(--muted);font-size:13px;max-width:480px;line-height:1.6;}
+.onboard .model{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin:18px 0 6px;color:var(--muted);font-size:12px;}
+.onboard .model .node{display:inline-flex;align-items:center;height:26px;padding:0 11px;border-radius:999px;border:1px solid var(--border);background:var(--panel-2);font-weight:650;color:var(--text);}
+.onboard .model .arr{color:color-mix(in srgb,var(--muted) 70%,transparent);}
+.onboard .actions{display:flex;gap:10px;justify-content:center;margin-top:22px;flex-wrap:wrap;}
+.onboard .disc{margin-top:18px;padding-top:16px;border-top:1px solid color-mix(in srgb,var(--border) 60%,transparent);font-size:12px;color:var(--muted);}
+.onboard .disc b{color:var(--text);font-weight:650;}
+.onboard .disc .cands{display:flex;flex-direction:column;gap:6px;margin-top:11px;text-align:left;}
+.onboard .cand{display:flex;align-items:center;gap:9px;padding:9px 11px;border:1px solid var(--border);border-radius:10px;background:var(--panel-2);font-size:12px;}
+.onboard .cand .cpath{flex:1;min-width:0;color:var(--text);}
+.onboard .cand .cmeta{color:var(--muted);}
+
+/* ───────────── conversation overlay ───────────── */
+.cback{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .2s ease;}
+.cback.show{opacity:1;pointer-events:auto;}
+.conv{
+  position:fixed;top:0;right:0;bottom:0;z-index:41;width:min(740px,100vw);
+  display:flex;flex-direction:column;background:color-mix(in srgb,var(--panel) 96%,black);
+  border-left:1px solid var(--border);box-shadow:-26px 0 70px rgba(0,0,0,.45);
+  transform:translateX(100%);transition:transform .24s cubic-bezier(.22,.61,.36,1);
+}
+.conv.show{transform:none;}
+.focusbar{display:none;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);
+  background:color-mix(in srgb,var(--st-block) 8%,transparent);font-size:12px;color:var(--st-block);font-weight:650;flex-shrink:0;}
+.focusbar.show{display:flex;}
+.focusbar .grow{flex:1;}
+.conv-head{display:flex;align-items:center;gap:11px;padding:12px 14px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.conv-crumb{flex:1;min-width:0;}
+.conv-crumb .cc1{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.conv-crumb .cc1 b{color:var(--text);font-weight:650;}
+.conv-crumb .cc2{font-size:15px;font-weight:800;letter-spacing:-.01em;margin-top:1px;display:flex;align-items:center;gap:9px;}
+.conv-close{display:inline-grid;place-items:center;width:30px;height:30px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);}
+.conv-close:hover{color:var(--text);background:var(--panel-2);}
+.conv-close svg{width:16px;height:16px;}
+
+.dodbar{padding:11px 16px;border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--bg) 40%,transparent);flex-shrink:0;}
+.dodbar-top{display:flex;align-items:center;gap:12px;cursor:pointer;}
+.dodbar .dring{width:38px;height:38px;flex-shrink:0;}
+.dodbar .dtxt{flex:1;min-width:0;}
+.dodbar .dt1{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:7px;}
+.dodbar .dt2{font-size:13px;color:var(--text);margin-top:3px;}
+.dodbar .dexp{color:var(--muted);transition:transform .16s ease;}
+.dodbar.open .dexp{transform:rotate(90deg);}
+.critlist{display:none;margin-top:11px;padding-top:11px;border-top:1px solid color-mix(in srgb,var(--border) 60%,transparent);flex-direction:column;gap:7px;}
+.dodbar.open .critlist{display:flex;}
+.crit{display:flex;align-items:flex-start;gap:9px;font-size:12px;color:var(--muted);}
+.crit .box{width:15px;height:15px;border-radius:4px;flex-shrink:0;margin-top:1px;display:grid;place-items:center;font-size:10px;font-weight:800;
+  border:1px solid color-mix(in srgb,var(--border) 90%,transparent);}
+.crit.met .box{background:color-mix(in srgb,var(--st-merge) 16%,transparent);border-color:color-mix(in srgb,var(--st-merge) 45%,transparent);color:var(--st-merge);}
+.crit.gate .box{border-style:dashed;border-color:color-mix(in srgb,var(--st-sign) 50%,transparent);color:var(--st-sign);}
+.crit .ctext{flex:1;color:color-mix(in srgb,var(--text) 86%,transparent);}
+.crit.met .ctext{color:var(--muted);}
+.crit .cev{font-size:12px;color:var(--muted);margin-top:2px;}
+.gatepill{display:inline-flex;align-items:center;height:16px;padding:0 6px;border-radius:4px;font-size:11px;font-weight:650;color:var(--st-sign);
+  border:1px solid color-mix(in srgb,var(--st-sign) 40%,transparent);margin-left:4px;}
+
+.conv-msgs{flex:1;min-height:0;overflow:auto;padding:18px 18px 26px;display:flex;flex-direction:column;gap:0;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,black 22px,black calc(100% - 16px),transparent 100%);
+  mask-image:linear-gradient(to bottom,transparent 0,black 22px,black calc(100% - 16px),transparent 100%);}
+.m{max-width:90%;}
+.m.sys{align-self:center;color:var(--muted);font-size:11px;text-align:center;margin:6px 0 14px;max-width:100%;}
+.m.user{align-self:flex-end;background:var(--user,#1e3a5f);border:1px solid color-mix(in srgb,#1e3a5f 60%,var(--border));
+  border-radius:14px;padding:11px 13px;margin:10px 0;font-size:13px;}
+.m.ai{align-self:stretch;max-width:100%;font-size:13px;line-height:1.6;margin:8px 0;}
+.m.ai p{margin:0 0 9px;}
+.m.ai .q{padding:11px 13px;border-radius:11px;border:1px solid color-mix(in srgb,var(--st-block) 42%,var(--border));
+  background:color-mix(in srgb,var(--st-block) 9%,transparent);color:#fdf0c4;}
+.m.ai .ferr{padding:11px 13px;border-radius:11px;border:1px solid color-mix(in srgb,var(--st-fail) 42%,var(--border));
+  background:color-mix(in srgb,var(--st-fail) 9%,transparent);color:#ffd9df;}
+.tcard{border:1px solid var(--border);border-radius:11px;background:var(--tool,#2a2336);margin:9px 0;overflow:hidden;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;}
+.tcard.think{background:color-mix(in srgb,#2a2336 70%,#251a3d);}
+.tcard.ok{background:color-mix(in srgb,#2a2336 70%,#0f2a1a);}
+.tcard-h{display:flex;align-items:center;gap:9px;padding:9px 12px;cursor:pointer;color:var(--muted);}
+.tcard-h .ic{font-size:12px;}
+.tcard.think .ic{color:#c4b5fd;} .tcard.ok .ic{color:var(--st-merge);}
+.tcard-h .ti{flex:1;color:color-mix(in srgb,var(--text) 80%,transparent);}
+.tcard-h .cv{transition:transform .15s ease;font-size:11px;}
+.tcard.open .tcard-h .cv{transform:rotate(90deg);}
+.tcard-b{display:none;padding:0 12px 11px 33px;color:var(--muted);line-height:1.6;white-space:pre-wrap;}
+.tcard.open .tcard-b{display:block;}
+
+/* artifact preview */
+.art{border:1px solid var(--border);border-radius:12px;background:var(--panel);overflow:hidden;margin:11px 0;}
+.art-h{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border);color:var(--muted);font-size:12px;flex-wrap:wrap;}
+.art-h .at{color:var(--text);font-weight:650;}
+.art-h .ok{color:var(--st-merge);font-weight:800;margin-left:auto;}
+.art-b{padding:12px;}
+.diff{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.55;border-radius:8px;overflow:hidden;border:1px solid var(--border);}
+.diff div{padding:1px 10px;}
+.diff .add{background:color-mix(in srgb,var(--st-merge) 12%,transparent);color:#bff2d2;}
+.diff .del{background:color-mix(in srgb,var(--st-fail) 12%,transparent);color:#ffd2da;}
+.diff .ctx{color:var(--muted);}
+.spark{display:block;width:100%;height:96px;border-radius:8px;border:1px solid var(--border);background:color-mix(in srgb,var(--bg) 60%,transparent);}
+.md{border-radius:8px;border:1px solid var(--border);background:color-mix(in srgb,var(--bg) 55%,transparent);padding:12px 14px;font-size:12px;line-height:1.6;}
+.md h4{margin:0 0 6px;font-size:13px;}
+.md ul{margin:6px 0 0;padding-left:18px;color:var(--muted);}
+.md li{margin:2px 0;}
+
+/* composer */
+.composer{flex-shrink:0;border-top:1px solid var(--border);background:color-mix(in srgb,var(--panel) 98%,black);padding:10px 14px 14px;}
+.secrow{display:flex;align-items:center;gap:8px;margin-bottom:9px;flex-wrap:wrap;}
+.secrow:empty{display:none;}
+.secrow .lab{font-size:11px;color:var(--muted);margin-right:2px;}
+.cqreply{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:9px;align-items:center;}
+.cqreply .qlbl{font-size:11px;color:color-mix(in srgb,var(--muted) 75%,transparent);font-weight:650;}
+.cqreply button{border:1px solid var(--border);border-radius:999px;padding:5px 11px;font-size:12px;color:var(--text);background:var(--panel-2);font-weight:650;}
+.cqreply button:hover{border-color:var(--accent);color:var(--accent);}
+.ctextwrap{border:1px solid var(--border);border-radius:14px;background:var(--panel-2);overflow:hidden;}
+.ctextwrap:focus-within{border-color:var(--accent);}
+.ctext{width:100%;min-height:56px;resize:none;border:0;background:transparent;color:var(--text);font:inherit;padding:12px 14px;outline:none;}
+.cfoot{display:flex;align-items:center;gap:8px;padding:0 8px 8px;}
+.cmodel{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 11px;border:1px solid var(--border);border-radius:9px;
+  background:var(--panel-2);color:var(--muted);font-size:12px;font-weight:650;}
+.cmodel .think{color:var(--accent);font-weight:650;}
+.cfoot .grow{flex:1;}
+.csend{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 15px;border-radius:10px;background:#0f4c75;border:1px solid #256b97;color:#dff1ff;font-weight:800;font-size:13px;}
+.csend:hover{border-color:var(--accent);background:#125b8c;}
+.csend svg{width:15px;height:15px;}
+.composer .hint{font-size:11px;color:color-mix(in srgb,var(--muted) 75%,transparent);margin-top:8px;text-align:center;}
+
+@media (max-width:760px){
+  .needs{grid-template-columns:1fr;}
+  .headline{font-size:20px;}
+  .grid.single{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span>pi <span class="sub">home</span></div>
+    <div class="spacer"></div>
+    <label class="scn" title="Mockup: switch pressure-test dataset">
+      <span class="lab">Scenario</span>
+      <select id="scnSel"></select>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg>
+    </label>
+    <button class="tbtn" title="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></button>
+    <button class="tbtn" title="Sessions"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <button class="tbtn" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3 14a1.6 1.6 0 0 0-1.5-1H1a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 3 8a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 8 3a1.6 1.6 0 0 0 1-1.5V1a2 2 0 1 1 4 0v.1A1.6 1.6 0 0 0 17 4.6a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.6 1.6 0 0 0 21 10h.1a2 2 0 1 1 0 4H21a1.6 1.6 0 0 0-1.6 1z"/></svg></button>
+  </div>
+
+  <div class="wrap" id="wrap"></div>
+
+  <div class="cback" id="cback"></div>
+  <aside class="conv" id="conv" aria-hidden="true"></aside>
+
+<script>
+/* ════════════════════════════════════════════════════════════════════
+   GROUNDING NOTE — every rendered field maps to the pi grounding spec.
+
+   PROGRESS (never authored): ProgressSnapshot.percent = metWeight/totalWeight over the
+     DoDCriterion[] where !gate (#7 adds gate?:boolean to the type; auto sources are never gated).
+     The ring is a SEGMENTED gauge — one arc per criterion, filled=met — so a percent always reads
+     as "k of n met" and traces to a checkbox / git fact / exit code; segments collapse to a single
+     proportional arc only past n>6 (#15) so it never becomes a ring of dashes.
+   FRESHNESS (#5): command criteria are evaluated ON-DEMAND (/api/dod/evaluate) + cached with
+     evaluatedAt — never on rollup render. A never-run command criterion is EXCLUDED from the
+     denominator (drawn as a faint "not yet checked" segment + an asterisked "k/n" number, never a
+     confident percent); a stale one (ran, but not recently) likewise asterisks the number.
+     ProgressSnapshot.allMet — which gates the sign-off promotion — requires every evaluable criterion
+     to be RUN and FRESH, so a card never promotes to "awaiting sign-off" on hours-stale evidence; if
+     it would, it shows "done — pending recheck" with a re-check on the card face. A neutral
+     "evaluating" ring (pulsing track, no number) covers the two-phase load gap and on-demand rechecks.
+   MIXED SOURCES (#5): when a workstream's sessions span >1 evaluator family we do NOT blend
+     heterogeneous criteria into one percent. The ws ring becomes a "k of n SESSIONS done" gauge
+     (one segment per session) with a "mixed sources" note. Criteria-blended percent is reserved
+     for the homogeneous-source case only. NOTE (#13): this mock detects the family via a label-text
+     regex (srcFamily()/sessFamily()) purely for the fixture; production keys mixed-source/evaluator
+     detection off the structured DoDSource.kind on each criterion, never substring matching.
+   DOC RECEIPTS (#13): a no-git workstream's artifact "N files / note path" is derived from the
+     session's own write/edit tool_result entries (the only file-write signal pi exposes) — stated
+     alongside git numstat as the receipt source; verification is the user's review, not a merge.
+   DoD = PROVENANCE × EVALUATOR (#18): authoredBy ∈ user|agent|orchestrator|rule (the pill at rest)
+     is separate from the evaluator kind that actually computes met-ness:
+       manual          → stored boolean in ProjectRegistry (toggled by PATCH /api/dod/criterion/:id)
+       git_clean/_merged/_ahead_zero → gitStatus()/gitLog()/`git merge-base --is-ancestor` (cheap, inline)
+       command         → executeBash exit===expect, ON-DEMAND only (/api/dod/evaluate) + evaluatedAt + stale flag
+       session_idle    → runtimeForPath() + agent_end(pending 0)
+     Every criterion resolves to one of those real evaluators — no pill is a phantom source.
+   SIGN-OFF (#6,#7,#10): a manual user-approval criterion is a GATE excluded from percent. Evaluable
+     criteria reach 100% → status flips to purple "awaiting sign-off". Row-level "Sign off" =
+     PATCH /api/dod/criterion/:id flipping that one gate (fully supported today): optimistic flip +
+     undo toast, no drawer. MERGE is a SEPARATE step — there is NO push/PR/merge route in the local-only
+     git layer, so it is either a net-new git-merge endpoint (called out as new work) or an agent prompt
+     ("merge feat/x into main"). We never label one button "Sign off & merge".
+   STATUS (WorkItemStatus, derived): runtime.isRunning → run/loop · git 'conflicted' OR
+     tool_execution_end(error)/abnormal agent_end → block/fail · evaluable 100% + pending manual gate →
+     sign · evaluable 100% (auto) → merge · else queued/planned/unset.
+   BLOCK detection (#9): "blocked · needs input" + quick-reply chips REQUIRE a structured elicitation —
+     extension_ui_request / a proposed ask_user tool whose payload is {sessionId, question, options[]}
+     (added to proposedApi) — or a real permission prompt. s.elicited marks those. A non-elicited
+     free-text stop CANNOT be proven a blocker, so it degrades to a quiet "Idle · may be waiting
+     (N min since agent_end, unread)" — never a fabricated amber alarm.
+   FAIL + BLAST (#17): 'fail' is derived from pi_event tool_execution_end(error)/abnormal agent_end and
+     git 'conflicted', NOT from a dashboard-initiated command-DoD eval (which is on-demand and may be
+     stale — a red command criterion shows its evaluatedAt separately). 'blast' has no dependency graph
+     to draw on, so blast = manual override OR destructive-keyword regex over the last assistant message
+     OR a dirtyCount bucket; it ONLY orders Needs-you triage and gates nothing.
+   LOOPS (#6, DURABLE): isLoop:boolean + budget?{maxMinutes?,maxCostUsd?} + loopStartedAt:string are
+     STORED in the registry (net-new fields), never inferred. ELAPSED is computed from loopStartedAt
+     (NOT runtimeForPath, which resets on the 60s idle dispose); COST from SessionStats. iteration count
+     + sparkbar are REBUILT from per-iteration CustomEntry('pi-web:loop-iter',{n,startedAt,toolEnds,cost})
+     and from tool_result ENTRIES in the JSONL — durable across dispose — NOT from ephemeral
+     agent_start/agent_end/tool_execution_end /ws events that die on dispose. So a 38m loop reconstructs
+     its count and can actually trip over-budget. GIT-DERIVED DoD freshness: a TTL poll (gitStatus +
+     merge-base, ~15–30s, visible active cards only) or an fs/git watcher emitting debounced,
+     dirty-project-scoped rollup_changed{projectId} — so merges done OUTSIDE pi still go live.
+     iteration (legacy note) = one agent_start→agent_end cycle with no intervening user message; the sparkbar =
+     tool_execution_end events per iteration span returned ON the rollup (not the /ws firehose), so a
+     flat/declining tail signals a stall. budget {maxMinutes?,maxCostUsd?} is compared to
+     SessionStats.cost + elapsed; the loop badge flips amber ONLY when stalled or over budget. Pause =
+     AgentSession.abort() + a registry 'paused' flag the orchestrator honours.
+   PLAN QUEUE: BEST-EFFORT parsed from agent notes — pi has no TodoWrite/plan primitive (a plan-tool
+     extension writing CustomEntry items would replace it); flagged with one info glyph, not prose.
+   DELTA (#11): "since last visit" diffs modified/mergedAt + criterion evaluatedAt against a stored
+     lastDashboardVisitAt (in the UI sidecar). Net +/− = numstat over commits since the visit. If
+     lastVisitAt is unavailable we say "Recent activity", never a fabricated interval.
+   ROLLUP VIEW-MODELS (#8): SessionRollup carries live, elicitation?{question,options[]}, blast,
+     failAction, loop?{iter,sparks[],startedAt,budget}, plannedQueue?{items,total,source},
+     dod?{text,sourceLabel,authoredBy,criteria:CriterionEval[]} (text+evaluator+gate+evidence+evaluatedAt);
+     WorkstreamRollup adds dodSummary+mixed+loop?; ProjectRollup adds lineage?{parentProjectName,fullPath}.
+   NESTING (#18): a session belongs to exactly ONE project = the registry root that is the LONGEST
+     prefix of session.cwd (explicit sessionIds override), so ai-education-in-zippy never double-counts
+     toward zippy. The lineage badge rides into renderRow so it survives compact/dormant rows.
+   LOAD/REALTIME (two-phase): first paint = registry + runtime only; git/DoD stream per card lazily with
+     a short TTL cache; dormant rows render last-known cached status. The page consumes a DEBOUNCED
+     per-project rollup_changed and ignores message_update/tool_execution_update from the /ws firehose.
+   ════════════════════════════════════════════════════════════════════ */
+
+const ST = {
+  block:{label:"Blocked · needs input", cls:"block", color:"var(--st-block)"},
+  run:  {label:"Running",               cls:"run",   color:"var(--st-run)"},
+  loop: {label:"Looping",               cls:"run",   color:"var(--st-run)"},
+  sign: {label:"Done · awaiting sign-off", cls:"sign", color:"var(--st-sign)"},
+  merge:{label:"Completed · merged",    cls:"merge", color:"var(--st-merge)"},
+  fail: {label:"Failed",                cls:"fail",  color:"var(--st-fail)"},
+  queued:{label:"Queued",               cls:"idle",  color:"var(--st-idle)"},
+  planned:{label:"Planned · not started", cls:"idle", color:"var(--st-idle)"},
+  unset:{label:"Set criterion",         cls:"unset", color:"var(--st-sign)"},
+};
+/* attention rank (#3) — block/fail first … merged last */
+const STATUS_RANK = { block:0, fail:0, unset:1, run:2, loop:2, sign:3, queued:4, planned:4, merge:5 };
+function statusRank(st){ return STATUS_RANK[st]!=null?STATUS_RANK[st]:9; }
+function byAttention(a,b){ return statusRank(a.status)-statusRank(b.status); }
+
+/* ── DoD freshness (#5): command criteria are evaluated ON-DEMAND and cached, never on rollup render.
+   A never-run command criterion isn't evaluable yet; a stale one (ran, but not recently) can't back a
+   100% / a sign-off promotion. isRecent() is intentionally generous; critStale() is the stricter gate. */
+function critUnrun(c){ return c.src==="command" && (!c.at || /never/i.test(c.at)); }
+function critStale(c){
+  if(c.src!=="command" || c.gate || critUnrun(c)) return false;
+  const a=(c.at||"").toLowerCase();
+  if(a==="snapshot" || a.includes("manual review") || a.includes("folder")) return false; // not a clock-bound eval
+  return /(h ago|d ago|yesterday|day|week)/.test(a);  // ran, but the cached result is old → stale
+}
+
+/* ── progress derivation (#1,#4,#5): percent over EVALUATED non-gate criteria.
+   never-run command criteria are excluded from the denominator (shown as an unfilled "not yet checked"
+   segment + an asterisked "k/n" number, never folded into a flattering percent). allMet (which gates the
+   sign-off promotion) requires every evaluable criterion to be RUN and FRESH. */
+function computeProgress(crit){
+  if(!crit || !crit.length) return null;
+  const evaluable = crit.filter(c=>!c.gate);
+  if(!evaluable.length) return {met:0,total:0,metW:0,totW:0,percent:0,allMet:false,gateOnly:true,unrun:0,stale:0};
+  const run = evaluable.filter(c=>!critUnrun(c));
+  const unrun = evaluable.length - run.length;
+  const stale = run.filter(critStale).length;
+  let metW=0, totW=0, metN=0;
+  run.forEach(c=>{ const w=c.weight||1; totW+=w; if(c.met){metW+=w; metN++;} });
+  return { met:metN, total:run.length, metW, totW,
+    percent: totW?Math.round(metW/totW*100):0,
+    allMet: run.length>0 && metW===totW && unrun===0 && stale===0,
+    unrun, stale };
+}
+function pendingGate(crit){ return (crit||[]).find(c=>c.gate && !c.met) || null; }
+/* a sign-status session that's resting on stale/unrun command evidence — can't be signed off yet (#5) */
+function signPending(s){ return s.status==="sign" && s._prog && (s._prog.unrun>0 || s._prog.stale>0); }
+
+/* classify a DoD source string into its evaluator family (label only — no colour, per #5) */
+function srcFamily(src){
+  const s=(src||"").toLowerCase();
+  if(s.includes("merge")||s.includes("branch")||s.includes("clean")||s.includes("ahead")) return "git";
+  if(s.includes("rule")||s.includes("test")||s.includes("command")||s.includes("exit")) return "cmd";
+  if(s.includes("user")||s.includes("sign")) return "user";
+  return "";
+}
+
+/* ─────────────────────────── canonical default world ─────────────────────────── */
+const WORLD_DEFAULT = [
+  { id:"wealthlens", name:"wealthlens", path:"~/workspace/wealthlens", desc:"personal finance app",
+    workstreams:[
+      { id:"plaid", name:"Plaid integration", dod:"merged to mainline", dodSrc:"branch feat/plaid", status:"block",
+        sessions:[
+          { id:"s1", name:"Wire Plaid OAuth", status:"block", blast:"md", elicited:true,
+            dod:"OAuth returns a valid token AND the integration test passes", dodSrc:"agent-defined",
+            live:"Which Plaid product scopes should I request — transactions only, or also investments & liabilities?",
+            kind:"question", meta:"Paused 12m ago",
+            chips:["transactions only","+ investments","+ investments & liabilities"],
+            crit:[
+              {text:"OAuth redirect returns a valid access_token", met:true, src:"agent", ev:"token exchange returned token (sandbox)"},
+              {text:"integration test passes", met:false, src:"command", ev:"npm run test:plaid — not yet run (blocked on scope)", at:"never run"},
+            ]},
+          { id:"s2", name:"Token refresh job", status:"run",
+            dod:"tests pass + merged to main", dodSrc:"rule-based",
+            live:"Writing cron to refresh access tokens (step 3/5).", meta:"running 6m",
+            crit:[
+              {text:"lint passes", met:true, src:"command", ev:"eslint exit 0", at:"2m ago"},
+              {text:"npm test → exit 0", met:false, src:"command", ev:"last run exit 1 (job incomplete)", at:"6m ago"},
+              {text:"branch merged into main", met:false, src:"git_merged", ev:"feat/plaid not an ancestor of main"},
+            ]},
+          { id:"s3", name:"Plaid webhook handler", status:"sign",
+            dod:"you review & sign off", dodSrc:"user sign-off",
+            live:"Webhook handler complete — all evaluable checks green.",
+            artifact:{kind:"diff", branch:"feat/plaid", add:214, del:31, ahead:3, check:{cmd:"npm run test:webhook", exit:0, at:"4m ago"}},
+            crit:[
+              {text:"handler idempotent + retries on 5xx", met:true, src:"manual", ev:"you checked"},
+              {text:"npm run test:webhook → exit 0", met:true, src:"command", ev:"exit 0", at:"4m ago"},
+              {text:"you review & sign off", met:false, src:"manual", gate:true, ev:"awaiting your sign-off"},
+            ]},
+        ]},
+      { id:"dash", name:"Dashboard redesign", dod:"user-reviewed & signed off", dodSrc:"branch feat/dash-v2", status:"sign",
+        sessions:[
+          { id:"s4", name:"Net-worth chart", status:"sign",
+            dod:"you review & sign off", dodSrc:"user sign-off",
+            live:"Replaced D3 with a lightweight sparkline.",
+            artifact:{kind:"spark", branch:"feat/dash-v2", add:88, del:402, note:"net-worth.png", check:{cmd:"visual check", exit:0, at:"snapshot"}},
+            crit:[
+              {text:"chart renders 12-mo series", met:true, src:"manual", ev:"screenshot attached"},
+              {text:"bundle smaller than D3 baseline", met:true, src:"command", ev:"38kb → 1.2kb", at:"7m ago"},
+              {text:"you review & sign off", met:false, src:"manual", gate:true, ev:"awaiting your sign-off"},
+            ]},
+        ]},
+      { id:"sweep", name:"Nightly bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 38m",
+        sessions:[
+          { id:"s5", name:"bug-sweep", status:"loop",
+            dod:"0 failing tests (open-ended autonomous loop)", dodSrc:"orchestrator-defined",
+            live:"Triaging failing test suite (4 of 11 fixed).", meta:"looping 38m · iter 12", loop:true, iter:12, dIter:4,
+            budget:{maxMinutes:60, maxCostUsd:5}, elapsedMin:38, cost:2.1,
+            iterspark:[3,5,4,6,5,7,6,8,7,9,8,10],
+            queue:["fix flaky e2e","upgrade vitest","dedupe fixtures","split slow suite"], queueTotal:6 },
+        ]},
+      { id:"auth", name:"Auth hardening", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:"2h ago",
+        sessions:[
+          { id:"sA", name:"Auth hardening", status:"merge",
+            dod:"merged to mainline", dodSrc:"merged",
+            live:"Hardened session auth, rotated secrets, added rate limits.",
+            artifact:{kind:"diff", branch:"feat/auth → main", add:331, del:96, merged:true, sha:"9f3a1c2", mergedAgo:"2h ago", check:{cmd:"npm test", exit:0, at:"2h ago"}},
+            crit:[
+              {text:"branch merged into main", met:true, src:"git_merged", ev:"ancestor of main @ 9f3a1c2"},
+              {text:"npm test → exit 0", met:true, src:"command", ev:"exit 0", at:"2h ago"},
+              {text:"working tree clean", met:true, src:"git_clean", ev:"dirtyCount 0"},
+            ]},
+        ]},
+    ]},
+  { id:"zippy", name:"zippy", path:"~/zippy", desc:"personal assistant",
+    workstreams:[
+      { id:"inbox", name:"Inbox triage loop", dod:"inbox at zero, replies drafted", dodSrc:"agent-defined", status:"loop", loop:true, loopTime:"looping",
+        sessions:[
+          { id:"s6", name:"inbox-triage", status:"loop",
+            dod:"inbox at zero, replies drafted (open-ended)", dodSrc:"agent-defined",
+            live:"Summarizing 14 new emails, drafting 3 replies.", meta:"looping 9m · iter 4", loop:true, iter:4,
+            iterspark:[4,6,5,7],
+            queue:["draft reply to Maya","archive 9 newsletters","flag invoice"], queueTotal:3 },
+        ]},
+      { id:"cal", name:"Calendar sync", dod:"merged to mainline", dodSrc:"branch feat/cal", status:"fail",
+        sessions:[
+          { id:"s7", name:"cal-sync", status:"fail", blast:"md", failAction:"Re-authenticate",
+            dod:"npm test → exit 0 + merged", dodSrc:"rule-based",
+            live:"Google OAuth token expired — needs re-auth.", kind:"failed", meta:"failed 21m ago",
+            crit:[
+              {text:"OAuth token valid", met:false, src:"command", ev:"sync.js exited 1 — 401 invalid_grant", at:"21m ago"},
+              {text:"npm test → exit 0", met:false, src:"command", ev:"blocked on auth", at:"21m ago"},
+            ]},
+        ]},
+    ]},
+  { id:"ai-education", name:"ai-education", path:"~/zippy/projects/ai-education", desc:"AI education platform", nest:"in zippy",
+    workstreams:[
+      { id:"curric", name:"Curriculum generator", dod:"merged to mainline", dodSrc:"branch feat/curriculum", status:"sign",
+        sessions:[
+          { id:"s8", name:"lesson-planner", status:"sign",
+            dod:"you review & sign off", dodSrc:"user sign-off",
+            live:"Curriculum generator pipeline complete.",
+            artifact:{kind:"diff", branch:"feat/curriculum", add:540, del:12, ahead:7, check:{cmd:"npm test", exit:0, at:"11m ago"}},
+            crit:[
+              {text:"generates 8-week plan from a topic", met:true, src:"manual", ev:"you checked"},
+              {text:"npm test → exit 0", met:true, src:"command", ev:"exit 0", at:"11m ago"},
+              {text:"you review & sign off", met:false, src:"manual", gate:true, ev:"awaiting your sign-off"},
+            ]},
+          { id:"s9", name:"quiz-gen", status:"queued",
+            dod:"merged to mainline", dodSrc:"branch feat/curriculum",
+            live:"Waiting on lesson-planner merge.", meta:"queued",
+            queue:["generate MCQ bank from lessons","add answer-key validation"], queueTotal:2 },
+        ]},
+      { id:"stt", name:"Spike: speech-to-text", dod:"decision doc written", dodSrc:"user-defined", status:"planned",
+        sessions:[
+          { id:"s10", name:"stt-spike", status:"planned",
+            dod:"decision doc written", dodSrc:"user-defined",
+            live:"Not started — plan ready.", meta:"planned",
+            queue:["evaluate Whisper vs Deepgram","prototype a latency test"], queueTotal:2 },
+        ]},
+    ]},
+];
+
+/* ─────────────────────────── scenario: single project ─────────────────────────── */
+const WORLD_SINGLE = [
+  { id:"pi-web", name:"pi-web", path:"~/workspace/oss/pi-web", desc:"local web UI for the pi agent",
+    workstreams:[
+      { id:"rollups", name:"Project Rollups dashboard", dod:"merged to mainline", dodSrc:"branch feat/rollups", status:"run",
+        sessions:[
+          { id:"p1", name:"rollups grid + drill-down", status:"run",
+            dod:"npm test → exit 0 + merged", dodSrc:"rule-based",
+            live:"Wiring the expand → workstream → session drill-down.", meta:"running 14m",
+            crit:[ {text:"grid renders from /api/rollups", met:true, src:"manual", ev:"you checked"},
+                   {text:"npm test → exit 0", met:false, src:"command", ev:"3 specs pending", at:"14m ago"},
+                   {text:"branch merged into main", met:false, src:"git_merged", ev:"not yet"} ]},
+        ]},
+      { id:"markdown", name:"Markdown artifact previews", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:"1h ago",
+        sessions:[
+          { id:"p2", name:"render + scroll md previews", status:"merge",
+            dod:"merged to mainline", dodSrc:"merged",
+            live:"Markdown artifact previews render and scroll.",
+            artifact:{kind:"diff", branch:"feat/md → main", add:142, del:18, merged:true, sha:"7e89657", mergedAgo:"1h ago", check:{cmd:"npm test", exit:0, at:"1h ago"}},
+            crit:[{text:"branch merged into main",met:true,src:"git_merged",ev:"ancestor @ 7e89657"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"1h ago"}] }]},
+      { id:"idle", name:"Dispose idle live sessions", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:"3h ago",
+        sessions:[
+          { id:"p3", name:"idle session disposal", status:"merge",
+            dod:"merged to mainline", dodSrc:"merged",
+            live:"Idle live sessions dispose after a grace period.",
+            artifact:{kind:"diff", branch:"feat/idle → main", add:96, del:7, merged:true, sha:"c17c2c0", mergedAgo:"3h ago", check:{cmd:"npm test", exit:0, at:"3h ago"}},
+            crit:[{text:"branch merged into main",met:true,src:"git_merged",ev:"ancestor @ c17c2c0"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"3h ago"}] }]},
+    ]},
+];
+
+/* ─────────────────────────── scenario: dense project (8 workstreams) ─────────────────────────── */
+const WORLD_DENSE = [ (function(){
+  const mk=(id,name,dod,dodSrc,status,extra)=>Object.assign({id,name,dod,dodSrc,status,
+    sessions:[{id:id+"_s",name:name.replace(/ loop$/,""),status:status==="loop"?"loop":status,dod,dodSrc,
+      live:extra&&extra.live||"…",meta:extra&&extra.meta,loop:status==="loop",elicited:extra&&extra.elicited,
+      artifact:extra&&extra.artifact, crit:extra&&extra.crit, queue:extra&&extra.queue, queueTotal:extra&&extra.queueTotal,
+      iterspark:extra&&extra.iterspark, iter:extra&&extra.iter, kind:extra&&extra.kind, blast:extra&&extra.blast, failAction:extra&&extra.failAction}]}, extra&&extra.ws||{});
+  const c=(text,met,src,ev,k,v)=>{ const o={text,met,src,ev}; if(k&&typeof k==="object") Object.assign(o,k); else if(k==="at") o.at=v; return o; };
+  return { id:"wealthlens", name:"wealthlens", path:"~/workspace/wealthlens", desc:"personal finance app · 8 active workstreams",
+    workstreams:[
+      mk("d_plaid","Plaid integration","OAuth token valid AND integration test passes","agent-defined","block",
+        {live:"Which Plaid product scopes — transactions only, or also investments & liabilities?",kind:"question",meta:"paused 12m ago",blast:"md",elicited:true,
+         chips:["transactions only","+ investments","+ liabilities"],
+         crit:[c("OAuth client registered",true,"manual","you checked"),c("product scopes chosen",false,"manual","blocked — needs your decision"),
+               c("token exchange wired",false,"manual",""),c("integration test passes",false,"command","blocked on scope","at","never run"),
+               c("error handling",false,"manual",""),c("retry/backoff",false,"manual",""),c("webhook verify",false,"manual",""),c("merged into main",false,"git_merged","")]}),
+      mk("d_dash","Dashboard redesign","you review & sign off","user sign-off","sign",
+        {live:"Net-worth chart rebuilt — all evaluable checks green.",artifact:{kind:"diff",branch:"feat/dash-v2",add:88,del:402,check:{cmd:"visual check",exit:0,at:"snapshot"}},
+         crit:[c("chart renders 12-mo series",true,"manual","screenshot"),c("responsive down to 360px",true,"manual","you checked"),
+               c("a11y: contrast + labels",true,"command","axe exit 0 — cached","at","3h ago"),c("bundle smaller than D3",true,"command","38kb → 1.2kb","at","6m ago"),
+               c("you review & sign off",false,"manual","awaiting your sign-off",{gate:true})]}),
+      mk("d_auth","Auth hardening","merged to mainline","merged","merge",
+        {live:"Hardened auth, merged.",ws:{mergedAgo:"2h ago"},artifact:{kind:"diff",branch:"feat/auth → main",add:331,del:96,merged:true,sha:"9f3a1c2",mergedAgo:"2h ago",check:{cmd:"npm test",exit:0,at:"2h ago"}},
+         crit:[c("branch merged into main",true,"git_merged","ancestor @ 9f3a1c2"),c("npm test → exit 0",true,"command","exit 0","at","2h ago"),c("working tree clean",true,"git_clean","dirtyCount 0")]}),
+      mk("d_sweep","bug-sweep loop","0 failing tests","orchestrator-defined","loop",
+        {live:"Triaging failing tests (5 of 12 fixed).",meta:"looping 38m · iter 12",iter:12,iterspark:[3,5,4,6,5,7,6,8,7,9,8,10],queue:["fix flaky e2e","upgrade vitest"],queueTotal:6,ws:{loop:true,loopTime:"looping 38m"}}),
+      mk("d_tax","Tax categories","npm test → exit 0 + merged","rule-based","run",
+        {live:"Mapping 1099 categories to ledger (step 7/8).",meta:"running 3m",
+         crit:[c("parse 1099 categories",true,"manual","you checked"),c("map to ledger codes",true,"manual",""),c("handle edge categories",true,"manual",""),
+               c("unit tests",true,"command","exit 0","at","3m ago"),c("integration tests",true,"command","exit 0","at","3m ago"),
+               c("npm test → exit 0",true,"command","exit 0","at","3m ago"),c("merged into main",false,"git_merged","not yet")]}),
+      mk("d_onb","Onboarding polish","you review & sign off","user sign-off","run",
+        {live:"Tightening empty-state copy and first-run flow.",meta:"running 1m",
+         crit:[c("empty-state copy",true,"manual","you checked"),c("first-run flow",true,"manual",""),c("tooltips on every action",false,"manual","in progress"),
+               c("responsive",true,"manual",""),c("you review & sign off",false,"manual","awaiting",{gate:true})]}),
+      mk("d_hooks","Plaid webhooks","you review & sign off","user sign-off","sign",
+        {live:"Webhook handler complete — all evaluable checks green.",artifact:{kind:"diff",branch:"feat/plaid",add:214,del:31,ahead:3,check:{cmd:"npm run test:webhook",exit:0,at:"4m ago"}},
+         crit:[c("handler idempotent",true,"manual","you checked"),c("retries on 5xx",true,"manual",""),c("npm run test:webhook → exit 0",true,"command","exit 0","at","4m ago"),
+               c("you review & sign off",false,"manual","awaiting",{gate:true})]}),
+      mk("d_chart","Net-worth charts","npm test → exit 0 + merged","rule-based","run",
+        {live:"Adding YoY comparison overlay (step 9/10).",meta:"running 2m",
+         crit:[c("YoY overlay",true,"manual","you checked"),c("legend",true,"manual",""),c("hover tooltip",true,"manual",""),c("unit tests",true,"command","exit 0","at","2m ago"),
+               c("npm test → exit 0",true,"command","exit 0","at","2m ago"),c("merged into main",false,"git_merged","not yet")]}),
+      // a deliberately session-heavy workstream so the "+N more sessions" cap is exercised (#20d)
+      { id:"d_tax_detail", name:"Tax form mappings", dod:"merged to mainline", dodSrc:"branch feat/tax", status:"run",
+        sessions:(function(){
+          const names=["1099-INT mapping","1099-DIV mapping","1099-B mapping","Schedule C buckets","crypto cost-basis",
+            "wash-sale detection","foreign-tax credits","K-1 passthrough","edge-case fixtures"];
+          const sts=["run","sign","merge","run","queued","queued","sign","run","merge"];
+          return names.map((nm,i)=>({id:"d_tax_"+i,name:nm,status:sts[i],dod:"npm test → exit 0 + merged",dodSrc:sts[i]==="sign"?"user sign-off":"rule-based",
+            live:sts[i]==="merge"?"Merged and green.":sts[i]==="sign"?"Done — evaluable checks green.":sts[i]==="queued"?"Queued behind earlier mappings.":"Mapping in progress.",
+            meta:sts[i]==="queued"?"queued":"running "+(i+1)+"m",
+            artifact:(sts[i]==="merge"||sts[i]==="sign")?{kind:"diff",branch:sts[i]==="merge"?"feat/tax → main":"feat/tax",add:40+i*6,del:8+i,merged:sts[i]==="merge",sha:(0x2a1b00+i*9).toString(16).slice(0,7),mergedAgo:sts[i]==="merge"?(i+1)+"h ago":undefined,check:{cmd:"npm test",exit:0,at:(i+1)+"m ago"}}:undefined,
+            crit:sts[i]==="sign"?[c("mapping correct",true,"manual","you checked"),c("npm test → exit 0",true,"command","exit 0","at",(i+1)+"m ago"),c("you sign off",false,"manual","awaiting",{gate:true})]
+              :sts[i]==="merge"?[c("merged into main",true,"git_merged","ancestor"),c("npm test → exit 0",true,"command","exit 0","at",(i+1)+"h ago")]
+              :[c("mapping drafted",true,"manual","you checked"),c("npm test → exit 0",sts[i]==="run","command",sts[i]==="run"?"exit 0":"pending","at",(i+1)+"m ago"),c("merged into main",false,"git_merged","not yet")]}));
+        })() },
+    ]};
+})() ];
+
+/* ─────────────────────────── scenario: all calm (Quiet Sunday) ─────────────────────────── */
+const WORLD_CALM = [
+  { id:"wealthlens", name:"wealthlens", path:"~/workspace/wealthlens", desc:"personal finance app",
+    workstreams:[
+      { id:"sweep", name:"Nightly bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 22m",
+        sessions:[{id:"c1",name:"bug-sweep",status:"loop",dod:"0 failing tests (open-ended)",dodSrc:"orchestrator-defined",
+          live:"Triaging tests (7 of 11 fixed) — within budget.",meta:"looping 22m · iter 9",loop:true,iter:9,iterspark:[3,4,5,6,5,7,6,8,7],queue:["dedupe fixtures","fix flaky e2e"],queueTotal:2}]},
+      { id:"auth", name:"Auth hardening", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:"3h ago",
+        sessions:[{id:"c2",name:"Auth hardening",status:"merge",dod:"merged to mainline",dodSrc:"merged",live:"Merged and green.",
+          artifact:{kind:"diff",branch:"feat/auth → main",add:331,del:96,merged:true,sha:"9f3a1c2",mergedAgo:"3h ago",check:{cmd:"npm test",exit:0,at:"3h ago"}},
+          crit:[{text:"merged into main",met:true,src:"git_merged",ev:"@ 9f3a1c2"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"3h ago"}]}]},
+    ]},
+  { id:"zippy", name:"zippy", path:"~/zippy", desc:"personal assistant",
+    workstreams:[
+      { id:"inbox", name:"Inbox triage loop", dod:"inbox at zero", dodSrc:"agent-defined", status:"loop", loop:true, loopTime:"looping",
+        sessions:[{id:"c3",name:"inbox-triage",status:"loop",dod:"inbox at zero (open-ended)",dodSrc:"agent-defined",
+          live:"Drafting replies, never sending without sign-off.",meta:"looping 7m · iter 3",loop:true,iter:3,iterspark:[5,6,7],queue:["draft reply to Maya"],queueTotal:1}]},
+      { id:"cal", name:"Calendar sync", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:"5h ago",
+        sessions:[{id:"c4",name:"cal-sync",status:"merge",dod:"merged to mainline",dodSrc:"merged",live:"Sync stable, merged.",
+          artifact:{kind:"diff",branch:"feat/cal → main",add:120,del:40,merged:true,sha:"a1b2c3d",mergedAgo:"5h ago",check:{cmd:"npm test",exit:0,at:"5h ago"}},
+          crit:[{text:"merged into main",met:true,src:"git_merged",ev:"@ a1b2c3d"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"5h ago"}]}]},
+    ]},
+  { id:"ai-education", name:"ai-education", path:"~/zippy/projects/ai-education", desc:"AI education platform", nest:"in zippy",
+    workstreams:[
+      { id:"curric", name:"Curriculum generator", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:"yesterday",
+        sessions:[{id:"c5",name:"lesson-planner",status:"merge",dod:"merged to mainline",dodSrc:"merged",live:"Generator merged.",
+          artifact:{kind:"diff",branch:"feat/curriculum → main",add:540,del:12,merged:true,sha:"e7f8a9b",mergedAgo:"yesterday",check:{cmd:"npm test",exit:0,at:"yesterday"}},
+          crit:[{text:"merged into main",met:true,src:"git_merged",ev:"@ e7f8a9b"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"yesterday"}]}]},
+      { id:"quiz", name:"Quiz generator", dod:"merged to mainline", dodSrc:"branch feat/quiz", status:"queued",
+        sessions:[{id:"c6",name:"quiz-gen",status:"queued",dod:"merged to mainline",dodSrc:"branch feat/quiz",live:"Queued behind curriculum merge.",meta:"queued",queue:["scaffold quiz schema","wire to lessons"],queueTotal:2}]},
+    ]},
+];
+
+/* ─────────────────────────── scenario: everything blocked (6 waiting) ─────────────────────────── */
+const WORLD_BLOCKED = [
+  { id:"wealthlens", name:"wealthlens", path:"~/workspace/wealthlens", desc:"personal finance app",
+    workstreams:[
+      { id:"plaid", name:"Plaid integration", dod:"merged to mainline", dodSrc:"branch feat/plaid", status:"block",
+        sessions:[
+          { id:"b1", name:"Wire Plaid OAuth", status:"block", blast:"md", elicited:true,
+            dod:"OAuth returns valid token AND integration test passes", dodSrc:"agent-defined",
+            live:"Which Plaid product scopes — transactions only, or also investments & liabilities?", kind:"question", meta:"paused 18m ago",
+            chips:["transactions only","+ investments","+ investments & liabilities"],
+            crit:[{text:"OAuth scaffolded",met:true,src:"manual",ev:"you checked"},{text:"product scope decided",met:false,src:"manual",ev:"needs your decision"},{text:"integration test passes",met:false,src:"command",ev:"blocked on scope",at:"never run"}] }]},
+      { id:"migrate", name:"Ledger migration", dod:"you approve the migration", dodSrc:"user sign-off", status:"block",
+        sessions:[
+          { id:"b2", name:"apply destructive migration", status:"block", blast:"hi", elicited:true,
+            dod:"you approve before the drop runs", dodSrc:"user sign-off",
+            live:"Migration will DROP and rebuild the transactions table (irreversible). Approve to proceed?", kind:"question", meta:"paused 4m ago",
+            chips:["approve — proceed","back up first, then run","hold — let me review"],
+            crit:[{text:"migration script written",met:true,src:"manual",ev:"you checked"},{text:"backup taken first",met:false,src:"manual",ev:"not yet"},{text:"you approve the drop",met:false,src:"manual",gate:true,ev:"awaiting your approval"}] }]},
+      { id:"tools", name:"Receipt importer", dod:"tool permission granted", dodSrc:"rule-based", status:"block",
+        sessions:[
+          { id:"b3", name:"import receipts", status:"block", blast:"md", elicited:true,
+            dod:"you grant the requested tool permission", dodSrc:"rule-based",
+            live:"Requesting permission to run `bash: curl` to fetch receipts from the vendor API. Allow?", kind:"question", meta:"paused 2m ago",
+            chips:["allow once","allow for this session","deny"],
+            crit:[{text:"vendor API endpoint reachable",met:true,src:"command",ev:"ping ok",at:"2m ago"},{text:"tool permission granted",met:false,src:"manual",ev:"awaiting your permission"}] }]},
+    ]},
+  { id:"zippy", name:"zippy", path:"~/zippy", desc:"personal assistant",
+    workstreams:[
+      { id:"cal", name:"Calendar sync", dod:"merged to mainline", dodSrc:"branch feat/cal", status:"fail",
+        sessions:[
+          { id:"b4", name:"cal-sync", status:"fail", blast:"md", failAction:"Re-authenticate",
+            dod:"npm test → exit 0 + merged", dodSrc:"rule-based",
+            live:"Google OAuth token expired — needs re-auth.", kind:"failed", meta:"failed 21m ago",
+            crit:[{text:"OAuth token valid",met:false,src:"command",ev:"401 invalid_grant",at:"21m ago"},{text:"npm test → exit 0",met:false,src:"command",ev:"blocked on auth",at:"21m ago"}] }]},
+      { id:"triage", name:"Test triage", dod:"0 failing tests", dodSrc:"rule-based", status:"fail",
+        sessions:[
+          { id:"b5", name:"failed-test triage", status:"fail", blast:"lo", failAction:"Re-run tests",
+            dod:"npm test → exit 0", dodSrc:"command",
+            live:"3 specs went red after the dependency bump — triage needed.", kind:"failed", meta:"failed 33m ago",
+            crit:[{text:"npm test → exit 0",met:false,src:"command",ev:"3 specs failing after bump",at:"33m ago"}] }]},
+    ]},
+  { id:"ai-education", name:"ai-education", path:"~/zippy/projects/ai-education", desc:"AI education platform", nest:"in zippy",
+    workstreams:[
+      { id:"curric", name:"Curriculum generator", dod:"merged to mainline", dodSrc:"branch feat/curriculum", status:"block",
+        sessions:[
+          { id:"b6", name:"lesson-planner", status:"block", blast:"lo", elicited:true,
+            dod:"you pick the curriculum tone", dodSrc:"user sign-off",
+            live:"Should lesson tone be formal-academic or conversational for grades 6–8?", kind:"question", meta:"paused 41m ago",
+            chips:["conversational","formal-academic","mix by grade"],
+            crit:[{text:"draft lessons generated",met:true,src:"manual",ev:"you checked"},{text:"tone chosen",met:false,src:"manual",ev:"needs your decision"}] }]},
+    ]},
+];
+
+/* ─────────────────────────── scenario: growing loop ─────────────────────────── */
+const WORLD_LOOP = [
+  { id:"wealthlens", name:"wealthlens", path:"~/workspace/wealthlens", desc:"personal finance app",
+    workstreams:[
+      { id:"sweep", name:"Nightly bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 38m",
+        sessions:[
+          { id:"g1", name:"bug-sweep", status:"loop",
+            dod:"0 failing tests — open-ended, no fixed scope", dodSrc:"orchestrator-defined",
+            live:"Each iteration appends new findings — queue grew 3 → 17, still within budget.", meta:"looping 38m · iter 12", loop:true, iter:12,
+            budget:{maxMinutes:90, maxCostUsd:8}, elapsedMin:38, cost:3.2,
+            iterspark:[2,3,3,4,5,5,6,6,7,8,9,10],
+            queue:["fix flaky e2e","upgrade vitest","dedupe fixtures"], queueTotal:17 }]},
+      { id:"auth", name:"Auth hardening", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:"2h ago",
+        sessions:[{id:"g2",name:"Auth hardening",status:"merge",dod:"merged to mainline",dodSrc:"merged",live:"Merged and green.",
+          artifact:{kind:"diff",branch:"feat/auth → main",add:331,del:96,merged:true,sha:"9f3a1c2",mergedAgo:"2h ago",check:{cmd:"npm test",exit:0,at:"2h ago"}},
+          crit:[{text:"merged into main",met:true,src:"git_merged",ev:"@ 9f3a1c2"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"2h ago"}]}]},
+    ]},
+  { id:"datapipe", name:"datapipe", path:"~/workspace/datapipe", desc:"ETL service",
+    workstreams:[
+      { id:"backfill", name:"Nightly backfill loop", dod:"0 dropped rows", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 2h 40m",
+        sessions:[
+          { id:"g3", name:"backfill", status:"loop",
+            dod:"0 dropped rows — open-ended", dodSrc:"orchestrator-defined",
+            live:"No new rows cleared in the last 4 iterations — the tail is flat (possible stall).", meta:"looping 2h 40m · iter 31", loop:true, iter:31,
+            budget:{maxMinutes:120, maxCostUsd:6}, elapsedMin:160, cost:6.4,
+            iterspark:[8,9,8,7,6,5,4,3,3,3,2,2],
+            queue:["retry shard 7","investigate lock contention"], queueTotal:2 }]},
+    ]},
+];
+
+/* ─────────────────────────── scenario: no-git DoD (research) ─────────────────────────── */
+const WORLD_NOGIT = [
+  { id:"zippy", name:"zippy", path:"~/zippy", desc:"personal assistant",
+    workstreams:[
+      { id:"pricing", name:"Competitor pricing research", dod:"3 competitor profiles written & user-reviewed", dodSrc:"user-defined", status:"sign",
+        sessions:[
+          { id:"n1", name:"pricing-research", status:"sign",
+            dod:"3 competitor profiles written & you review", dodSrc:"user-defined",
+            live:"Drafted notes for Plaid, Finicity and MX into ~/zippy/research/pricing/.",
+            artifact:{kind:"doc", note:"pricing/competitors.md", files:3, check:{cmd:"manual review", exit:0, at:"folder, no repo"}},
+            crit:[
+              {text:"Plaid profile written", met:true, src:"manual", ev:"competitors.md · §1"},
+              {text:"Finicity profile written", met:true, src:"manual", ev:"competitors.md · §2"},
+              {text:"MX profile written", met:true, src:"manual", ev:"competitors.md · §3"},
+              {text:"you review the doc", met:false, src:"manual", gate:true, ev:"awaiting your review"},
+            ]},
+        ]},
+    ]},
+  { id:"ai-education", name:"ai-education", path:"~/zippy/projects/ai-education", desc:"AI education platform", nest:"in zippy",
+    workstreams:[
+      { id:"curric", name:"Curriculum generator", dod:"8-week lesson plan written & approved", dodSrc:"user-defined", status:"sign",
+        sessions:[
+          { id:"n2", name:"lesson-docs", status:"sign",
+            dod:"8-week plan written & you approve", dodSrc:"user-defined",
+            live:"Wrote lesson docs into ~/zippy/projects/ai-education/lessons/ (no repo).",
+            artifact:{kind:"doc", note:"lessons/week-1..8.md", files:8, check:{cmd:"manual review", exit:0, at:"folder, no repo"}},
+            crit:[
+              {text:"8 weekly lesson docs written", met:true, src:"manual", ev:"lessons/week-1..8.md"},
+              {text:"you approve the plan", met:false, src:"manual", gate:true, ev:"awaiting your approval"},
+            ]},
+        ]},
+    ]},
+];
+
+/* ─────────────────────────── scenario: six DoD sources at once ─────────────────────────── */
+const WORLD_MIXED = [
+  { id:"wealthlens", name:"wealthlens", path:"~/workspace/wealthlens", desc:"personal finance app · every DoD source",
+    workstreams:[
+      { id:"plaid", name:"Plaid integration", dod:"merged to mainline", dodSrc:"branch feat/plaid", status:"block", _open:true,
+        sessions:[
+          { id:"m1", name:"Plaid integration", status:"run",
+            dod:"branch merged into main", dodSrc:"git_merged into main",
+            live:"Feature branch ready; auto-source DoD stays running until the merge lands.",
+            artifact:{kind:"diff", branch:"feat/plaid", add:214, del:31, ahead:3, check:{cmd:"npm test", exit:0, at:"5m ago"}},
+            crit:[{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"5m ago"},{text:"working tree clean",met:true,src:"git_clean",ev:"dirtyCount 0"},{text:"branch merged into main",met:false,src:"git_merged",ev:"feat/plaid not ancestor of main"}]},
+          { id:"m2", name:"Token refresh job", status:"run",
+            dod:"npm test → exit 0 + merged", dodSrc:"rule-based",
+            live:"Writing refresh cron (step 3/5).", meta:"running 6m",
+            crit:[{text:"lint passes",met:true,src:"command",ev:"exit 0",at:"6m ago"},{text:"npm test → exit 0",met:false,src:"command",ev:"last exit 1",at:"6m ago"},{text:"merged into main",met:false,src:"git_merged",ev:"pending"}]},
+          { id:"m3", name:"Wire Plaid OAuth", status:"block", blast:"md", elicited:true,
+            dod:"valid token AND integration test passes", dodSrc:"agent-defined",
+            live:"Which Plaid scopes should I request?", kind:"question", meta:"paused 12m ago",
+            chips:["transactions only","+ investments","+ liabilities"],
+            crit:[{text:"OAuth returns valid token",met:true,src:"agent",ev:"token ok"},{text:"integration test passes",met:false,src:"command",ev:"blocked on scope",at:"never run"}]},
+          { id:"m4", name:"Dashboard redesign", status:"sign",
+            dod:"you review & sign off", dodSrc:"user sign-off",
+            live:"Net-worth chart rebuilt — evaluable checks green.",
+            artifact:{kind:"spark", branch:"feat/dash-v2", add:88, del:402, note:"net-worth.png", check:{cmd:"visual check",exit:0,at:"snapshot"}},
+            crit:[{text:"chart renders",met:true,src:"manual",ev:"screenshot"},{text:"bundle smaller than D3",met:true,src:"command",ev:"38kb → 1.2kb",at:"7m ago"},{text:"you sign off",met:false,src:"manual",gate:true,ev:"awaiting"}]},
+          { id:"m5", name:"Pricing research", status:"unset",
+            dod:"", dodSrc:"user-defined",
+            live:"No Definition of Done set yet — tell pi what 'done' means here.", meta:"criterion not set",
+            crit:[]},
+          { id:"m6", name:"sub: dedupe fixtures", status:"loop",
+            dod:"orchestrator: fixtures deduped, suite green", dodSrc:"orchestrator-defined",
+            live:"Spawned by bug-sweep loop — deduping shared fixtures.", meta:"looping 6m · iter 3", loop:true, iter:3, iterspark:[3,4,5],
+            queue:["merge auth fixtures","drop dead snapshots"], queueTotal:2 },
+        ]},
+    ]},
+];
+
+/* ─────────────────────────── scenario: fleet scale (42 projects) ─────────────────────────── */
+function genScale(){
+  const active = [
+    { id:"wealthlens", name:"wealthlens", path:"~/workspace/wealthlens", desc:"personal finance app",
+      workstreams:[
+        { id:"plaid", name:"Plaid integration", dod:"merged to mainline", dodSrc:"branch feat/plaid", status:"block",
+          sessions:[{id:"x1",name:"Wire Plaid OAuth",status:"block",blast:"md",elicited:true,dod:"valid token AND integration test passes",dodSrc:"agent-defined",
+            live:"Which Plaid scopes should I request — transactions only, or also investments & liabilities?",kind:"question",meta:"paused 12m ago",
+            chips:["transactions only","+ investments","+ liabilities"],
+            crit:[{text:"OAuth scaffolded",met:true,src:"manual",ev:"ok"},{text:"scope decided",met:false,src:"manual",ev:"needs you"},{text:"integration test passes",met:false,src:"command",ev:"blocked",at:"never run"}]}]},
+        { id:"sweep", name:"bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 38m",
+          sessions:[{id:"x2",name:"bug-sweep",status:"loop",dod:"0 failing tests (open-ended)",dodSrc:"orchestrator-defined",
+            live:"Triaging failing tests (4 of 11 fixed).",meta:"looping 38m · iter 12",loop:true,iter:12,iterspark:[3,5,4,6,5,7,6,8,7,9,8,10],queue:["fix flaky e2e","upgrade vitest"],queueTotal:6}]},
+      ]},
+    { id:"zippy", name:"zippy", path:"~/zippy", desc:"personal assistant",
+      workstreams:[
+        { id:"cal", name:"Calendar sync", dod:"merged to mainline", dodSrc:"branch feat/cal", status:"fail",
+          sessions:[{id:"x3",name:"cal-sync",status:"fail",blast:"md",failAction:"Re-authenticate",dod:"npm test → exit 0 + merged",dodSrc:"rule-based",
+            live:"Google OAuth token expired — needs re-auth.",kind:"failed",meta:"failed 21m ago",
+            crit:[{text:"OAuth token valid",met:false,src:"command",ev:"401",at:"21m ago"},{text:"npm test → exit 0",met:false,src:"command",ev:"blocked",at:"21m ago"}]}]},
+        { id:"inbox", name:"Inbox triage loop", dod:"inbox at zero", dodSrc:"agent-defined", status:"loop", loop:true, loopTime:"looping",
+          sessions:[{id:"x4",name:"inbox-triage",status:"loop",dod:"inbox at zero (open-ended)",dodSrc:"agent-defined",
+            live:"Summarizing 14 emails, drafting 3 replies.",meta:"looping 9m · iter 4",loop:true,iter:4,iterspark:[4,6,5,7],queue:["draft reply to Maya"],queueTotal:3}]},
+      ]},
+    { id:"datapipe", name:"datapipe", path:"~/workspace/datapipe", desc:"ETL service",
+      workstreams:[
+        { id:"backfill", name:"Nightly backfill loop", dod:"0 dropped rows", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 2h",
+          sessions:[{id:"x6",name:"backfill",status:"loop",dod:"0 dropped rows (open-ended)",dodSrc:"orchestrator-defined",
+            live:"Reprocessing 2024-Q4 partitions.",meta:"looping 2h · iter 31",loop:true,iter:31,iterspark:[6,7,6,8,7,9,8,10,9,8],queue:["retry 3 failed shards"],queueTotal:1}]},
+      ]},
+    { id:"ai-education", name:"ai-education", path:"~/zippy/projects/ai-education", desc:"AI education platform", nest:"in zippy",
+      workstreams:[
+        { id:"curric", name:"Curriculum generator", dod:"merged to mainline", dodSrc:"branch feat/curriculum", status:"sign",
+          sessions:[{id:"x5",name:"lesson-planner",status:"sign",dod:"you review & sign off",dodSrc:"user sign-off",live:"Pipeline complete — evaluable checks green.",
+            artifact:{kind:"diff",branch:"feat/curriculum",add:540,del:12,ahead:7,check:{cmd:"npm test",exit:0,at:"11m ago"}},
+            crit:[{text:"generates 8-week plan",met:true,src:"manual",ev:"you checked"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"11m ago"},{text:"you review & sign off",met:false,src:"manual",gate:true,ev:"awaiting"}]}]},
+      ]},
+  ];
+  const names = ["notes-cli","portfolio","blog-engine","scraper-kit","habit-tracker","invoice-gen","slack-bot","weather-tui","recipe-box","gym-log",
+    "rss-reader","budget-sheet","photo-sort","markdown-lint","csv-merge","cron-runner","pdf-merge","url-shortener","quote-api","todo-sync",
+    "git-stats","dns-check","log-tail","port-scan","color-pick","font-prev","emoji-cli","unit-conv","timezone","qr-gen",
+    "regex-lab","json-fmt","yaml-lint","env-doctor","disk-map","clip-hist","screenshot-ocr","dotfiles"];
+  const roots = ["~/workspace","~/workspace","~/zippy/projects","~/workspace/oss"];
+  const dormant = names.map((nm,i)=>{
+    const merged = i%3!==0;
+    const wsCount = 1 + (i%3);
+    const ws=[];
+    for(let k=0;k<wsCount;k++){
+      const isMerge = merged || k>0;
+      ws.push(isMerge
+        ? { id:nm+"_w"+k, name:["core","cleanup","docs","tests"][k]||"work", dod:"merged to mainline", dodSrc:"merged", status:"merge", mergedAgo:(i%5+1)+"d ago",
+            sessions:[{id:nm+"_s"+k,name:nm+" "+(["core","cleanup","docs","tests"][k]||"work"),status:"merge",dod:"merged to mainline",dodSrc:"merged",live:"Merged and green.",
+              artifact:{kind:"diff",branch:"main",add:40+i,del:8,merged:true,sha:(0x100000+i*7).toString(16).slice(0,7),mergedAgo:(i%5+1)+"d ago",check:{cmd:"npm test",exit:0,at:(i%5+1)+"d ago"}},
+              crit:[{text:"merged into main",met:true,src:"git_merged",ev:"ancestor"},{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:(i%5+1)+"d ago"}]}]}
+        : { id:nm+"_w"+k, name:"next up", dod:"merged to mainline", dodSrc:"branch", status:"queued",
+            sessions:[{id:nm+"_s"+k,name:nm+" next up",status:"queued",dod:"merged to mainline",dodSrc:"branch",live:"Queued — not started.",meta:"queued",queue:["scope the change","write tests"],queueTotal:2}]});
+    }
+    return { id:nm, name:nm, path:roots[i%roots.length]+"/"+nm, desc:"", workstreams:ws };
+  });
+  // a realistic fleet has MANY simultaneous loops — exercise the active-card cap (#2): 10 active loops
+  // collapse to ~6 full cards + a "Running · N more" grouped row card, not 10 instrument panels.
+  const loopNames = ["etl-nightly","index-rebuild","crawl-news","retrain-rec","cache-warm","log-compact","img-thumbs","feed-sync","metrics-roll"];
+  const activeLoops = loopNames.map((nm,i)=>({ id:nm, name:nm, path:"~/workspace/"+nm, desc:"",
+    workstreams:[{ id:nm+"_loop", name:"Nightly "+nm+" loop", dod:"0 errors", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping "+(10+i*7)+"m",
+      sessions:[{ id:nm+"_s", name:nm, status:"loop", dod:"0 errors (open-ended)", dodSrc:"orchestrator-defined",
+        live:"Processing batch "+(i+2)+"/"+(i+8)+" — within budget.", meta:"looping "+(10+i*7)+"m · iter "+(3+i), loop:true, iter:3+i,
+        iterspark:[3,4,5,6,5,7,6], queue:["next batch"], queueTotal:1 }]}]}));
+  return active.concat(activeLoops, dormant);
+}
+const WORLD_SCALE = genScale();
+
+/* ─────────────────────────── scenario registry ─────────────────────────── */
+const SCENARIOS = {
+  default:{ label:"Default · canonical world", data:WORLD_DEFAULT },
+  single: { label:"Single project · many rings", data:WORLD_SINGLE },
+  scale:  { label:"Fleet scale · 42 projects", data:WORLD_SCALE },
+  dense:  { label:"Dense project · 8 workstreams", data:WORLD_DENSE, openFirst:true },
+  calm:   { label:"Quiet Sunday · all calm", data:WORLD_CALM },
+  blocked:{ label:"Five agents waiting · 6 blocked", data:WORLD_BLOCKED },
+  loop:   { label:"Growing loop · queue 3→17", data:WORLD_LOOP },
+  nogit:  { label:"Research · no repo, no git DoD", data:WORLD_NOGIT },
+  mixed:  { label:"Six definitions of done", data:WORLD_MIXED, openFirst:true },
+  empty:  { label:"Cold start · first run", data:[], empty:true, candidates:3 },
+};
+
+/* ─────────────────────────── live state + enrichment ─────────────────────────── */
+const state = { scn:"default", data:WORLD_DEFAULT, SESS:{}, focus:null, lastVisit:"2h ago", signed:{} };
+
+/* derive _prog on every session + workstream so the ring can NEVER drift from criteria (#1) */
+function enrich(data){
+  data.forEach(p=>p.workstreams.forEach(w=>{
+    w.sessions.forEach(s=>{ s._prog = computeProgress(s.crit); s._gate = pendingGate(s.crit);
+      if(s.loop){ s._loop = loopHealth(s); s._loopWarn = s._loop.warn; } });
+    w._loopWarn = w.sessions.some(s=>s._loopWarn);
+    // mixed-source guard (#5): if the workstream's sessions span >1 evaluator family, do NOT blend
+    // heterogeneous criteria into one percent — switch the ring to a "k of n SESSIONS done" gauge.
+    const fams = new Set(w.sessions.filter(s=>s.status!=="unset").map(sessFamily));
+    w._mixed = fams.size > 1;
+    if(w._mixed){
+      const total=w.sessions.length, done=w.sessions.filter(sessionDone).length;
+      w._sessGauge = { done, total, percent: total?Math.round(done/total*100):0 };
+      w._prog = null;
+    } else {
+      w._crit = w.sessions.reduce((a,s)=>a.concat(s.crit||[]), []);
+      w._prog = computeProgress(w._crit);
+    }
+  }));
+}
+
+function loadScenario(id){
+  const sc = SCENARIOS[id] || SCENARIOS.default;
+  state.scn = id; state.data = sc.data; state.SESS = {};
+  enrich(state.data);
+  state.data.forEach(p=>p.workstreams.forEach(w=>w.sessions.forEach(s=>{ state.SESS[s.id]={s,w,p}; })));
+  closeConv();
+  renderAll(sc);
+  if(sc.openFirst){ requestAnimationFrame(()=>{ const c=document.querySelector(".pcard"); if(c){c.classList.add("open"); const w=c.querySelector(".ws"); if(w&&state.scn==="mixed") w.classList.add("open");} }); }
+}
+
+/* ─────────────────────────── small helpers ─────────────────────────── */
+const esc = t => String(t==null?"":t).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const isNeed = st => st==="block" || st==="fail";
+const isRecent = ago => /(^now|sec|min|m ago|h ago|hour)/i.test(ago||"");
+/* blast radius (#11): manual priority OR heuristic (destructive keyword + dependents + dirty) */
+function blastRadius(s){
+  if(s.blast) return s.blast;
+  const t=((s.live||"")+" "+(s.name||"")).toLowerCase();
+  if(/(drop|delete|destroy|migrat|irrevers|\brm\b|--force|reset --hard|truncate)/.test(t)) return "hi";
+  return "lo";
+}
+const blastRank = b => b==="hi"?0 : b==="md"?1 : 2;
+const blastLabel = b => b==="hi"?"high blast radius" : b==="md"?"elevated blast radius" : "low blast radius";
+
+/* loop health (#3): a loop is healthy until it STALLS (flat/declining spark tail) or runs OVER budget.
+   Only then does its badge go amber — growth of the planned queue is expected and never alarming. */
+function loopHealth(s){
+  const b=s.budget||{};
+  const overTime = b.maxMinutes!=null && s.elapsedMin!=null && s.elapsedMin>b.maxMinutes;
+  const overCost = b.maxCostUsd!=null && s.cost!=null && s.cost>b.maxCostUsd;
+  let stalled=false;
+  const sp=s.iterspark;
+  if(sp && sp.length>=4){ const tail=sp.slice(-4); stalled = tail.every((v,i)=> i===0 || v<=tail[i-1]) && tail[tail.length-1]<=tail[0]; }
+  const over = overTime||overCost;
+  const pctTime = b.maxMinutes!=null && s.elapsedMin!=null ? Math.min(100,Math.round(s.elapsedMin/b.maxMinutes*100)) : null;
+  const pctCost = b.maxCostUsd!=null && s.cost!=null ? Math.min(100,Math.round(s.cost/b.maxCostUsd*100)) : null;
+  let reason="";
+  if(over) reason = overTime&&overCost?"over time + cost budget" : overTime?"over time budget" : "over cost budget";
+  else if(stalled) reason="stalled — flat iteration tail";
+  return { warn:over||stalled, over, stalled, reason, pctTime, pctCost, b };
+}
+
+/* a session has reached its DoD (used by the mixed-source k-of-n session gauge, #5) */
+function sessionDone(s){ return s.status==="merge" || s.status==="sign" || !!(s._prog && s._prog.allMet); }
+/* evaluator family of a SESSION's DoD source label (for the mixed-source check) */
+function sessFamily(s){
+  const sl=(s.dodSrc||"").toLowerCase();
+  if(sl.includes("merge")||sl.includes("branch")||sl.includes("clean")||sl.includes("ahead")) return "git";
+  if(sl.includes("rule")||sl.includes("command")||sl.includes("test")||sl.includes("exit")) return "cmd";
+  if(sl.includes("user")||sl.includes("sign")) return "user";
+  if(sl.includes("agent")) return "agent";
+  if(sl.includes("orchestr")) return "orch";
+  return "other";
+}
+
+/* ─────────────────────────── SEGMENTED progress ring (#1,#5,#15) ───────────────────────────
+   met = freshly-met run criteria · runTotal = evaluated criteria (denominator) · unrun = never-run
+   command criteria, drawn as faint thin "not yet checked" segments so the ring never reads complete. */
+function segArcs(met, runTotal, unrun, percent, color){
+  const r=15.5, C=2*Math.PI*r, n=runTotal+unrun;
+  if(n>6){ // past 6 criteria → one clean proportional arc over the RUN criteria (#15)
+    const off=C*(1-(runTotal?met/runTotal:0));
+    const faint = unrun?`<circle cx="18" cy="18" r="${r}" fill="none" stroke="color-mix(in srgb,var(--st-idle) 42%,transparent)" stroke-width="1.6" stroke-dasharray="2 3"/>`:"";
+    return faint+`<circle class="ring-fill" cx="18" cy="18" r="${r}" stroke="${color}" stroke-dasharray="${C} ${C}" stroke-dashoffset="${off}" transform="rotate(-90 18 18)"/>`;
+  }
+  const seg=C/n, gap=Math.min(seg*0.22, 3.4), dash=Math.max(seg-gap,1.4);
+  let out="";
+  for(let i=0;i<n;i++){
+    const isUnrun = i>=runTotal;
+    const stroke = i<met ? color : (isUnrun ? 'color-mix(in srgb,var(--st-idle) 45%,transparent)' : 'var(--seg-off)');
+    const sw = isUnrun ? 1.6 : 3.4;
+    const da = isUnrun ? `${(dash*0.5).toFixed(2)} ${(C-dash*0.5).toFixed(2)}` : `${dash.toFixed(2)} ${(C-dash).toFixed(2)}`;
+    out+=`<circle cx="18" cy="18" r="${r}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="butt" `+
+      `stroke-dasharray="${da}" stroke-dashoffset="${(-i*seg).toFixed(2)}" transform="rotate(-90 18 18)"/>`;
+  }
+  return out;
+}
+/* colourblind-safe status SHAPE at the 12-o'clock cap of a progress ring (#13: enlarged to ~5px):
+   circle=run · square=block · diamond=sign · ×=fail — so a blocked 50 ≠ a running 50 without hue. */
+function ringShape(st, color){
+  if(st==="run") return `<circle cx="18" cy="3.6" r="2.7" fill="${color}"/>`;
+  if(st==="block") return `<rect x="15.3" y="0.9" width="5.4" height="5.4" rx="0.7" fill="${color}"/>`;
+  if(st==="sign") return `<rect x="15.4" y="1" width="5.2" height="5.2" fill="${color}" transform="rotate(45 18 3.6)"/>`;
+  if(st==="fail") return `<text x="18" y="7.6" text-anchor="middle" font-size="11" font-weight="800" fill="${color}">×</text>`;
+  return "";
+}
+/* item = a session or workstream carrying .status, ._prog (or ._sessGauge for mixed), .loop
+   opts.neutral → strip the alarm hue (used for surfaced block/fail rings, #13) */
+function ringSvg(item, size, opts){
+  const o=opts||{}, r=15.5, C=2*Math.PI*r, st=item.status;
+  const hue=(ST[st]&&ST[st].color)||"var(--st-idle)";
+  const color = o.neutral ? "color-mix(in srgb,var(--muted) 70%,transparent)" : hue;
+  const wrap=(inner,track)=>`<svg class="ring" viewBox="0 0 36 36" style="width:${size}px;height:${size}px">${track?`<circle class="ring-track" cx="18" cy="18" r="${r}"/>`:""}${inner}</svg>`;
+  // phase-2 / on-demand eval (#5): pulsing track, no number, no status hue — "evaluating, not yet known"
+  if(item._evaluating) return `<svg class="ring" viewBox="0 0 36 36" style="width:${size}px;height:${size}px"><circle class="ring-track eval" cx="18" cy="18" r="${r}"/></svg>`;
+  if(st==="merge") return wrap(`<circle class="ring-fill" cx="18" cy="18" r="${r}" stroke="${color}" stroke-dasharray="${C} ${C}" stroke-dashoffset="0" transform="rotate(-90 18 18)"/><text class="ring-gly" x="18" y="22.5" text-anchor="middle" fill="${color}">✓</text>`, true);
+  if(st==="loop"||item.loop){ const lh=item._loopWarn; const lc=lh?"var(--st-block)":color;
+    return wrap(`<circle class="ring-dot" cx="18" cy="18" r="${r}" style="stroke:color-mix(in srgb,${lh?'var(--st-block)':'var(--st-run)'} 55%,transparent)"/><text class="ring-gly" x="18" y="22.8" text-anchor="middle" fill="${lc}">∞</text>`, true); }
+  if(st==="queued"||st==="planned") return wrap(`<circle class="ring-dot" cx="18" cy="18" r="${r}"/><text class="ring-gly" x="18" y="22.6" text-anchor="middle" fill="var(--st-idle)">·</text>`, true);
+  // mixed-source workstream → "k of n SESSIONS done" gauge (#5), neutral hue, never a blended percent
+  if(item._sessGauge){
+    const g=item._sessGauge;
+    return wrap(`${segArcs(g.done, g.total, 0, g.percent, 'color-mix(in srgb,var(--muted) 78%,transparent)')}${ringShape(st,o.neutral?color:hue)}<text class="ring-num" x="18" y="22.2" text-anchor="middle" font-size="9">${g.done}/${g.total}</text>`, false);
+  }
+  const prog=item._prog;
+  if(st==="unset" || !prog || (prog.total===0 && !prog.unrun)) return wrap(`<circle class="ring-dot" cx="18" cy="18" r="${r}" style="stroke:color-mix(in srgb,var(--st-sign) 55%,transparent)"/><text class="ring-gly" x="18" y="22.5" text-anchor="middle" fill="var(--st-sign)">?</text>`, true);
+  // stale / never-run command evidence (#5): show "k/n*" muted instead of a confident percent
+  const showFrac = prog.unrun>0 || prog.stale>0;
+  const numTxt = showFrac ? `${prog.met}/${prog.total}*` : `${prog.percent}`;
+  const numFill = showFrac ? 'color-mix(in srgb,var(--muted) 88%,transparent)' : (o.neutral?color:'var(--text)');
+  const numSize = showFrac ? 8.5 : 11;
+  return wrap(`${segArcs(prog.met, prog.total, prog.unrun||0, prog.percent, color)}${ringShape(st,o.neutral?color:hue)}<text class="ring-num" x="18" y="22.6" text-anchor="middle" font-size="${numSize}" fill="${numFill}">${numTxt}</text>`, false);
+}
+
+function badge(status, soft){
+  const m=ST[status]; if(!m) return "";
+  if(status==="block" && soft) return `<span class="badge paused"><span class="d"></span>Paused</span>`;
+  return `<span class="badge ${m.cls}"><span class="d"></span>${m.label}</span>`;
+}
+function srcTag(src){ return `<span class="srcTag" title="DoD source: ${esc(src)}">${esc(src)}</span>`; }
+function dodInline(dod, src){ return `${esc(dod)} ${srcTag(src)}`; }
+
+/* dot-strip: one shape-coded dot per workstream (compact rows + onboarding only, per #15) */
+function dotStrip(p){
+  return `<span class="dotstrip">`+p.workstreams.map(w=>{
+    const cls = ST[w.status]?ST[w.status].cls:"idle";
+    return `<span class="d ${cls}" title="${esc(w.name)} · ${esc((ST[w.status]||{}).label||w.status)}"></span>`;
+  }).join("")+`</span>`;
+}
+
+/* per-project counts */
+function projNeeds(p){ let you=0,fail=0,sign=0,run=0; p.workstreams.forEach(w=>w.sessions.forEach(s=>{
+  if(s.status==="block") you++; if(s.status==="fail") fail++; if(s.status==="sign") sign++; if(s.status==="run"||s.status==="loop") run++; })); return {you,fail,sign,run}; }
+function pClass(p){ const c=projNeeds(p); if(c.you||c.fail) return "attn"; if(c.run) return "active"; if(c.sign) return "signoff"; return "calm"; }
+function firstSessId(p, statuses){ for(const w of p.workstreams) for(const s of w.sessions) if(statuses.includes(s.status)) return s.id; return null; }
+
+/* representative live one-liner (#11): SKIP items already surfaced in Needs-you so the card never
+   restates a blocker it can't action better than the Needs-you card. If the project is nothing BUT
+   needs, point up instead of offering a redundant Continue. */
+function cardLive(p){
+  let best=null, bestW=null, bestRank=99, needCount=0, topNeedW=null;
+  p.workstreams.forEach(w=>w.sessions.forEach(s=>{
+    if(isNeed(s.status)){ needCount++; if(!topNeedW) topNeedW=w; return; }
+    const rk=statusRank(s.status);
+    if(rk<bestRank){ bestRank=rk; best=s; bestW=w; }
+  }));
+  if(!best){
+    if(needCount) return {tone:"block", loop:false, pointUp:"sec-needs", txt:`${topNeedW?topNeedW.name:'This project'} — answer in Needs you`, id:null};
+    return {tone:"calm", loop:false, txt:"All quiet.", id:null};
+  }
+  const st=best.status;
+  if(st==="run"||st==="loop") return {tone:st==="loop"?"loop":"run", loop:st==="loop", txt:best.live, id:best.id};
+  if(st==="unset") return {tone:"calm", loop:false, txt:`${bestW.name} — no Definition of Done set yet`, id:best.id};
+  if(st==="sign")  return {tone:"calm", loop:false, pointUp:"sec-signoff", txt:"Done per its DoD — sign off above", id:best.id};
+  if(st==="queued"||st==="planned") return {tone:"calm", loop:false, txt:best.live, id:best.id};
+  return {tone:"calm", loop:false, txt:"All work merged. Nothing pending.", id:best.id};
+}
+
+/* ─────────────────────────── icons ─────────────────────────── */
+function continueIcon(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 11.5a8.4 8.4 0 0 1-12 7.6L3 21l1.9-6A8.4 8.4 0 1 1 21 11.5Z"/></svg>`; }
+function sendIcon(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m5 12 14-7-5 16-3-7-6-2Z"/></svg>`; }
+function chevIcon(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="14" height="14"><path d="m9 6 6 6-6 6"/></svg>`; }
+function xIcon(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6 18 18M18 6 6 18"/></svg>`; }
+function plusIcon(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>`; }
+function focusIcon(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>`; }
+function historyIcon(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 4v4h4"/><path d="M12 8v4l3 2"/></svg>`; }
+function pauseIcon(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M7 5v14M17 5v14"/></svg>`; }
+function recheckIcon(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg>`; }
+
+/* ═══════════════════════════ master render ═══════════════════════════ */
+function renderAll(sc){
+  const wrap = document.getElementById("wrap");
+  if(sc.empty){ wrap.innerHTML = onboardHtml(sc.candidates||0); bindOnboard(); return; }
+
+  const counts = fleetCounts();
+  // pick ONE ping target for the whole page (#20a) — the liveliest running/looping session
+  state._pingId = (function(){ let best=null,rk=99; Object.values(state.SESS).forEach(({s})=>{
+    if(s.status==="run"||s.status==="loop"){ const r=statusRank(s.status); if(r<rk){rk=r;best=s.id;} } }); return best; })();
+  wrap.innerHTML = `
+    <section class="hero">${heroHtml(counts)}<div class="rail" id="rail"></div></section>
+    ${needsSectionHtml(counts)}
+    ${signoffSectionHtml(counts)}
+    ${projectsSectionHtml(counts)}
+    ${plannedSectionHtml(counts)}
+    ${doneSectionHtml(counts)}
+    ${tailNoteHtml(counts)}
+  `;
+  renderRail(counts);
+  renderNeeds();
+  renderSignoff();
+  renderGrid();
+  renderPlanned();
+  renderDone();
+}
+
+/* projects whose only state is merged/queued — collapsed into the "Healthy & dormant" group.
+   ONE canonical definition, reused by the grid, Done, Planned, rail and hero (#12). */
+function dormantIds(){ return new Set(state.data.filter(p=>pClass(p)==="calm").map(p=>p.id)); }
+
+function fleetCounts(){
+  const c={run:0,loop:0,block:0,sign:0,plan:0,merge:0,fail:0,unset:0,total:0,projects:state.data.length};
+  const dorm=dormantIds();
+  Object.values(state.SESS).forEach(({s,p})=>{
+    c.total++;
+    const inDorm=dorm.has(p.id);
+    if(s.status==="run") c.run++;
+    else if(s.status==="loop") c.loop++;
+    else if(s.status==="block") c.block++;
+    else if(s.status==="sign") c.sign++;
+    // Merged + Planned tallies count only NON-dormant projects so every jump-link lands on a
+    // surface whose count matches what Done / Planned actually render (#12).
+    else if(s.status==="queued"||s.status==="planned"){ if(!inDorm) c.plan++; }
+    else if(s.status==="merge"){ if(!inDorm) c.merge++; }
+    else if(s.status==="fail") c.fail++;
+    else if(s.status==="unset") c.unset++;
+  });
+  c.active = c.run + c.loop;
+  c.needs = c.block + c.fail;
+  c.healthy = dorm.size;
+  return c;
+}
+
+/* since-last-visit DIGEST (#7) — a real status-transition diff against a STORED lastDashboardVisitAt,
+   not a merges-only line. Recent merges count FLEET-WIDE (incl. dormant) so calm-collapse never erases
+   throughput; numstat is demoted to the merged fragment's tooltip; each fragment is a jump-link. */
+const fmtN = n => n>=1000?(n/1000).toFixed(1)+"k":n;
+const shortWs = nm => String(nm||"").replace("Nightly ","").replace("Spike: ","").replace(" loop","");
+function fleetDelta(){
+  let merges=0, add=0, del=0, blocked=0, ready=0, loopName="", loopIters=0;
+  Object.values(state.SESS).forEach(({s,w})=>{
+    if(s.status==="merge" && isRecent((s.artifact&&s.artifact.mergedAgo)||(w&&w.mergedAgo)||"")) {
+      merges++; if(s.artifact){ add+=s.artifact.add||0; del+=s.artifact.del||0; } }
+    if(s.status==="block" && isRecent(s.meta)) blocked++;          // newly blocked since the visit
+    if(s.status==="sign") ready++;                                  // newly ready to sign off
+    if(s.loop && s.dIter && s.dIter>loopIters){ loopIters=s.dIter; loopName=(w&&w.name)||s.name; }
+  });
+  return {merges, add, del, blocked, ready, loopIters, loopName, since:state.lastVisit};
+}
+function deltaClause(){
+  const d=fleetDelta();
+  const frags=[];
+  if(d.merges){ const net=(d.add||d.del)?`+${fmtN(d.add)}/−${fmtN(d.del)} lines (git numstat) since your last visit`:"merged since your last visit";
+    frags.push(`<a data-jump="sec-done" title="${esc(net)}"><b>+${d.merges}</b> merged</a>`); }
+  if(d.blocked) frags.push(`<a data-jump="sec-needs"><b>${d.blocked}</b> newly blocked</a>`);
+  if(d.ready) frags.push(`<a data-jump="sec-signoff"><b>${d.ready}</b> ready to sign off</a>`);
+  if(d.loopIters) frags.push(`<a data-jump="sec-proj">${esc(shortWs(d.loopName))} <b>+${d.loopIters} iters</b></a>`);
+  if(!frags.length) return "";
+  const head = d.since ? `Since you last looked <b>${esc(d.since)}</b>` : `Recent activity`;
+  return `<span class="delta">${head}: ${frags.join('<span class="sep">·</span> ')}.</span>`;
+}
+
+/* ─────────────────────────── hero ─────────────────────────── */
+function heroHtml(c){
+  const day = "Sunday · 21 Jun";
+  const loopWarnN = Object.values(state.SESS).filter(({s})=>s._loopWarn).length;
+  if(c.needs===0){
+    const bits=[];
+    if(c.loop) bits.push(`${c.loop} loop${c.loop>1?"s":""} running`);
+    if(c.run) bits.push(`${c.run} task${c.run>1?"s":""} running`);
+    const runTxt = bits.length? bits.join(" · ") : "nothing running";
+    // headline is honest about the one remaining obligation (#3): a stalled loop, or pending sign-offs
+    let headline;
+    if(loopWarnN) headline = `<em>${loopWarnN} loop${loopWarnN>1?"s":""} need${loopWarnN>1?"":"s"} a look.</em> Nothing else needs you.`;
+    else if(c.sign) headline = `<em>${c.sign} done</em> — your sign-off is all that's pending.`;
+    else headline = `<em class="calm">Nothing needs you.</em> ${esc(runTxt)}, everything else can wait.`;
+    const subBits=[];
+    if(c.loop) subBits.push(`<b>${c.loop} loop${c.loop>1?"s":""}</b> ${loopWarnN?`running · <span style="color:var(--st-block)">${loopWarnN} need${loopWarnN>1?"":"s"} attention</span>`:"within budget"}`);
+    if(c.run) subBits.push(`<b>${c.run} running</b>`);
+    if(c.sign) subBits.push(`<b>${c.sign} done</b> awaiting your sign-off`);
+    if(c.plan) subBits.push(`<b>${c.plan} planned</b>`);
+    // "close this tab" ONLY when truly nothing is pending — no needs, no sign-offs, no stalled loop (#3)
+    const closeTab = (c.sign===0 && c.needs===0 && !loopWarnN) ? " You can close this tab." : "";
+    const stall = loopWarnN ? ` <span style="color:var(--st-block)">· ${loopWarnN} loop${loopWarnN>1?"s":""} stalled — review</span>` : "";
+    return `<div class="eyebrow">${day} · everything in one quiet view</div>
+      <h1 class="headline">${headline}</h1>
+      <p class="subline">${subBits.join(" · ")}${subBits.length?".":""}${closeTab}${stall}${deltaClause()}</p>`;
+  }
+  const subBits=[];
+  if(c.active) subBits.push(`<b>${c.active} running</b> across ${c.projects} project${c.projects>1?"s":""}`);
+  if(c.sign) subBits.push(`<b>${c.sign} done</b> awaiting sign-off`);
+  if(c.plan) subBits.push(`<b>${c.plan} planned</b>, not started`);
+  return `<div class="eyebrow">${day} · everything in one quiet view</div>
+    <h1 class="headline"><em>${c.needs} ${c.needs===1?"thing needs":"things need"} you.</em> Everything else can wait.</h1>
+    <p class="subline">${subBits.join(" · ")}.${deltaClause()}</p>`;
+}
+
+/* ─────────────────────────── tally rail (jump-links) ─────────────────────────── */
+function renderRail(c){
+  // Needs-you count is owned solely by the hero (#1) — no needs pill here.
+  // Hue + swatch only on the ACTIONABLE pills (sign-off, stalled-loop warning) — #2,#10.
+  // Counts are session-level except Healthy, whose unit is labelled (projects) so denominators are clear (#10).
+  const pills=[]; // [extraCls, label, n, jumpId, hasSwatch]
+  const loopWarnN = Object.values(state.SESS).filter(({s})=>s._loopWarn).length;
+  if(loopWarnN){
+    const warnRef = Object.values(state.SESS).find(({s})=>s._loopWarn);
+    pills.push(["warn","Loops need attention", loopWarnN, warnRef?("card-"+warnRef.p.id):"sec-proj", true]);
+  }
+  if(c.sign)  pills.push(["sign","Sign-off", c.sign, "sec-signoff", true]);
+  if(c.active)pills.push(["","Running", c.active, "sec-proj", false]);
+  if(c.plan)  pills.push(["","Planned", c.plan, "sec-planned", false]);
+  if(c.merge) pills.push(["","Merged", c.merge, "sec-done", false]);
+  if(c.healthy) pills.push(["",`Healthy · ${c.healthy} project${c.healthy>1?"s":""}`, "", "sec-healthy", false]);
+  if(!pills.length) pills.push(["","Everything healthy — nothing needs you", "", "sec-proj", false]);
+  document.getElementById("rail").innerHTML = pills.map(([cl,l,n,j,sw])=>
+    `<button class="pill ${cl}" data-jump="${j}">${sw?'<span class="sw"></span>':""}${l}${n!==""?` <span class="n">${n}</span>`:""}</button>`).join("");
+}
+
+/* ─────────────────────────── needs you (4 bands, #14) ─────────────────────────── */
+function needsSectionHtml(c){
+  // When nothing needs you, the hero already says so exactly once — no header, no calmline restatement (#1).
+  if(c.needs===0) return "";
+  const focusBtn = c.needs>2 ? `<button class="hbtn" id="focusBtn">${focusIcon()} Triage all in focus</button>` : `<span class="hint">answer inline — your reply continues the conversation</span>`;
+  // header carries NO count (hero owns it, #1); a single need gets a natural-width column, no empty sibling (#19)
+  return `<div class="shead" id="sec-needs"><h2>Needs you</h2>${focusBtn}</div>
+    <section class="needs${c.needs===1?' single':''}" id="needs"></section>`;
+}
+function renderNeeds(){
+  const host=document.getElementById("needs"); if(!host) return;
+  const items=[];
+  Object.values(state.SESS).forEach(({s,w,p})=>{ if(isNeed(s.status)) items.push({s,w,p}); });
+  items.sort((a,b)=> blastRank(blastRadius(a.s))-blastRank(blastRadius(b.s)) || (a.s.status==="block"?0:1)-(b.s.status==="block"?0:1));
+  const top = items.slice(0,2);
+  const rest = items.slice(2);
+  let html = top.map(({s,w,p})=>{
+    const cls = s.status==="block" ? "block":"fail";
+    const blast = blastRadius(s);
+    const soft = s.status==="block" && !s.elicited;   // non-elicited stop — pi can't PROVE it's blocked (#9)
+    // status badge + (optional) blast tag, both in the SAME hue so one card never shows two alarm colours (#16)
+    const statusBadge = s.status==="fail" ? badge("fail") : badge("block", soft);
+    const blastTag = (blast==="hi"||blast==="md") ? `<span class="blast ${cls}">${blastLabel(blast)}</span>` : "";
+    const headTag = `${statusBadge} ${blastTag}`;
+    // chips ONLY when structurally elicited ({question,options[]}); else degrade to a single open (#9,#12)
+    let chips="";
+    if(s.elicited && s.chips && s.chips.length){
+      chips = `<div class="qreply"><span class="qlbl">quick reply →</span>`+s.chips.map(q=>`<button data-reply="${s.id}" data-text="${esc(q)}">${esc(q)}</button>`).join("")+`</div>`;
+    }
+    const failBtn = s.status==="fail" ? `<button class="btn ghost sm" data-open="${s.id}">${esc(s.failAction||"Re-run")}</button>` : "";
+    const askHtml = soft
+      ? `<span style="color:var(--muted)">No structured question — pi went idle (${esc(s.meta||'a while ago')}), unread. It may be waiting on you, or may simply have finished. Open to read its last message.</span>`
+      : esc(s.live);
+    return `<article class="need ${cls}">
+      <div class="crumb"><b>${esc(p.name)}</b> &nbsp;›&nbsp; ${esc(w.name)}</div>
+      <div class="sname">${esc(s.name)} ${headTag}</div>
+      <div class="ask">${askHtml}</div>
+      ${chips}
+      <div class="actions">
+        <button class="btn primary" data-open="${s.id}">${continueIcon()} ${soft?"Open conversation":"Continue the conversation"}</button>
+        ${failBtn}
+      </div>
+    </article>`;
+  }).join("");
+  if(rest.length){
+    const needRow = ({s,w,p})=>{
+      const blast=blastRadius(s);
+      const blastTag = (blast==="hi"||blast==="md")?`<span class="blast ${s.status==='fail'?'fail':'block'}">${blast==="hi"?"high":"elevated"}</span>`:"";
+      return `<div class="needrow">
+        <span class="sess-dot ${(ST[s.status]||{}).cls||'idle'}" style="background:${(ST[s.status]||{}).color}"></span>
+        <div class="nleft">
+          <div class="ncrumb"><b>${esc(p.name)}</b> › ${esc(w.name)} ${blastTag}</div>
+          <div class="nq">${esc(s.live)}</div>
+        </div>
+        <button class="btn primary sm" data-open="${s.id}">${continueIcon()} Continue</button>
+      </div>`;
+    };
+    const RCAP=6, rShown=rest.slice(0,RCAP), rExtra=rest.slice(RCAP);   // cap the reveal too (#9)
+    html += `<div class="needmore" id="needmore" style="grid-column:1/-1">
+      <div class="needmore-h" data-toggle="needmore"><b>+${rest.length} more need you</b> — collapsed to stay calm; ordered by blast radius<span class="chev">${chevIcon()}</span></div>
+      <div class="needmore-b">${rShown.map(needRow).join("")}${rExtra.length?`<div class="more-rows" hidden>${rExtra.map(needRow).join("")}</div><button class="morelink" data-toggle="more">+${rExtra.length} more — show all</button>`:""}</div>
+    </div>`;
+  }
+  host.innerHTML = html;
+}
+
+/* ─────────────────────────── sign-off — first-class to-do LIST (#1,#4,#5,#6) ─────────────────────────── */
+function hasGitBranch(s){ return !!(s.artifact && s.artifact.branch && s.artifact.kind!=="doc"); }  // gate merge on a real branch (#4)
+function branchOf(s){ return (s.artifact&&s.artifact.branch)||""; }
+function signoffSectionHtml(c){
+  if(!c.sign) return "";
+  // first-class, lifted directly under Needs-you — but ~1/3 the visual mass of a card band (#1)
+  const batch = c.sign>1
+    ? `<button class="hbtn sgn" id="signAll"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="13" height="13"><path d="M20 6 9 17l-5-5"/></svg> Sign off all ${c.sign}</button>`
+    : `<span class="hint">one click — no reply needed</span>`;
+  return `<div class="shead" id="sec-signoff"><h2>Awaiting your sign-off</h2><span class="cnt">${c.sign} done</span>${batch}</div>
+    <section class="signoff" id="signoffHost"></section>`;
+}
+function mergeAffordance(s){
+  // a real branch → an unambiguous "ask pi to merge" prompt; otherwise NO merge implied (#4)
+  return hasGitBranch(s)
+    ? `<button class="btn ghost sm" data-open="${s.id}">Ask pi to merge ${esc(branchOf(s))} → main</button><span class="infg" title="Merge is a SEPARATE, net-new step — pi's git layer is local-only (no push/PR/merge). This sends the agent the prompt &quot;merge ${esc(branchOf(s))} into main&quot; via /api/prompt, or a net-new git-merge endpoint.">i</span>`
+    : `<button class="btn ghost sm" data-open="${s.id}">Archive</button>`;
+}
+function renderSignoff(){
+  const host=document.getElementById("signoffHost"); if(!host) return;
+  const items=[]; Object.values(state.SESS).forEach(({s,w,p})=>{ if(s.status==="sign") items.push({s,w,p}); });
+  const CAP=3, shown=items.slice(0,CAP), rest=items.slice(CAP);
+  const rowHtml = ({s,w,p}) => {
+    const gate=s._gate, gone=!!state.signed[s.id], pending=signPending(s);
+    const lineage = p.nest?` <span class="nest" title="own project root nested inside its parent — not counted toward the parent">⤷ ${esc(p.nest)}</span>`:"";
+    const crit = pending
+      ? `<span class="pend">Done — pending recheck</span> · ${esc((gate&&gate.text)||s.dod)} ${srcTag(s.dodSrc)}`
+      : `Done per its DoD — <span class="gk">${esc((gate&&gate.text)||s.dod)}</span> ${srcTag(s.dodSrc)}`;
+    const act = gone
+      ? `<span style="color:var(--st-merge);font-weight:650">✓ Signed off</span>${mergeAffordance(s)}`
+      : pending
+        ? `<button class="btn ghost sm" data-recheckcard="${s.id}">${recheckIcon()} Re-check</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`
+        : `<button class="btn sign" data-signoff="${s.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`;
+    return `<article class="soff ${gone?'gone':''}">
+      <div class="sleft">
+        <div class="scrumb"><b>${esc(p.name)}</b>${lineage} › ${esc(w.name)} · <span class="sn">${esc(s.name)}</span></div>
+        <div class="scrit">${crit}${s.artifact?` <span style="opacity:.45">·</span> ${artChip(s)}`:""}</div>
+      </div>
+      <div class="sact">${act}</div>
+    </article>`;
+  };
+  let html = shown.map(rowHtml).join("");
+  if(rest.length){
+    html += `<div class="needmore" id="signmore"><div class="needmore-h" data-toggle="needmore"><b>+${rest.length} more to sign off</b> — collapsed to keep the fold tight<span class="chev">${chevIcon()}</span></div>
+      <div class="needmore-b">${rest.map(rowHtml).join("")}</div></div>`;
+  }
+  host.innerHTML = html;
+}
+function showToast(msg, undoFn){
+  let t=document.getElementById("toast");
+  if(!t){ t=document.createElement("div"); t.id="toast"; t.className="toast"; document.body.appendChild(t); }
+  t.innerHTML = `<span>${msg}</span>`+(undoFn?`<button class="undo" id="toastUndo">Undo</button>`:"");
+  t.classList.add("show");
+  clearTimeout(showToast._t); showToast._t=setTimeout(()=>t.classList.remove("show"), 5200);
+  const u=document.getElementById("toastUndo"); if(u) u.onclick=()=>{ if(undoFn) undoFn(); t.classList.remove("show"); };
+}
+/* one-click sign-off = PATCH the manual gate criterion met=true (optimistic) + undo toast (#6) */
+function signOff(id){
+  const ref=state.SESS[id]; if(!ref) return;
+  const gate=ref.s._gate;
+  state.signed[id]=true; if(gate) gate.met=true;
+  renderSignoff();
+  showToast(`<b>${esc(ref.s.name)}</b> signed off — merge is a separate step.`, ()=>{ state.signed[id]=false; if(gate) gate.met=false; renderSignoff(); });
+}
+/* batch action (#1): sign off every clean (non-pending) item at once, one undo */
+function signOffAll(){
+  const flipped=[];
+  Object.values(state.SESS).forEach(({s})=>{ if(s.status==="sign" && !signPending(s) && !state.signed[s.id]){ state.signed[s.id]=true; if(s._gate) s._gate.met=true; flipped.push(s); } });
+  renderSignoff();
+  showToast(`<b>${flipped.length}</b> signed off — merges are separate steps.`, ()=>{ flipped.forEach(s=>{ state.signed[s.id]=false; if(s._gate) s._gate.met=false; }); renderSignoff(); });
+}
+/* on-demand re-check of a stale/unrun command DoD (#5): neutral evaluating ring, then a fresh eval */
+function recheckCard(id){
+  const ref=state.SESS[id]; if(!ref) return; const s=ref.s;
+  s._evaluating=true; renderGrid();
+  showToast(`Re-checking <b>${esc(s.name)}</b>… (on-demand command DoD via /api/dod/evaluate)`);
+  setTimeout(()=>{ (s.crit||[]).forEach(c=>{ if(c.src==="command" && !c.gate){ c.met=true; c.at="now"; } }); s._prog=computeProgress(s.crit); s._evaluating=false; renderSignoff(); renderGrid(); }, 850);
+}
+
+/* ─────────────────────────── projects ─────────────────────────── */
+function projectsSectionHtml(c){
+  // section head = title + count only; the ring legend moved into a '?' tip (#20c)
+  return `<div class="shead" id="sec-proj"><h2>Projects</h2><span class="cnt">${state.data.length}</span>
+      <span class="hint">tap a card to drill in <span class="infg" title="Each ring is one workstream. Segments = its Definition-of-Done criteria, filled = met (or 'k of n sessions done' when a workstream's sessions use mixed DoD sources). ✓ = merged · ∞ = autonomous loop · ? = no DoD set yet.">?</span></span>
+    </div>
+    <section id="projectsHost"></section>`;
+}
+function projWarn(p){ return p.workstreams.some(w=>w._loopWarn); }
+function allWsSurfaced(p){ return p.workstreams.length>0 && p.workstreams.every(w=>w.status==="block"||w.status==="fail"); }
+function agoToMin(a){
+  const s=String(a||"").toLowerCase(); const m=s.match(/(\d+(?:\.\d+)?)/); const v=m?parseFloat(m[1]):1;
+  if(/yesterday/.test(s)) return 1440;
+  if(/min|m ago/.test(s)) return v;
+  if(/h ago|hour/.test(s)) return v*60;
+  if(/d ago|day/.test(s)) return v*1440;
+  if(/w ago|week/.test(s)) return v*10080;
+  return 1e9;
+}
+function mergeRecency(p){ let best=1e9; p.workstreams.forEach(w=>w.sessions.forEach(s=>{ const a=(s.artifact&&s.artifact.mergedAgo)||w.mergedAgo; if(a){ const n=agoToMin(a); if(n<best) best=n; } })); return best; }
+
+/* attention-driven, ALWAYS: full ring-cards for attn (always) + capped active (#2); sign-off / dormant
+   collapse to rows; when every attn/active card is fully surfaced in Needs-you, collapse the grid (#11). */
+function renderGrid(){
+  const host=document.getElementById("projectsHost"); if(!host) return;
+  const attn = state.data.filter(p=>pClass(p)==="attn");
+  const active = state.data.filter(p=>pClass(p)==="active").sort((a,b)=> (projWarn(a)?0:1)-(projWarn(b)?0:1)); // stalled loops first (#3)
+  const dormant = state.data.filter(p=>pClass(p)==="calm");
+  let signoff = state.data.filter(p=>pClass(p)==="signoff");
+
+  // never an empty grid: promote sign-off projects to full cards when nothing is attn/active
+  let fullSign=[];
+  if(!attn.length && !active.length && signoff.length){ fullSign = signoff.slice(); signoff = []; }
+
+  const fullCandidates = attn.concat(active);
+  // #11: collapse the whole grid to one line when every attn/active card is fully surfaced in Needs-you
+  const allCollapse = fullCandidates.length>0 && fullCandidates.every(allWsSurfaced) && !active.some(projWarn);
+
+  let out="";
+  if(allCollapse){
+    out += `<div class="surfline" style="border:1px solid var(--border);border-radius:14px;background:var(--panel);margin-bottom:14px">
+      <span class="sq"></span><b>All work across ${fullCandidates.length} project${fullCandidates.length>1?"s":""}</b> is in Needs&nbsp;you above — nothing extra to surface here
+      <button class="jump" data-jump="sec-needs">answer ↑</button></div>
+      <div class="grpcard" id="sec-collapsed"><div class="grp-h" data-toggle="grp"><span class="gt">In Needs you</span> <span class="gc">${fullCandidates.length} project${fullCandidates.length>1?"s":""} · drill in for full context</span><span class="chev">${chevIcon()}</span></div>
+        <div class="grp-b">`+fullCandidates.map(p=>renderRow(p)).join("")+`</div></div>`;
+  } else {
+    const ACTIVE_CAP = 6;
+    const activeFull = active.slice(0, ACTIVE_CAP);
+    const activeOverflow = active.slice(activeFull.length);
+    const full = attn.concat(activeFull).concat(fullSign);
+    const single = full.length===1 && !signoff.length && !dormant.length && !activeOverflow.length;
+    if(full.length) out += `<div class="grid ${single?'single':''}">`+full.map(p=>renderCard(p)).join("")+`</div>`;
+    // #2: fold active overflow into a "Running · N more" grouped-row card (name + dot-strip + live one-liner)
+    if(activeOverflow.length){
+      out += `<div class="grpcard" id="sec-running"><div class="grp-h" data-toggle="grp"><span class="gt">Running</span> <span class="gc">${activeOverflow.length} more loop${activeOverflow.length>1?"s":""} · within budget · live</span><span class="chev">${chevIcon()}</span></div>
+        <div class="grp-b">`+activeOverflow.map(p=>renderRow(p,{live:true})).join("")+`</div></div>`;
+    }
+  }
+  // sign-off group is a COLLAPSED drill-down reference — the action lives in the strip above (#6 de-dup)
+  if(signoff.length){
+    out += `<div class="grpcard" id="sec-signgrp"><div class="grp-h" data-toggle="grp"><span class="gt sgn">Awaiting your sign-off</span> <span class="gc">${signoff.length} project${signoff.length>1?"s":""} · sign off in the strip above ↑</span><span class="chev">${chevIcon()}</span></div>
+      <div class="grp-b">`+signoff.map(p=>renderRow(p)).join("")+`</div></div>`;
+  }
+  // dormant group — recency-sorted + capped with show-all (#9); id=sec-healthy for the rail jump (#10)
+  if(dormant.length){
+    const sorted = dormant.slice().sort((a,b)=> mergeRecency(a)-mergeRecency(b));
+    const CAP=6, shown=sorted.slice(0,CAP), extra=sorted.slice(CAP);
+    out += `<div class="grpcard" id="sec-healthy"><div class="grp-h" data-toggle="grp"><span class="gt">Healthy &amp; dormant</span> <span class="gc">${dormant.length} project${dormant.length>1?"s":""} · nothing needs you · last-known cached status</span><span class="chev">${chevIcon()}</span></div>
+      <div class="grp-b">`+shown.map(p=>renderRow(p)).join("")
+        +(extra.length?`<div class="more-rows" hidden>${extra.map(p=>renderRow(p)).join("")}</div><button class="morelink" data-toggle="more">+${extra.length} more — show all</button>`:"")
+      +`</div></div>`;
+  }
+  host.innerHTML = out;
+}
+
+function renderCard(p){
+  const c = projNeeds(p);
+  const live = cardLive(p);
+  const hasNeeds = (c.you||c.fail) > 0;
+  const countPills = [];
+  // Needs-you count is owned by the hero (#1) — NO per-card "N in Needs you" pill. Surfaced
+  // workstreams carry a quiet ↑ marker on their ring instead (#13).
+  if(c.sign){ countPills.push(`<button class="countpill sgn jumplink" data-jump="sec-signoff">${c.sign} to sign off ↑</button>`); }
+  if(!hasNeeds && !c.sign){ countPills.push(c.run?`<span class="countpill calm">${c.run} running</span>`:`<span class="countpill calm">all calm</span>`); }
+
+  const surfaced = p.workstreams.filter(w=>w.status==="block"||w.status==="fail");
+  const allSurfaced = hasNeeds && p.workstreams.length>0 && surfaced.length===p.workstreams.length;
+  let ringsBlock;
+  if(allSurfaced){
+    // every workstream is already in Needs-you → don't paint a row of ghost rings (#13)
+    ringsBlock = `<div class="surfline"><span class="sq"></span><b>All ${surfaced.length} workstream${surfaced.length>1?"s":""}</b> are in Needs&nbsp;you<button class="jump" data-jump="sec-needs">answer ↑</button></div>`;
+  } else {
+    const rings = p.workstreams.slice().sort(byAttention).map(w=>{
+      const short = w.name.replace("Nightly ","").replace("Spike: ","").replace(" loop","");
+      const surf = hasNeeds && (w.status==="block"||w.status==="fail");
+      // surfaced rings stay SALIENT (amber hue + dashed outline + ↑) so attention doesn't invert (#11)
+      return `<div class="ringcell${surf?' surfaced':''}" title="${esc(w.name)} — ${esc(w.dod||'DoD not set')}${surf?' · already in Needs you ↑':''}">
+        ${surf?'<span class="upmark" title="surfaced in Needs you — answer above">↑</span>':''}
+        ${ringSvg(w, 54)}
+        <div class="wsn">${esc(short)}</div></div>`;
+    }).join("");
+    ringsBlock = `<div class="rings">${rings}</div>`;
+  }
+
+  const ws = p.workstreams.slice().sort(byAttention).map(w=>renderWorkstream(w,p)).join("");
+  // one-liner: point UP when the only live item is a surfaced need / a sign-off (#11) — never a redundant Continue
+  const liveRun = (live.tone==="run"||live.tone==="loop");
+  let olActs, olAttr, ping="";
+  if(live.pointUp){
+    const lbl = live.pointUp==="sec-needs" ? "Answer ↑" : "Sign off ↑";
+    olActs = `<button class="btn ghost sm" data-jump="${live.pointUp}">${lbl}</button>`;
+    olAttr = `data-jump="${live.pointUp}"`;
+  } else {
+    olActs = liveRun
+      ? `<button class="btn pause sm" data-pause="${live.id}">${pauseIcon()} Pause</button><button class="btn primary sm" data-open="${live.id}">${continueIcon()} Open</button>`
+      : (live.id?`<button class="btn primary sm" data-open="${live.id}">${continueIcon()} Continue</button>`:"");
+    olAttr = live.id?`data-open="${live.id}"`:"";
+    ping = (live.id && live.id===state._pingId) ? " ping" : "";
+  }
+
+  return `<article class="pcard" id="card-${p.id}" data-p="${p.id}">
+    <div class="pcard-head" data-toggle="card">
+      <div class="pcard-id">
+        <div class="pname">${esc(p.name)} ${p.nest?`<span class="nest" title="own project root nested inside its parent — its work is NOT counted toward the parent">⤷ ${esc(p.nest)}</span>`:""}</div>
+        <div class="ppath mono">${esc(p.path)}${p.desc?` · ${esc(p.desc)}`:""}</div>
+      </div>
+      <div class="pcard-counts">
+        <span class="chev">${chevIcon()}</span>
+        ${countPills.join("")}
+      </div>
+    </div>
+    ${ringsBlock}
+    <div class="oneliner ${live.tone}${ping}" ${olAttr}>
+      <span class="live"></span>
+      <span class="txt">${live.loop?`<b>loop · </b>`:""}${esc(live.txt)}</span>
+      ${olActs?`<span class="ol-act">${olActs}</span>`:""}
+    </div>
+    <div class="pbody">${ws}</div>
+  </article>`;
+}
+
+/* compact dense row — name + shape-coded dot-strip + tiny summary (or the LIVE one-liner for the
+   "Running · N more" overflow group, #2), expands inline. */
+function renderRow(p, opts){
+  const o=opts||{};
+  const c=projNeeds(p);
+  const lv = o.live ? cardLive(p) : null;
+  let sum;
+  if(o.live) sum = `<span style="color:var(--st-run)">${lv.loop?'∞ ':''}live</span>`;
+  else if(c.you||c.fail) sum=`<b>${c.you+c.fail}</b> need you`;   // #11: a surfaced row reads "needs you", never "healthy"
+  else if(c.sign) sum=`<b>${c.sign}</b> to sign off`;
+  else { const merged=p.workstreams.filter(w=>w.status==="merge").length; const q=p.workstreams.filter(w=>w.status==="queued"||w.status==="planned").length;
+    sum = merged?`<b>${merged}</b> merged`+(q?` · ${q} queued`:""):(q?`<b>${q}</b> queued`:"healthy"); }
+  const ppTxt = o.live ? esc(lv.txt) : esc(p.path);
+  const ppCls = o.live ? "pp" : "pp mono";
+  const ws = p.workstreams.slice().sort(byAttention).map(w=>renderWorkstream(w,p)).join("");
+  return `<div class="prow" id="card-${p.id}" data-toggle="prow" data-rowp="${p.id}">
+      ${dotStrip(p)}
+      <span class="pn">${esc(p.name)}${p.nest?` <span class="nest" title="nested under its parent — counted only here, not toward the parent">⤷ ${esc(p.nest)}</span>`:""}</span>
+      <span class="${ppCls}">${ppTxt}</span>
+      <span class="psum">${sum}</span>
+      <span class="chev">${chevIcon()}</span>
+    </div>
+    <div class="prow-body" data-rowbody="${p.id}"><div class="pbody" style="display:block;border-top:0">${ws}</div></div>`;
+}
+
+function renderWorkstream(w,p){
+  let extra="";
+  if(w.status==="loop"){
+    const lw = (w.sessions.find(s=>s._loop&&s._loop.warn)||{})._loop;
+    extra = `<span class="loopBadge${w._loopWarn?' warn':''}"><span class="inf">∞</span> ${esc(w.loopTime||"looping")}${w._loopWarn&&lw?` · ${esc(lw.reason)}`:""}</span>`;
+  } else extra = badge(w.status);
+  // session-list cap (#20d): only the first 6 (by attention) render; the rest fold behind "+N more"
+  const sorted = w.sessions.slice().sort(byAttention);
+  const CAP=6, shown=sorted.slice(0,CAP), more=sorted.slice(CAP);
+  const sess = shown.map(s=>renderSession(s,w,p)).join("")
+    + (more.length ? `<div class="sess-extra" hidden>${more.map(s=>renderSession(s,w,p)).join("")}</div><button class="sessmore" data-toggle="sessmore">+${more.length} more session${more.length>1?"s":""}</button>` : "");
+  // mixed-source workstreams report "k of n sessions done", never a blended percent (#5)
+  const mixedNote = w._mixed ? ` <span class="srcTag" title="this workstream's sessions use different DoD evaluators (git / command / manual / sign-off), so the ring is a 'k of n sessions done' gauge — not a blended percent">mixed sources · ${w._sessGauge.done}/${w._sessGauge.total} done</span>` : "";
+  const wsDod = (w.status==="unset"
+    ? `<span style="color:var(--st-sign)">not set</span> ${srcTag(w.dodSrc)}`
+    : dodInline(w.dod, w.dodSrc)) + mixedNote;
+  return `<div class="ws" data-w="${w.id}">
+    <div class="ws-head" data-toggle="ws">
+      <div class="ws-ring">${ringSvg(w, 44)}</div>
+      <div class="ws-id">
+        <div class="ws-name">${esc(w.name)} ${extra}</div>
+        <div class="ws-dod">${wsDod}</div>
+      </div>
+      <div class="ws-meta">
+        <span class="ws-cnt">${w.sessions.length} session${w.sessions.length>1?"s":""}</span>
+        <span class="ws-chev chev">${chevIcon()}</span>
+      </div>
+    </div>
+    <div class="sess-list">${sess}</div>
+  </div>`;
+}
+
+/* artifact chip FACE carries only the receipt's identity — branch/sha + diff, or doc name.
+   The command/exit/timestamp/re-check evidence lives once in the DoD criteria list in the drawer (#14). */
+function artChip(s){
+  const a=s.artifact; if(!a) return "";
+  if(a.kind==="doc"){
+    // gate-aware (#19): "awaiting your review" while the manual review gate is unmet; "✓ user-reviewed" after
+    const gate=s._gate; const reviewed = !gate || gate.met || state.signed[s.id];
+    const tag = reviewed ? `<span class="ok">✓ user-reviewed</span>` : `<span style="color:var(--muted)">awaiting your review</span>`;
+    // #13: the file count is derived from the session's own write/edit tool_result entries (no git, no PR)
+    return `<span class="artchip doc" title="No repo — file count derived from this session's write/edit tool_result entries; verification is your review of the rendered notes, not a merge.">📄 ${esc(a.note)} · ${a.files} file${a.files>1?"s":""} · ${tag}</span>`;
+  }
+  const merged = a.merged;
+  const diff = `<span class="add">+${a.add}</span>/<span class="del">−${a.del}</span>`;
+  const head = merged ? `✓ merged · ${esc(a.sha)}` : esc(a.branch);
+  return `<span class="artchip ${merged?'mg':''}">${esc(head)} · ${diff}</span>`;
+}
+
+function budgetMeter(s){
+  if(!s._loop) return "";
+  const lh=s._loop, pct=Math.max(lh.pctTime||0, lh.pctCost||0);
+  const lab = (lh.b.maxMinutes!=null && s.elapsedMin!=null) ? `${s.elapsedMin}/${lh.b.maxMinutes}m`
+    : (lh.b.maxCostUsd!=null && s.cost!=null ? `$${s.cost}/$${lh.b.maxCostUsd}` : "");
+  return `<div class="budget ${lh.warn?'warn':''}" style="margin-top:8px" title="budget compared to SessionStats.cost + elapsed; amber only over budget or on a stalled (flat/declining) iteration tail">
+    <span class="bar"><i style="width:${Math.min(100,pct)}%"></i></span>budget ${esc(lab)} · ${lh.warn?esc(lh.reason):"within budget"}</div>`;
+}
+function renderSession(s,w,p){
+  const cls=(ST[s.status]||{}).cls||"idle";
+  // shape-coded sess-dot encodes status without leaning on hue (#14); status badge dropped (ws badge sits above)
+  const dot = `<span class="sess-dot ${cls}" style="background:${(ST[s.status]||{}).color||'var(--st-idle)'}"></span>`;
+  const artifact = s.artifact ? `<div style="margin-top:8px">${artChip(s)}</div>` : "";
+  let queue="";
+  if(s.queue && s.queue.length){
+    const total = s.queueTotal || s.queue.length;
+    const shown = s.queue.slice(0,3);
+    const more = total - shown.length;
+    queue = `<div class="qnext">`+(s.iterspark?`${iterSparkHtml(s.iterspark)} `:"")
+      +shown.map((q,i)=>`<span class="qchip"><span class="qn">${i+1}</span>${esc(q)}</span>`).join("")
+      +(more>0?`<span class="qmore">~${more} more planned</span>`:"")
+      +`<span class="infg" title="Planned-next items are best-effort, parsed from the agent's notes — pi has no TodoWrite/plan primitive, so the count is approximate (~). A plan-tool extension writing CustomEntry items would make it exact.">i</span></div>`;
+  }
+  // state-matched verbs (#20e); sign rows expose the same one-click Sign off as the strip (#6)
+  const verb = s.status==="merge" ? "View" : (s.status==="run"||s.status==="loop") ? "Open" : s.status==="unset" ? "Define done" : "Continue";
+  const primary = `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} ${verb}</button>`;
+  let secondary="";
+  if(s.status==="sign") secondary=`<button class="btn sign sm" data-signoff="${s.id}">✓ Sign off</button>`;
+  else if(s.status==="fail") secondary=`<button class="btn ghost sm" data-open="${s.id}">${esc(s.failAction||"Re-run")}</button>`;
+  else if(s.status==="run"||s.status==="loop") secondary=`<button class="btn pause sm" data-pause="${s.id}">${pauseIcon()} Pause</button>`;
+
+  const dodTxt = s.status==="unset" ? `<span style="color:var(--st-sign)">no criterion set — define what done means</span> ${srcTag(s.dodSrc)}`
+    : dodInline(s.dod, s.dodSrc);
+  const loopTag = s.loop ? `<span class="loopBadge${s._loopWarn?' warn':''}"><span class="inf">∞</span> ${esc(s.meta||'looping')}${s._loopWarn?` · ${esc(s._loop.reason)}`:""}</span>` : "";
+
+  return `<div class="sess" data-open="${s.id}">
+    ${dot}
+    <div class="sess-main">
+      <div class="sess-top"><span class="sess-name">${esc(s.name)}</span> ${loopTag}</div>
+      <div class="sess-live">${s.kind==='question'?'❔ ':''}${s.kind==='failed'?'⚠ ':''}<b>${esc(s.live)}</b>${(!s.loop&&s.meta&&s.kind!=='failed'&&s.status!=='block'&&s.status!=='unset')?` · ${esc(s.meta)}`:""}</div>
+      <div class="sess-dod">${dodTxt}</div>
+      ${artifact}
+      ${s.loop?budgetMeter(s):""}
+      ${queue}
+    </div>
+    <div class="sess-act" onclick="event.stopPropagation()">
+      ${primary}
+      ${secondary}
+    </div>
+  </div>`;
+}
+
+function iterSparkHtml(arr){
+  const max=Math.max(...arr,1);
+  return `<span class="iterspark" title="iteration rhythm — tool_execution_end events per loop iteration (health, not progress)">`+arr.map(v=>`<i style="height:${Math.max(3,Math.round(v/max*16))}px"></i>`).join("")+`</span>`;
+}
+
+/* ─────────────────────────── planned surface (#8,#9: self-labeling accordion, no double heading) ─────────────────────────── */
+function plannedSectionHtml(c){
+  if(!c.plan) return "";
+  return `<section class="done" id="sec-planned" style="margin-top:32px"></section>`;
+}
+function renderPlanned(){
+  const host=document.getElementById("sec-planned"); if(!host) return;
+  // same scope as the rail/hero count (#12): exclude dormant-project planned rows so it never becomes a wall
+  const dorm=dormantIds();
+  const items=[]; Object.values(state.SESS).forEach(({s,w,p})=>{ if((s.status==="queued"||s.status==="planned") && !dorm.has(p.id)) items.push({s,w,p}); });
+  const row = ({s,w,p}) => {
+    const total=s.queueTotal||(s.queue?s.queue.length:0); const shown=(s.queue||[]).slice(0,3); const more=total-shown.length;
+    const plan = s.queue&&s.queue.length ? `<div class="qnext">`+shown.map((q,i)=>`<span class="qchip"><span class="qn">${i+1}</span>${esc(q)}</span>`).join("")+(more>0?`<span class="qmore">~${more} more planned</span>`:"")+`<span class="infg" title="Planned-next items are best-effort, parsed from the agent's notes — pi has no TodoWrite/plan primitive, so the count is approximate (~).">i</span></div>` : "";
+    return `<div class="drow" data-open="${s.id}">
+      <div class="dleft">
+        <div class="dcrumb"><b>${esc(p.name)}</b>${p.nest?` <span class="nest">⤷ ${esc(p.nest)}</span>`:""} › ${esc(w.name)}</div>
+        <div class="dname">${esc(s.name)} ${badge(s.status)}</div>
+        <div class="dnote">${esc(s.live)} · DoD: ${dodInline(s.dod, s.dodSrc)}</div>
+        ${plan}
+      </div>
+      <div class="sess-act">
+        <button class="btn primary sm" data-open="${s.id}">${continueIcon()} Start</button>
+      </div>
+    </div>`;
+  };
+  const CAP=6, shown=items.slice(0,CAP), extra=items.slice(CAP);
+  host.innerHTML = `
+    <div class="done-head" data-toggle="done">
+      <div class="done-title">≡ Planned</div>
+      <div class="done-sum"><b class="p">${items.length} planned</b>, not started — each has a ready plan</div>
+      <span class="chev">${chevIcon()}</span>
+    </div>
+    <div class="done-body">
+      <div class="done-grp"><div class="done-grp-h plan"><span class="sw"></span> Ready to start · ${items.length}</div>
+        ${shown.map(row).join("")}${extra.length?`<div class="more-rows" hidden>${extra.map(row).join("")}</div><button class="morelink" data-toggle="more">+${extra.length} more — show all</button>`:""}</div>
+    </div>`;
+}
+
+/* ─────────────────────────── done surface — COMPLETED & MERGED only (#6,#10) ───────────────────────────
+   "Awaiting your sign-off" is its own lifted strip above; Done is the merged receipt wall, collapsed. */
+function doneSectionHtml(c){
+  if(!c.merge) return "";
+  return `<section class="done" id="sec-done" style="margin-top:32px"></section>`;
+}
+function renderDone(){
+  const host=document.getElementById("sec-done"); if(!host) return;
+  const dorm=dormantIds();
+  const mergeToday=[], mergeEarlier=[];
+  Object.values(state.SESS).forEach(({s,w,p})=>{
+    if(s.status==="merge"){
+      if(dorm.has(p.id)) return;  // dormant merges live in the Healthy & dormant group — never double-counted (#12)
+      const ago=(s.artifact&&s.artifact.mergedAgo)||w.mergedAgo||"";
+      (isRecent(ago)?mergeToday:mergeEarlier).push({s,w,p});
+    }
+  });
+  const CAP=6;
+  const row = ({s,w,p}) => {
+    const ago=(s.artifact&&s.artifact.mergedAgo)||w.mergedAgo;
+    const note = `DoD met: <b style="color:var(--text);font-weight:650">${esc(s.dod)}</b> ${srcTag(s.dodSrc)}${ago?` · merged ${esc(ago)}`:""}`;
+    return `<div class="drow" data-open="${s.id}">
+      <div class="dleft">
+        <div class="dcrumb"><b>${esc(p.name)}</b>${p.nest?` <span class="nest">⤷ ${esc(p.nest)}</span>`:""} › ${esc(w.name)}</div>
+        <div class="dname">${esc(s.name)} ${badge("merge")}</div>
+        <div class="dnote">${note}</div>
+        <div style="margin-top:8px">${artChip(s)}</div>
+      </div>
+      <div class="sess-act">
+        <button class="btn ghost sm" data-open="${s.id}">View merge</button>
+      </div>
+    </div>`;
+  };
+  const cap = (arr, label, cls) => {
+    if(!arr.length) return "";
+    const shown=arr.slice(0,CAP), extra=arr.slice(CAP);
+    return `<div class="done-grp"><div class="done-grp-h ${cls}"><span class="sw"></span> ${label} · ${arr.length}</div>
+      ${shown.map(row).join("")}${extra.length?`<div class="more-rows" hidden>${extra.map(row).join("")}</div><button class="morelink" data-toggle="more">+${extra.length} older — show all</button>`:""}</div>`;
+  };
+  const mtot=mergeToday.length+mergeEarlier.length;
+  host.innerHTML = `
+    <div class="done-head" data-toggle="done">
+      <div class="done-title">✓ Done</div>
+      <div class="done-sum"><b class="m">${mtot} completed &amp; merged</b> — verified receipts <span class="infg" title="Verification-first: no done card without its receipt — a diff (git numstat), a merge sha (git merge-base --is-ancestor), or a rendered doc.">?</span></div>
+      <span class="chev">${chevIcon()}</span>
+    </div>
+    <div class="done-body">
+      ${cap(mergeToday, "Completed &amp; merged · today", "merge")}
+      ${cap(mergeEarlier, "Completed &amp; merged · earlier", "merge earlier")}
+    </div>`;
+}
+
+function tailNoteHtml(c){
+  // say "close this tab" once — the hero already carries it when calm (#17b)
+  if(c.needs===0) return "";
+  return `<p class="calmnote">All other loops are quiet. pi will surface them here the moment they need you.</p>`;
+}
+
+/* ─────────────────────────── first-run onboarding ─────────────────────────── */
+function onboardHtml(candidates){
+  const disc = candidates>0 ? `
+    <div class="disc">
+      pi found <b>${candidates} recent session folder${candidates>1?"s":""}</b> that look like projects. Add them with one tap:
+      <div class="cands">
+        <div class="cand"><span class="dotstrip"><span class="d merge"></span></span><span class="cpath mono">~/workspace/oss/pi-web</span><span class="cmeta">git · 12 sessions</span><button class="btn ghost sm">Add</button></div>
+        <div class="cand"><span class="dotstrip"><span class="d merge"></span></span><span class="cpath mono">~/workspace/wealthlens</span><span class="cmeta">git · 8 sessions</span><button class="btn ghost sm">Add</button></div>
+        <div class="cand"><span class="dotstrip"><span class="d idle"></span></span><span class="cpath mono">~/zippy</span><span class="cmeta">git · 5 sessions</span><button class="btn ghost sm">Add</button></div>
+      </div>
+    </div>` : `
+    <div class="disc">No sessions yet — once you start one, pi will offer to roll its folder up into a project automatically.</div>`;
+  return `<div class="onboard">
+    <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="11" height="6" rx="1.5"/><path d="M18 14v6M21 17h-6" opacity=".6"/></svg></div>
+    <h2>Roll up your work into projects</h2>
+    <p>pi-web groups your sessions into a calm, at-a-glance view. Tell it which folders are projects, and it organizes everything underneath.</p>
+    <div class="model">
+      <span class="node">Project</span><span class="arr">›</span>
+      <span class="node">Workstream</span><span class="arr">›</span>
+      <span class="node">Session</span><span class="arr">·</span>
+      <span class="node">Definition of Done</span>
+    </div>
+    <p style="font-size:12px">Each workstream tracks a <b style="color:var(--text)">Definition of Done</b> — merged to main, tests passing, or your sign-off — and a ring shows progress toward it.</p>
+    <div class="actions">
+      <button class="btn primary" id="obAdd">${plusIcon()} Add a project</button>
+      <button class="btn" id="obStart">${continueIcon()} Start your first session</button>
+    </div>
+    ${disc}
+  </div>`;
+}
+function bindOnboard(){
+  const add=document.getElementById("obAdd"); if(add) add.onclick=()=>{};
+  const st=document.getElementById("obStart"); if(st) st.onclick=()=>{};
+}
+
+/* ─────────────────────────── conversation overlay ─────────────────────────── */
+function critListHtml(s){
+  if(!s.crit || !s.crit.length) return "";
+  // EVALUATOR family (#18) — distinct from the DoD's provenance pill (authoredBy, shown at the DoD level).
+  // Every src resolves to one of the four REAL evaluators; an agent-asserted boolean is a manual evaluator.
+  const evalFamily = {manual:"manual",command:"command",git_merged:"git",git_clean:"git",git_ahead_zero:"git",agent:"manual",session_idle:"runtime"};
+  return `<div class="critlist">`+s.crit.map(c=>{
+    const fam = evalFamily[c.src]||"manual";
+    const stale=critStale(c), unrun=critUnrun(c);
+    const atTxt = unrun ? ` <span class="stale">· not yet run — excluded from %</span>`
+      : (c.at ? ` <span class="${stale?'stale':''}">· evaluated ${esc(c.at)}${stale?' (stale)':''}</span>` : "");
+    const ev = (c.ev||unrun||c.src==="command") ? `<div class="cev">${esc(c.ev||"")}${atTxt}${c.src==="command"?` <button class="recheck" data-recheck>${recheckIcon()} re-check</button>`:""}</div>` : "";
+    return `<div class="crit ${c.met?'met':''} ${c.gate?'gate':''}">
+      <span class="box">${c.met?'✓':(c.gate?'…':'')}</span>
+      <div><div class="ctext">${esc(c.text)} <span class="srcTag" style="margin-left:4px" title="evaluator: ${esc(fam)}">${esc(fam)}</span>${c.gate?`<span class="gatepill">sign-off gate · excluded from %</span>`:""}</div>
+      ${ev}</div>
+    </div>`;
+  }).join("")+`</div>`;
+}
+
+function transcript(s,w,p){
+  const sys = `<div class="m sys">Session opened in <span class="mono">${esc(p.path)}</span></div>`;
+  const userMsg = txt => `<div class="m user">${esc(txt)}</div>`;
+  const ai = html => `<div class="m ai">${html}</div>`;
+  const think = (title,body)=>`<div class="tcard think"><div class="tcard-h" data-tc><span class="ic">✦</span><span class="ti">${esc(title)}</span><span class="cv">${chevIcon()}</span></div><div class="tcard-b">${esc(body)}</div></div>`;
+  const tool = (title,body,ok)=>`<div class="tcard ${ok?'ok':''}"><div class="tcard-h" data-tc><span class="ic">${ok?'✓':'›_'}</span><span class="ti">${esc(title)}</span><span class="cv">${chevIcon()}</span></div><div class="tcard-b">${esc(body)}</div></div>`;
+
+  let body = sys;
+  if(s.status==="block"){
+    body += userMsg("Set this up for me.");
+    const askBlock = s.elicited
+      ? `<p>Groundwork is wired. Before I continue toward the Definition of Done, I need a decision from you (structured ask_user prompt — options below pre-fill your reply):</p><div class="q"><b>${esc(s.live)}</b></div>`
+      : `<p>Groundwork is wired, then I stopped with a free-text question. There are no structured options to offer as chips — read it and reply in your own words:</p><div class="q"><b>${esc(s.live)}</b></div>`;
+    body += ai(think("Thought for 8s · planning","Need a product decision before I lock in the work, since it changes the test fixtures and is hard to reverse later.")
+      + tool("bash · probe","$ … returned ok", true) + askBlock);
+  } else if(s.status==="fail"){
+    body += userMsg("Keep this in sync for me.");
+    body += ai(tool("cron · run","$ node sync.js\n→ refreshing token\n✗ 401 invalid_grant: token expired or revoked", false)
+      + `<div class="ferr"><b>⚠ Failed — ${esc(s.live)}</b><br>I can resume the moment you ${esc((s.failAction||'re-run').toLowerCase())}. Nothing else is blocked on this.</div>`);
+  } else if(s.status==="loop"){
+    body += `<div class="m sys">Autonomous loop · ${esc(s.meta||'looping')} · DoD: ${esc(s.dod)}</div>`;
+    body += ai(think("Thought · picking the next item","Open-ended loop. I work the highest-signal item, re-evaluate, and append new findings. Stopping condition is the DoD, not a fixed list.")
+      + tool("run · latest iteration","… progress this iteration", false)
+      + `<p>${esc(s.live)} I will keep looping until the DoD is met, staying within budget.</p>`);
+    if(s.queue){
+      const total=s.queueTotal||s.queue.length; const shown=s.queue.slice(0,3); const more=total-shown.length;
+      body += `<div class="m ai"><div class="tcard open"><div class="tcard-h" data-tc><span class="ic">≡</span><span class="ti">Planned next (~${total} queued, growing · best-effort)</span><span class="cv">${chevIcon()}</span></div><div class="tcard-b">`+shown.map((q,i)=>`${i+1}. ${esc(q)}`).join("\n")+(more>0?`\n… ~${more} more — growth is expected for an open-ended loop`:"")+`</div></div></div>`;
+    }
+  } else if(s.status==="run"){
+    body += userMsg("Work on this for me.");
+    body += ai(tool("tool · step","→ in progress", true)
+      + `<p>${esc(s.live)} I will leave results for your review and never finalize without sign-off.</p>`);
+  } else if(s.status==="unset"){
+    body += `<div class="m sys">No Definition of Done set for this session.</div>`;
+    body += ai(`<p>I do not have a Definition of Done for <b>${esc(s.name)}</b> yet, so I will not show a fabricated percent. Tell me what "done" means here and I will track progress against it.</p>`
+      + `<div class="q" style="border-color:color-mix(in srgb,var(--st-sign) 42%,var(--border));background:color-mix(in srgb,var(--st-sign) 9%,transparent);color:#eaddff"><b>What is the Definition of Done?</b><br>e.g. "a decision doc comparing 3 options, reviewed by me" — or pick a git / test rule.</div>`);
+  } else if(s.status==="sign" || s.status==="merge"){
+    const merged = s.status==="merge";
+    body += userMsg(`Build ${esc(s.name)}.`);
+    body += ai(think("Thought · wrapping up","Implementation is complete and the Definition of Done is satisfied. Surfacing the verification artifact so you can confirm at a glance.")
+      + `<p>${esc(s.live)} ${merged?'It is merged to mainline and the check passed.':'Every evaluable criterion is green (100%); only your sign-off gate remains.'}</p>`
+      + artifactPreview(s));
+  } else {
+    body += `<div class="m sys">DoD: ${esc(s.dod)} · ${esc(s.dodSrc)}</div>`;
+    if(s.queue && s.queue.length){
+      body += ai(`<p>${esc(s.live)} Here is the plan I will run once you say go (best-effort, parsed from my notes):</p>`
+        + `<div class="tcard open"><div class="tcard-h" data-tc><span class="ic">≡</span><span class="ti">Plan</span><span class="cv">${chevIcon()}</span></div><div class="tcard-b">`+s.queue.map((q,i)=>`${i+1}. ${esc(q)}`).join("\n")+`</div></div>`);
+    } else { body += ai(`<p>${esc(s.live)}</p>`); }
+  }
+  return body;
+}
+
+function artifactPreview(s){
+  const a=s.artifact; if(!a) return "";
+  if(a.kind==="doc"){
+    return `<div class="art"><div class="art-h"><span class="at">${esc(a.note)}</span><span style="color:var(--muted)">${a.files} file${a.files>1?"s":""} · no repo</span><span class="ok">✓ user-reviewed</span></div>
+      <div class="art-b"><div class="md">
+        <h4>Competitor pricing — summary</h4>
+        <ul><li><b>Plaid</b> — usage-based, $0.30 / linked item / mo</li><li><b>Finicity</b> — tiered, volume discounts &gt; 50k</li><li><b>MX</b> — flat platform fee + per-call</li></ul>
+        <div style="margin-top:8px;color:var(--muted);font-size:11px">Plain folder · verification is your review of the rendered notes, not a merge.</div>
+      </div></div></div>`;
+  }
+  if(a.kind==="spark"){
+    return `<div class="art"><div class="art-h"><span class="at">${esc(a.note||'chart')}</span><span style="color:var(--muted)">${esc(a.branch)} · +${a.add}/−${a.del}</span><span class="ok">✓ ${esc(a.check?a.check.cmd:'visual')}</span></div>
+      <div class="art-b">
+        <svg class="spark" viewBox="0 0 320 96" preserveAspectRatio="none">
+          <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7dd3fc" stop-opacity=".35"/><stop offset="1" stop-color="#7dd3fc" stop-opacity="0"/></linearGradient></defs>
+          <path d="M0 70 L40 64 L80 58 L120 48 L160 52 L200 38 L240 30 L280 22 L320 14 L320 96 L0 96 Z" fill="url(#sg)"/>
+          <path d="M0 70 L40 64 L80 58 L120 48 L160 52 L200 38 L240 30 L280 22 L320 14" fill="none" stroke="#7dd3fc" stroke-width="2"/>
+        </svg>
+        <div style="margin-top:8px;color:var(--muted);font-size:12px">Net worth, last 12 months — D3 replaced with an inline sparkline (38kb → 1.2kb).</div>
+      </div></div>`;
+  }
+  const merged=a.merged;
+  return `<div class="art"><div class="art-h"><span class="at">${merged?`merged · ${esc(a.sha)}`:esc(a.branch)}</span> <span style="color:var(--muted)">+${a.add}/−${a.del}${a.ahead?` · ahead ${a.ahead}`:""}</span>${a.check?`<span class="ok">✓ ${esc(a.check.cmd)} ${a.check.exit===0?'exit 0':'exit '+a.check.exit} · ${esc(a.check.at)}</span>`:""}</div>
+    <div class="art-b"><div class="diff">
+      <div class="ctx">@@ ${esc(s.name)} @@  ${merged?`(merge-base --is-ancestor: ✓)`:`(branch ${esc(a.branch)})`}</div>
+      <div class="del">- legacy path with no verification</div>
+      <div class="add">+ verified implementation · ${a.add} insertions</div>
+      <div class="add">+ ${a.check?`${esc(a.check.cmd)} → exit ${a.check.exit}`:'checks recorded'}</div>
+    </div>
+    <div style="margin-top:8px;color:var(--muted);font-size:11px">Grounded in <span class="mono">git numstat</span> (+${a.add}/−${a.del})${merged?` and <span class="mono">git merge-base --is-ancestor</span>`:` on <span class="mono">${esc(a.branch)}</span>`}${a.check?` · check via on-demand command DoD`:""}.</div>
+    </div></div>`;
+}
+
+function openSession(id, prefill){
+  const ref = state.SESS[id]; if(!ref) return;
+  const {s,w,p}=ref;
+  // composer secondary action — two-step sign-off then merge (#10), never a fused "Sign off & merge";
+  // the merge step is gated on a real git branch and labelled unambiguously (#4)
+  let secActions="";
+  if(s.status==="sign") secActions=`<button class="btn sign sm" data-signoff="${s.id}">✓ Sign off</button><span class="lab">then</span>${mergeAffordance(s)}`;
+  else if(s.status==="merge") secActions=`<span class="lab">Or:</span><button class="btn ghost sm">Open merge ${esc((s.artifact||{}).sha||'')}</button>`;
+  else if(s.status==="fail") secActions=`<span class="lab">Or:</span><button class="btn ghost sm">${esc(s.failAction||'Re-run')}</button>`;
+  else if(s.status==="run"||s.status==="loop") secActions=`<span class="lab">Or:</span><button class="btn ghost sm">${pauseIcon()} Pause loop</button>`;
+  else if(s.status==="unset") secActions=`<span class="lab">Or:</span><button class="btn ghost sm">Pick a git / test rule</button>`;
+
+  // quick-reply chips ONLY for structured elicitations (#12)
+  let cqr="";
+  if(s.elicited && s.chips && s.chips.length){
+    cqr = `<div class="cqreply"><span class="qlbl">quick reply →</span>`+s.chips.map(q=>`<button data-cfill="${esc(q)}">${esc(q)}</button>`).join("")+`</div>`;
+  }
+
+  const placeholder = s.status==="block"
+    ? "Ask pi…  (your reply continues the conversation)"
+    : s.status==="unset" ? "Ask pi…  (describe what done means, or name a git/test rule)"
+    : "Ask pi…  (pick up the conversation where it left off)";
+
+  let focusBar="";
+  if(state.focus){
+    const {ids,i}=state.focus; const left=ids.length-i-1;
+    focusBar = `<div class="focusbar show">${focusIcon()} Focus triage · item ${i+1} of ${ids.length}<span class="grow"></span>${left>0?`<button class="btn ghost sm" id="focusNext">Next (${left} left) ${chevIcon()}</button>`:`<button class="btn ghost sm" id="focusDone">Done</button>`}</div>`;
+  }
+
+  const ringItem = (s._prog || s.status!=='queued') ? s : w;
+  const conv = document.getElementById("conv");
+  conv.innerHTML = `
+    ${focusBar}
+    <div class="conv-head">
+      <div class="conv-crumb">
+        <div class="cc1"><b>${esc(p.name)}</b> &nbsp;›&nbsp; ${esc(w.name)} ${p.nest?`· ${esc(p.nest)}`:""}</div>
+        <div class="cc2">${esc(s.name)} ${badge(s.status, s.status==="block"&&!s.elicited)}</div>
+      </div>
+      <button class="conv-close" id="convClose">${xIcon()}</button>
+    </div>
+    <div class="dodbar" id="dodbar">
+      <div class="dodbar-top" data-dod>
+        <div class="dring">${ringSvg(ringItem, 38)}</div>
+        <div class="dtxt">
+          <div class="dt1">Definition of Done ${srcTag(s.dodSrc)}</div>
+          <div class="dt2">${s.status==="unset"?'<span style="color:var(--st-sign)">not set — define what done means below</span>':esc(s.dod)}${(s.status==="sign"&&s._gate)?' <span style="color:var(--st-sign)">· 100% of evaluable criteria met, sign-off gate pending</span>':''}</div>
+        </div>
+        ${s.crit&&s.crit.length?`<span class="dexp chev">${chevIcon()}</span>`:""}
+      </div>
+      ${critListHtml(s)}
+    </div>
+    <div class="conv-msgs" id="convMsgs">${transcript(s,w,p)}</div>
+    <div class="composer">
+      ${cqr}
+      <div class="secrow">${secActions}</div>
+      <div class="ctextwrap">
+        <textarea class="ctext" id="ctext" placeholder="${esc(placeholder)}"></textarea>
+        <div class="cfoot">
+          <span class="cmodel">pi-opus · <span class="think">thinking: high</span></span>
+          <span class="grow"></span>
+          <button class="csend" id="csend">${sendIcon()} Send</button>
+        </div>
+      </div>
+      <div class="hint">Continue the conversation — your reply goes straight to the agent. Approve / sign-off are optional shortcuts above.</div>
+    </div>`;
+
+  document.getElementById("cback").classList.add("show");
+  conv.classList.add("show"); conv.setAttribute("aria-hidden","false");
+  const msgs=document.getElementById("convMsgs");
+  requestAnimationFrame(()=>{ msgs.scrollTop=msgs.scrollHeight; });
+  const ta=document.getElementById("ctext");
+  if(prefill){ ta.value=prefill; }
+  setTimeout(()=>{ if(s.status==="block"||s.status==="fail"||s.status==="unset"||prefill) ta.focus(); }, 260);
+
+  document.getElementById("convClose").onclick = ()=>{ state.focus=null; closeConv(); };
+  const dodTop=conv.querySelector("[data-dod]");
+  if(dodTop) dodTop.onclick=()=>document.getElementById("dodbar").classList.toggle("open");
+  conv.querySelectorAll("[data-cfill]").forEach(b=> b.onclick=()=>{ ta.value=b.getAttribute("data-cfill"); ta.focus(); });
+  conv.querySelectorAll("[data-recheck]").forEach(b=> b.onclick=(e)=>{ e.stopPropagation(); b.innerHTML=`${recheckIcon()} re-running…`; });
+  const fn=document.getElementById("focusNext"); if(fn) fn.onclick=()=>{ state.focus.i++; openSession(state.focus.ids[state.focus.i]); };
+  const fd=document.getElementById("focusDone"); if(fd) fd.onclick=()=>{ state.focus=null; closeConv(); };
+
+  document.getElementById("csend").onclick = ()=>{
+    const v=ta.value.trim(); if(!v) { ta.focus(); return; }
+    const fresh=document.getElementById("convMsgs");
+    fresh.insertAdjacentHTML("beforeend", `<div class="m user">${esc(v)}</div>`+
+      `<div class="m ai"><div class="tcard think open"><div class="tcard-h" data-tc><span class="ic">✦</span><span class="ti">pi is thinking…</span><span class="cv">${chevIcon()}</span></div><div class="tcard-b">Picking up the conversation with your reply and resuming work toward the Definition of Done.</div></div></div>`);
+    ta.value=""; fresh.scrollTop=fresh.scrollHeight;
+    fresh.querySelectorAll("[data-tc]").forEach(h=> h.onclick=()=> h.parentElement.classList.toggle("open"));
+  };
+  conv.querySelectorAll("[data-tc]").forEach(h=> h.onclick=()=> h.parentElement.classList.toggle("open"));
+}
+function closeConv(){
+  document.getElementById("cback").classList.remove("show");
+  const conv=document.getElementById("conv"); conv.classList.remove("show"); conv.setAttribute("aria-hidden","true");
+}
+
+/* ─────────────────────────── events ─────────────────────────── */
+document.addEventListener("click", e=>{
+  const pause = e.target.closest("[data-pause]");
+  if(pause){ e.preventDefault(); e.stopPropagation(); const on=pause.getAttribute("data-paused")==="1";
+    pause.setAttribute("data-paused", on?"0":"1");
+    pause.innerHTML = on ? `${pauseIcon()} Pause` : `${continueIcon()} Resume`;
+    return; }
+
+  const reply = e.target.closest("[data-reply]");
+  if(reply){ e.preventDefault(); e.stopPropagation(); openSession(reply.getAttribute("data-reply"), reply.getAttribute("data-text")); return; }
+
+  const rc = e.target.closest("[data-recheckcard]");
+  if(rc){ e.preventDefault(); e.stopPropagation(); recheckCard(rc.getAttribute("data-recheckcard")); return; }
+
+  const so = e.target.closest("[data-signoff]");
+  if(so){ e.preventDefault(); e.stopPropagation(); signOff(so.getAttribute("data-signoff")); return; }
+
+  if(e.target.closest("#signAll")){ e.preventDefault(); e.stopPropagation(); signOffAll(); return; }
+
+  const open = e.target.closest("[data-open]");
+  if(open){ e.preventDefault(); e.stopPropagation(); openSession(open.getAttribute("data-open")); return; }
+
+  // jump-links land ON the matching surface AND auto-expand collapsed targets (#10)
+  const jump = e.target.closest("[data-jump]");
+  if(jump){ e.preventDefault(); e.stopPropagation(); const el=document.getElementById(jump.getAttribute("data-jump"));
+    if(el){
+      const grp=el.closest(".grpcard"); if(grp) grp.classList.add("open");
+      if(el.classList.contains("grpcard")||el.classList.contains("done")||el.classList.contains("pcard")) el.classList.add("open");
+      if(el.classList.contains("prow")){ el.classList.add("open"); const body=el.nextElementSibling; if(body&&body.classList.contains("prow-body")) body.classList.add("open"); }
+      el.scrollIntoView({behavior:"smooth",block:"start"});
+    } return; }
+
+  if(e.target.closest("#focusBtn")){
+    const items=[]; Object.values(state.SESS).forEach(({s})=>{ if(isNeed(s.status)) items.push(s); });
+    items.sort((a,b)=> blastRank(blastRadius(a))-blastRank(blastRadius(b)) || (a.status==="block"?0:1)-(b.status==="block"?0:1));
+    state.focus={ids:items.map(s=>s.id), i:0}; openSession(state.focus.ids[0]); return;
+  }
+
+  // generic "show all" reveal — works for Done/Planned groups AND the dormant/needs lists (#9)
+  const more = e.target.closest("[data-toggle=more]");
+  if(more){ e.stopPropagation(); const mr=more.previousElementSibling; if(mr&&mr.classList.contains("more-rows")) mr.hidden=false; more.remove(); return; }
+
+  const tg = e.target.closest("[data-toggle]");
+  if(tg){
+    const kind=tg.getAttribute("data-toggle");
+    if(kind==="card") tg.closest(".pcard").classList.toggle("open");
+    else if(kind==="ws") tg.closest(".ws").classList.toggle("open");
+    else if(kind==="sessmore"){ const ex=tg.previousElementSibling; if(ex&&ex.classList.contains("sess-extra")) ex.hidden=false; tg.remove(); }
+    else if(kind==="done") tg.closest(".done").classList.toggle("open");
+    else if(kind==="grp") tg.closest(".grpcard").classList.toggle("open");
+    else if(kind==="needmore") tg.closest(".needmore").classList.toggle("open");
+    else if(kind==="prow"){ tg.classList.toggle("open"); const id=tg.getAttribute("data-rowp"); const body=document.querySelector(`[data-rowbody="${id}"]`); if(body) body.classList.toggle("open"); }
+    return;
+  }
+});
+document.getElementById("cback").addEventListener("click", ()=>{ state.focus=null; closeConv(); });
+document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ state.focus=null; closeConv(); } });
+
+/* scenario switcher */
+const sel=document.getElementById("scnSel");
+sel.innerHTML = Object.entries(SCENARIOS).map(([k,v])=>`<option value="${k}">${esc(v.label)}</option>`).join("");
+sel.addEventListener("change", ()=>{ const v=sel.value; history.replaceState(null,"","?scn="+v); loadScenario(v); });
+
+/* boot */
+const qs = new URLSearchParams(location.search).get("scn");
+const boot = (qs && SCENARIOS[qs]) ? qs : "default";
+sel.value = boot;
+loadScenario(boot);
+</script>
+</body>
+</html>
