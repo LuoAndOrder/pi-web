@@ -1,5 +1,5 @@
 .composer {
-  grid-row: 3;
+  grid-row: 4;
   min-width: 0;
   overflow: visible;
   background: color-mix(in srgb, var(--panel) 92%, transparent);
@@ -11,7 +11,7 @@
 }
 
 .extensionFooter {
-  grid-row: 4;
+  grid-row: 5;
   min-width: 0;
   margin: 6px 16px 0;
   color: var(--muted);

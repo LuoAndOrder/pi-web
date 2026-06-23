@@ -32,7 +32,9 @@ body {
 .app {
   display: grid;
   grid-template-columns: 1fr;
-  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  /* row 2 hosts the rollup drill-in oversight band (#rollupContextBand); it is display:none when
+     hidden so the track collapses to 0 and the conversation layout is unchanged until a drill-in. */
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
   width: 100%;
   min-width: 0;
   height: var(--app-height);

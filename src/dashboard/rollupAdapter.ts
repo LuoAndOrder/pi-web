@@ -102,6 +102,7 @@ function toArtifact(sr: SessionRollup): VArtifact | null {
 
 function toCrit(ce: CriterionEval): VCrit {
   return {
+    id: ce.id, // carry the criterion identity to the seam so S7 can PATCH /api/dod/criterion/:id
     text: ce.text ?? "",
     met: !!ce.met,
     src: ce.sourceKind ?? "manual", // structured source.kind → c.src (no substring matching)

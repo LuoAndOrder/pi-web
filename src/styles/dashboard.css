@@ -228,6 +228,14 @@
 #dashboardView .shead .hbtn:disabled:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
 #dashboardView .shead .hbtn.sgn:disabled:hover { background: color-mix(in srgb, var(--st-sign) 10%, transparent); border-color: color-mix(in srgb, var(--st-sign) 42%, var(--border)); }
 #dashboardView .qreply button:disabled:hover { border-color: var(--border); color: var(--text); }
+/* deferred sign-off CTAs (S7): an explicit "coming soon" affordance — a calm dashed violet at full
+   opacity with an inline "soon" tag — so the focal sign-off control reads as intentionally not-yet-live,
+   never as a broken greyed button the hero/strip points the eye at (review finding). */
+#dashboardView .btn.sign.soon:disabled,
+#dashboardView .btn.sign.soon:disabled:hover { opacity: 1; background: color-mix(in srgb, var(--st-sign) 8%, transparent); border: 1px dashed color-mix(in srgb, var(--st-sign) 34%, var(--border)); color: color-mix(in srgb, var(--st-sign) 78%, var(--muted)); }
+#dashboardView .hbtn.sgn.soon:disabled,
+#dashboardView .hbtn.sgn.soon:disabled:hover { opacity: 1; background: color-mix(in srgb, var(--st-sign) 8%, transparent); border: 1px dashed color-mix(in srgb, var(--st-sign) 36%, var(--border)); color: color-mix(in srgb, var(--st-sign) 80%, var(--muted)); }
+#dashboardView .soon { display: inline-flex; align-items: center; height: 15px; padding: 0 5px; border-radius: 4px; font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: color-mix(in srgb, var(--st-sign) 80%, var(--muted)); border: 1px solid color-mix(in srgb, var(--st-sign) 34%, transparent); background: color-mix(in srgb, var(--bg) 30%, transparent); }
 
 /* dot-strip (colourblind-safe via SHAPE channel) */
 #dashboardView .dotstrip { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; }
@@ -269,14 +277,8 @@
 #dashboardView .countpill.jump { cursor: pointer; color: var(--muted); border-style: dashed; }
 #dashboardView .countpill.jump:hover { color: var(--st-block); border-color: color-mix(in srgb, var(--st-block) 40%, transparent); }
 
-/* rings row */
-#dashboardView .rings { display: flex; gap: 12px; padding: 4px 16px 14px; flex-wrap: wrap; align-items: flex-start; }
-#dashboardView .ringcell { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 70px; text-align: center; position: relative; }
+/* progress ring (single aggregate per card via .csum-ring + segmented arcs) */
 #dashboardView .ring { width: 54px; height: 54px; display: block; }
-#dashboardView .ringcell .wsn { font-size: 11px; line-height: 1.2; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-#dashboardView .ringcell.surfaced .wsn { color: var(--st-block); font-weight: 650; }
-#dashboardView .ringcell.surfaced .ring { outline: 1.5px dashed color-mix(in srgb, var(--st-block) 55%, transparent); outline-offset: 2px; border-radius: 999px; }
-#dashboardView .upmark { position: absolute; top: -3px; right: 2px; font-size: 10px; font-weight: 800; color: var(--st-block); background: var(--panel); border: 1px solid color-mix(in srgb, var(--st-block) 45%, var(--border)); border-radius: 7px; padding: 0 4px; line-height: 15px; }
 #dashboardView .ring-track.eval { animation: dashRingPulse 1.3s ease-in-out infinite; stroke: color-mix(in srgb, var(--accent) 55%, var(--border)); }
 @keyframes dashRingPulse { 0%, 100% { opacity: .3; } 50% { opacity: .95; } }
 @media (prefers-reduced-motion: reduce) { #dashboardView .ring-track.eval { animation: none; opacity: .6; } }
@@ -290,7 +292,6 @@
 #dashboardView .ring-dot { fill: none; stroke: color-mix(in srgb, var(--st-idle) 60%, transparent); stroke-width: 3.2; stroke-dasharray: 0.1 5.6; stroke-linecap: round; }
 #dashboardView .ring-num { font: 800 11px ui-sans-serif, system-ui; fill: var(--text); }
 #dashboardView .ring-gly { font: 800 13px ui-sans-serif, system-ui; }
-#dashboardView .ring-shape { fill: none; stroke-width: 2.4; }
 
 /* compact card summary */
 #dashboardView .csum { display: flex; align-items: center; gap: 14px; padding: 2px 16px 14px; }
@@ -361,9 +362,6 @@
 #dashboardView .artchip .ok { color: var(--st-merge); font-weight: 800; }
 #dashboardView .artchip .add { color: color-mix(in srgb, var(--st-merge) 85%, var(--muted)); }
 #dashboardView .artchip .del { color: color-mix(in srgb, var(--st-fail) 80%, var(--muted)); }
-#dashboardView .recheck { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: color-mix(in srgb, var(--muted) 80%, transparent); border: 0; background: transparent; padding: 0 0 0 4px; }
-#dashboardView .recheck:hover { color: var(--accent); }
-#dashboardView .stale { color: var(--st-block); }
 #dashboardView .sess-act { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
 #dashboardView .qnext { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 #dashboardView .qchip { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 6px; font-size: 11px; color: var(--muted); border: 1px dashed color-mix(in srgb, var(--border) 95%, transparent); background: transparent; }
@@ -371,7 +369,6 @@
 #dashboardView .qsrc { font-size: 11px; color: color-mix(in srgb, var(--muted) 65%, transparent); font-style: italic; }
 #dashboardView .iterspark { display: inline-flex; align-items: flex-end; gap: 2px; height: 16px; }
 #dashboardView .iterspark i { width: 3px; border-radius: 1px; background: color-mix(in srgb, var(--muted) 45%, transparent); }
-#dashboardView .iterspark.live i { background: color-mix(in srgb, var(--st-run) 55%, transparent); }
 
 /* ───────────── compact project rows (fleet scale) ───────────── */
 #dashboardView .grpcard { border: 1px solid var(--border); border-radius: 16px; background: color-mix(in srgb, var(--panel) 70%, transparent); overflow: hidden; margin-top: 14px; }
@@ -481,12 +478,8 @@
 #dashboardView .sess-dot.fail { position: relative; background: transparent !important; }
 #dashboardView .sess-dot.fail::after { content: "\00d7"; position: absolute; inset: -4px 0 0; font-size: 13px; line-height: 1; font-weight: 800; text-align: center; color: var(--st-fail); }
 
-/* calm + reassurance lines */
+/* calm reassurance note */
 #dashboardView .calmnote { margin-top: 28px; text-align: center; color: color-mix(in srgb, var(--muted) 70%, transparent); font-size: 12px; }
-#dashboardView .calmline { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--st-merge) 22%, var(--border)); border-radius: 14px; background: color-mix(in srgb, var(--st-merge) 5%, transparent); color: var(--text); font-size: 13px; }
-#dashboardView .calmline .ok { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 999px; flex-shrink: 0; color: var(--st-merge); border: 1px solid color-mix(in srgb, var(--st-merge) 40%, transparent); background: color-mix(in srgb, var(--st-merge) 9%, transparent); font-weight: 800; }
-#dashboardView .calmline b { font-weight: 650; }
-#dashboardView .calmline .sub { color: var(--muted); font-size: 12px; margin-left: 2px; }
 
 /* ───────────── first-run onboarding ───────────── */
 #dashboardView .onboard { max-width: 620px; margin: 36px auto; border: 1px solid var(--border); border-radius: 18px; background: var(--panel); padding: 30px 30px 26px; text-align: center; }
@@ -503,12 +496,15 @@
 #dashboardView .onboard .actions { display: flex; gap: 10px; justify-content: center; margin-top: 22px; flex-wrap: wrap; }
 #dashboardView .onboard .disc { margin-top: 18px; padding-top: 16px; border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); font-size: 12px; color: var(--muted); }
 #dashboardView .onboard .disc b { color: var(--text); font-weight: 650; }
+/* deferred: S9 onboarding candidate list (.cands/.cand*) — bindOnboard is a no-op until S9 */
 #dashboardView .onboard .disc .cands { display: flex; flex-direction: column; gap: 6px; margin-top: 11px; text-align: left; }
 #dashboardView .onboard .cand { display: flex; align-items: center; gap: 9px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); font-size: 12px; }
 #dashboardView .onboard .cand .cpath { flex: 1; min-width: 0; color: var(--text); }
 #dashboardView .onboard .cand .cmeta { color: var(--muted); }
 
-/* ───────────── DoD criteria + authoring (re-homed from the conv overlay) ───────────── */
+/* ───────────── DoD criteria + authoring (re-homed from the conv overlay) ─────────────
+   deferred: S10 DoD authoring drawer (.dodbar, .critlist, .crit, .gatepill, .dodauthor) — reserved,
+   not yet rendered inside #dashboardView; the drill-in oversight band uses its own scoped styles. */
 #dashboardView .dodbar { padding: 11px 16px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--bg) 40%, transparent); }
 #dashboardView .dodbar-top { display: flex; align-items: center; gap: 12px; cursor: pointer; }
 #dashboardView .dodbar .dring { width: 38px; height: 38px; flex-shrink: 0; }
@@ -554,4 +550,78 @@
   #dashboardView .headline { font-size: 20px; }
   #dashboardView .grid.single { grid-template-columns: 1fr; }
   #dashboardView .dashClose { top: 10px; right: 12px; }
+}
+
+/* ═══════════════ drill-in oversight context band (above the REAL conversation) ═══════════════
+   Lives OUTSIDE #dashboardView (row 2 of the .app grid), so it carries its own status palette +
+   a re-scoped copy of the ring / badge / criteria styles. It reuses pi-web's global --panel/
+   --border/--text/--muted/--accent tokens, which already match the dashboard's. */
+.rollupContextBand { grid-row: 2; }
+.rollupContextBand[hidden] { display: none; }
+#rollupContextBand {
+  --st-run: #7dd3fc; --st-block: #facc15; --st-fail: #fb7185; --st-sign: #c084fc;
+  --st-merge: #4ade80; --st-idle: #7e93aa; --seg-off: rgba(125, 146, 170, 0.26);
+  margin: 6px 16px 0; border: 1px solid var(--border); border-radius: 14px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent); overflow: hidden;
+  font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+#rollupContextBand .cb-bar { display: flex; align-items: center; gap: 13px; padding: 10px 14px; }
+#rollupContextBand .cb-bar[data-cb-toggle] { cursor: pointer; }
+#rollupContextBand .cb-bar[data-cb-toggle]:hover { background: color-mix(in srgb, var(--text) 3%, transparent); }
+#rollupContextBand .cb-ring { width: 40px; height: 40px; flex-shrink: 0; }
+#rollupContextBand .cb-main { flex: 1; min-width: 0; }
+#rollupContextBand .cb-crumb { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#rollupContextBand .cb-crumb b { color: var(--text); font-weight: 650; }
+#rollupContextBand .cb-sn { color: color-mix(in srgb, var(--text) 92%, transparent); font-weight: 650; }
+#rollupContextBand .cb-nest { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px; border-radius: 5px; font-size: 11px; color: var(--muted); border: 1px solid color-mix(in srgb, var(--border) 92%, transparent); }
+#rollupContextBand .cb-dod { font-size: 12px; color: var(--muted); margin-top: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+#rollupContextBand .cb-lbl { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: color-mix(in srgb, var(--muted) 85%, transparent); }
+#rollupContextBand .cb-dtxt { color: color-mix(in srgb, var(--text) 86%, transparent); }
+#rollupContextBand .cb-unset, #rollupContextBand .cb-pend { color: var(--st-sign); }
+#rollupContextBand .cb-exp { color: var(--muted); transition: transform .16s ease; display: inline-grid; place-items: center; width: 20px; height: 20px; flex-shrink: 0; }
+#rollupContextBand.open .cb-exp { transform: rotate(90deg); }
+#rollupContextBand .cb-close { display: inline-grid; place-items: center; width: 26px; height: 26px; flex-shrink: 0; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--muted); }
+#rollupContextBand .cb-close:hover { color: var(--text); border-color: var(--accent); }
+/* ring (re-scoped from #dashboardView; same markup emitted by ringSvg) */
+#rollupContextBand .ring { display: block; }
+#rollupContextBand .ring-track { fill: none; stroke: color-mix(in srgb, var(--border) 90%, transparent); stroke-width: 3.2; }
+#rollupContextBand .ring-track.eval { animation: dashRingPulse 1.3s ease-in-out infinite; stroke: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+#rollupContextBand .ring-fill { fill: none; stroke-width: 3.4; stroke-linecap: round; transition: stroke-dashoffset .5s ease; }
+#rollupContextBand .ring-dot { fill: none; stroke: color-mix(in srgb, var(--st-idle) 60%, transparent); stroke-width: 3.2; stroke-dasharray: 0.1 5.6; stroke-linecap: round; }
+#rollupContextBand .ring-num { font: 800 11px ui-sans-serif, system-ui; fill: var(--text); }
+#rollupContextBand .ring-gly { font: 800 13px ui-sans-serif, system-ui; }
+/* status badge (re-scoped) */
+#rollupContextBand .badge { display: inline-flex; align-items: center; gap: 6px; height: 21px; padding: 0 9px; border-radius: 999px; font-size: 11px; font-weight: 650; border: 1px solid transparent; white-space: nowrap; }
+#rollupContextBand .badge .d { width: 7px; height: 7px; border-radius: 999px; }
+#rollupContextBand .badge.block { color: var(--st-block); border-color: color-mix(in srgb, var(--st-block) 40%, transparent); background: color-mix(in srgb, var(--st-block) 11%, transparent); }
+#rollupContextBand .badge.block .d { background: var(--st-block); }
+#rollupContextBand .badge.fail { color: var(--st-fail); border-color: color-mix(in srgb, var(--st-fail) 42%, transparent); background: color-mix(in srgb, var(--st-fail) 11%, transparent); }
+#rollupContextBand .badge.fail .d { background: var(--st-fail); }
+#rollupContextBand .badge.run { color: var(--st-run); border-color: color-mix(in srgb, var(--st-run) 40%, transparent); background: color-mix(in srgb, var(--st-run) 10%, transparent); }
+#rollupContextBand .badge.run .d { background: var(--st-run); }
+#rollupContextBand .badge.sign { color: var(--st-sign); border-color: color-mix(in srgb, var(--st-sign) 42%, transparent); background: color-mix(in srgb, var(--st-sign) 11%, transparent); }
+#rollupContextBand .badge.sign .d { background: var(--st-sign); }
+#rollupContextBand .badge.merge { color: var(--st-merge); border-color: color-mix(in srgb, var(--st-merge) 42%, transparent); background: color-mix(in srgb, var(--st-merge) 11%, transparent); }
+#rollupContextBand .badge.merge .d { background: var(--st-merge); }
+#rollupContextBand .badge.idle { color: var(--st-idle); border-color: color-mix(in srgb, var(--st-idle) 38%, transparent); background: color-mix(in srgb, var(--st-idle) 9%, transparent); }
+#rollupContextBand .badge.idle .d { background: var(--st-idle); }
+#rollupContextBand .badge.unset { color: var(--st-sign); border-color: color-mix(in srgb, var(--st-sign) 38%, transparent); background: transparent; }
+#rollupContextBand .badge.unset .d { background: transparent; box-shadow: inset 0 0 0 1.4px var(--st-sign); }
+/* srcTag + criteria list (re-scoped) */
+#rollupContextBand .srcTag { display: inline-flex; align-items: center; font-size: 12px; font-weight: 450; color: var(--muted); white-space: nowrap; }
+#rollupContextBand .srcTag::before { content: "·"; margin: 0 5px 0 1px; color: color-mix(in srgb, var(--muted) 50%, transparent); }
+#rollupContextBand .cb-crit { display: none; }
+#rollupContextBand.open .cb-crit { display: flex; flex-direction: column; gap: 7px; padding: 4px 16px 12px; border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+#rollupContextBand .crit { display: flex; align-items: flex-start; gap: 9px; font-size: 12px; color: var(--muted); }
+#rollupContextBand .crit .box { width: 15px; height: 15px; border-radius: 4px; flex-shrink: 0; margin-top: 1px; display: grid; place-items: center; font-size: 10px; font-weight: 800; border: 1px solid color-mix(in srgb, var(--border) 90%, transparent); }
+#rollupContextBand .crit.met .box { background: color-mix(in srgb, var(--st-merge) 16%, transparent); border-color: color-mix(in srgb, var(--st-merge) 45%, transparent); color: var(--st-merge); }
+#rollupContextBand .crit.gate .box { border-style: dashed; border-color: color-mix(in srgb, var(--st-sign) 50%, transparent); color: var(--st-sign); }
+#rollupContextBand .crit .cbody { min-width: 0; }
+#rollupContextBand .crit .ctext { color: color-mix(in srgb, var(--text) 86%, transparent); }
+#rollupContextBand .crit.met .ctext { color: var(--muted); }
+#rollupContextBand .crit .cev { font-size: 12px; color: var(--muted); margin-top: 2px; }
+#rollupContextBand .crit .cat { color: color-mix(in srgb, var(--muted) 85%, transparent); }
+#rollupContextBand .gatepill { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 4px; font-size: 11px; font-weight: 650; color: var(--st-sign); border: 1px solid color-mix(in srgb, var(--st-sign) 40%, transparent); margin-left: 4px; }
+@media (max-width: 700px) {
+  #rollupContextBand { margin: 0 10px; }
 }

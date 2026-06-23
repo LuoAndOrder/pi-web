@@ -163,6 +163,7 @@ export function createDashboard(options: {
 
   function openDashboard() {
     if (open) return;
+    hideContextBand(); // the band is the drill-in frame; reopening the dashboard supersedes it
     // Establish the "since you last looked" baseline from the previous visit, then record
     // this visit so the next open compares against it.
     view.lastVisit = readLastVisit();
@@ -213,6 +214,28 @@ export function createDashboard(options: {
     const cwd = ref?.s.cwd ?? "";
     closeDashboard();
     await sessions.openSession(sessionId, cwd);
+    // Keep the oversight frame on the drill: render a compact context band (project › workstream
+    // breadcrumb + k-of-n ring + DoD criteria) ABOVE the real conversation, so opening a session
+    // from a rollup doesn't drop into a context-free full-view (review finding). It survives the
+    // openSession clearMessages/refresh because it lives in its own element, not in #messages.
+    showContextBand(sessionId);
+  }
+
+  // The oversight context band above the live conversation. It is a SNAPSHOT taken at drill-in
+  // time (the dashboard is closed while it shows, so realtime refetch doesn't touch it); it clears
+  // when you dismiss it, reopen the dashboard, or navigate to another session.
+  function showContextBand(sessionId: string) {
+    const html = renderer.contextBandHtml(sessionId);
+    if (!html) { hideContextBand(); return; }
+    elements.rollupContextBand.innerHTML = html;
+    elements.rollupContextBand.classList.remove("open");
+    elements.rollupContextBand.hidden = false;
+  }
+  function hideContextBand() {
+    if (elements.rollupContextBand.hidden) return;
+    elements.rollupContextBand.hidden = true;
+    elements.rollupContextBand.classList.remove("open");
+    elements.rollupContextBand.innerHTML = "";
   }
 
   // Ported from the mockup click delegation (index.html L3166-3213), scoped to
@@ -294,6 +317,20 @@ export function createDashboard(options: {
     });
     // Delegated drill-in / continue / expand-collapse, scoped to the overlay.
     elements.dashboardWrap.addEventListener("click", handleClick);
+    // Drill-in context band: dismiss (×) or expand/collapse the DoD criteria list.
+    elements.rollupContextBand.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest("[data-cb-close]")) { hideContextBand(); return; }
+      if (target.closest("[data-cb-toggle]")) elements.rollupContextBand.classList.toggle("open");
+    });
+    // Switching to another session (drawer item, tab bar, or a new session) leaves the drilled
+    // session, so the band's snapshot no longer applies — clear it.
+    const clearOnNav = () => hideContextBand();
+    elements.sessionListEl.addEventListener("click", clearOnNav);
+    elements.sessionBarEl.addEventListener("click", clearOnNav);
+    elements.sessionNewButton.addEventListener("click", clearOnNav);
+    elements.newSessionHeaderButton.addEventListener("click", clearOnNav);
   }
 
   return {

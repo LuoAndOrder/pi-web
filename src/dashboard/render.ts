@@ -42,6 +42,7 @@ export interface VArtifact {
   mergedAgo?: string;
 }
 export interface VCrit {
+  id?: string;
   text?: string;
   met?: boolean;
   src?: string;
@@ -149,6 +150,10 @@ interface CardLive {
 
 export interface DashboardRenderer {
   renderAll: (sc?: { empty?: boolean; candidates?: number }) => void;
+  // Build the drill-in oversight band (breadcrumb + k-of-n ring + DoD criteria) shown above the
+  // REAL conversation when a session is opened from a rollup, so the drill keeps its project /
+  // workstream / DoD frame instead of dropping into a context-free full-view (review finding).
+  contextBandHtml: (sessionId: string) => string | null;
 }
 
 // Shared status ordering (lower rank = more urgent, surfaces first). Exported as the SINGLE
@@ -186,6 +191,10 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
   // no-op (review finding). Continue/Open (data-open) IS wired and stays enabled.
   const DEFER = ' disabled aria-disabled="true"';
   const deferTip = (what: string) => `${DEFER} title="${esc(what)} — coming in a later update"`;
+  // While manual sign-off (S7) is deferred, the sign-off CTAs must read as INTENTIONALLY not-yet-live
+  // — not as generic greyed/broken buttons the eye is pointed at (review finding). `.soon` gives them an
+  // explicit "coming soon" treatment + an inline tag, and the hero/strip copy drops its one-click promise.
+  const soonTag = `<span class="soon">soon</span>`;
   // a HARD need = a FAILURE or a STRUCTURALLY-ELICITED block; a non-elicited free-text stop can't be
   // PROVEN a blocker (spec §5.3), so it degrades to a quiet "may be waiting", never Needs-you.
   const isNeed = (s: VSession) => s.status === "fail" || (s.status === "block" && !!s.elicited);
@@ -336,6 +345,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
   const plusIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>`;
   const focusIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>`;
   const recheckIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg>`;
+  const closeIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="14" height="14"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
 
   // ═══════════════════════════ master render ═══════════════════════════
   function renderAll(sc?: { empty?: boolean; candidates?: number }) {
@@ -460,7 +470,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
       const runTxt = bits.length ? bits.join(" · ") : "nothing running";
       let headline: string; const subBits: string[] = [];
       if (c.sign) {
-        headline = `<em class="sign">${c.sign} done</em> — your sign-off is all that's pending.`;
+        headline = `<em class="sign">${c.sign} done</em> — ready for your review.`;
         if (c.loop) subBits.push(`<b>${c.loop} loop${c.loop > 1 ? "s" : ""}</b> running`);
         if (c.run) subBits.push(`<b>${c.run} running</b>`);
       } else if (c.setup) {
@@ -633,8 +643,8 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
   function signoffSectionHtml(c: Counts) {
     if (!c.sign) return "";
     const batch = c.sign > 1
-      ? `<button class="hbtn sgn" id="signAll"${deferTip("Batch sign-off")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="13" height="13"><path d="M20 6 9 17l-5-5"/></svg> Sign off all ${c.sign}</button>`
-      : `<span class="hint">one click — no reply needed</span>`;
+      ? `<button class="hbtn sgn soon" id="signAll"${deferTip("Batch sign-off")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="13" height="13"><path d="M20 6 9 17l-5-5"/></svg> Sign off all ${c.sign} ${soonTag}</button>`
+      : `<span class="hint">review each below — one-click sign-off coming soon</span>`;
     const cnt = c.sign > 1 ? "" : `<span class="cnt">${c.sign} done</span>`;
     return `<div class="shead" id="sec-signoff"><h2>Awaiting your sign-off</h2>${cnt}${batch}</div>
       <section class="signoff" id="signoffHost" data-testid="signoff"></section>`;
@@ -651,6 +661,10 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
     const CAP = 3, shown = items.slice(0, CAP), rest = items.slice(CAP);
     const rowHtml = ({ s, w, p }: { s: VSession; w: VWorkstream; p: VProject }) => {
       const gate = s._gate, gone = !!state.signed[s.id], pending = signPending(s);
+      // S5 DOM contract: data-signoff carries the GATE CRITERION id (what S7 PATCHes via
+      // /api/dod/criterion/:id), not the session id. data-recheckcard stays the session id
+      // (the recheck handler resolves the stale criterion via SESS[id]._gate).
+      const critId = gate?.id ?? "";
       const lineage = p.nest ? ` <span class="nest" title="own project root nested inside its parent — not counted toward the parent">⤷ ${esc(p.nest)}</span>` : "";
       const crit = pending
         ? `<span class="pend">Done — pending recheck</span> · ${esc((gate && gate.text) || s.dod)} ${srcTag(s.dodSrc)}`
@@ -659,7 +673,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
         ? `<span style="color:var(--st-merge);font-weight:650">✓ Signed off</span>${mergeAffordance(s)}`
         : pending
           ? `<button class="btn remedy sm" data-recheckcard="${s.id}" title="command DoD evidence is stale — re-run it on demand (coming in a later update)"${DEFER}>${recheckIcon()} Re-check</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`
-          : `<button class="btn sign" data-signoff="${s.id}"${deferTip("Sign-off")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`;
+          : `<button class="btn sign soon" data-signoff="${esc(critId)}"${deferTip("Sign-off")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off ${soonTag}</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`;
       return `<article class="soff ${gone ? "gone" : ""}">
         <div class="sleft">
           <div class="scrumb"><b>${esc(p.name)}</b>${lineage} › ${esc(w.name)} · <span class="sn">${esc(s.name)}</span></div>
@@ -963,7 +977,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
       : s.status === "merge" ? "View" : (s.status === "run" || s.status === "loop") ? "Open" : s.status === "unset" ? "Define done" : "Continue";
     const primary = `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} ${verb}</button>`;
     let secondary = "";
-    if (s.status === "sign" && !navOnly) secondary = `<button class="btn sign sm" data-signoff="${s.id}"${deferTip("Sign-off")}>✓ Sign off</button>`;
+    if (s.status === "sign" && !navOnly) secondary = `<button class="btn sign sm soon" data-signoff="${esc(s._gate?.id ?? "")}"${deferTip("Sign-off")}>✓ Sign off ${soonTag}</button>`;
     else if (s.status === "fail") secondary = `<button class="btn ghost sm" data-open="${s.id}">${esc(s.failAction || "Re-run")}</button>`;
 
     const dodTxt = s.status === "unset" ? `<span style="color:var(--st-sign)">no criterion set — define what done means</span> ${srcTag(s.dodSrc)}`
@@ -1123,5 +1137,41 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
     if (t instanceof HTMLInputElement && t.classList.contains("needjump")) filterNeeds(t);
   });
 
-  return { renderAll };
+  // ─────────────────────────── drill-in oversight context band ───────────────────────────
+  // The structured DoDSource.kind → its evaluator family label (mirrors the mockup critList #18).
+  const evalFamily = (src?: string) => src === "command" ? "command" : src === "session_idle" ? "runtime" : (src && src.indexOf("git") === 0) ? "git" : "manual";
+  function critRow(c: VCrit): string {
+    const fam = evalFamily(c.src);
+    const atTxt = c.at ? ` <span class="cat">· ${esc(c.at)}</span>` : "";
+    const ev = (c.ev || c.at) ? `<div class="cev">${esc(c.ev || "")}${atTxt}</div>` : "";
+    const gatePill = c.gate ? `<span class="gatepill">sign-off gate · excluded from %</span>` : "";
+    return `<div class="crit ${c.met ? "met" : ""} ${c.gate ? "gate" : ""}">
+      <span class="box">${c.met ? "✓" : (c.gate ? "…" : "")}</span>
+      <div class="cbody"><div class="ctext">${esc(c.text)} <span class="srcTag" title="evaluator: ${esc(fam)}">${esc(fam)}</span>${gatePill}</div>${ev}</div>
+    </div>`;
+  }
+  function contextBandHtml(sessionId: string): string | null {
+    const ref = state.SESS[sessionId];
+    if (!ref) return null;
+    const { s, w, p } = ref;
+    const ringItem: RingItem = (s._prog || s.status !== "queued") ? s : w;
+    const dodLine = s.status === "unset"
+      ? `<span class="cb-unset">not set — no Definition of Done yet</span>`
+      : `${esc(s.dod)}${(s.status === "sign" && s._gate) ? ` <span class="cb-pend">· evaluable criteria met — sign-off gate pending</span>` : ""}`;
+    const hasCrit = !!(s.crit && s.crit.length);
+    const crit = hasCrit ? `<div class="cb-crit">${s.crit!.map(critRow).join("")}</div>` : "";
+    const exp = hasCrit ? `<span class="cb-exp">${chevIcon()}</span>` : "";
+    const soft = s.status === "block" && !s.elicited;
+    return `<div class="cb-bar"${hasCrit ? ' data-cb-toggle role="button" tabindex="0"' : ""}>
+      <div class="cb-ring">${ringSvg(ringItem, 40)}</div>
+      <div class="cb-main">
+        <div class="cb-crumb"><b>${esc(p.name)}</b>${p.nest ? ` <span class="cb-nest">⤷ ${esc(p.nest)}</span>` : ""} &nbsp;›&nbsp; ${esc(w.name)} · <span class="cb-sn">${esc(s.name)}</span> ${badge(s.status, soft)}</div>
+        <div class="cb-dod"><span class="cb-lbl">Definition of Done</span> ${srcTag(s.dodSrc)} <span class="cb-dtxt">${dodLine}</span></div>
+      </div>
+      ${exp}
+      <button class="cb-close" type="button" data-cb-close aria-label="Dismiss oversight context" title="Dismiss">${closeIcon()}</button>
+    </div>${crit}`;
+  }
+
+  return { renderAll, contextBandHtml };
 }

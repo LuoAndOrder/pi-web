@@ -62,6 +62,7 @@ export type AppElements = {
   dashboardView: HTMLElement;
   dashboardWrap: HTMLDivElement;
   dashboardCloseButton: HTMLButtonElement;
+  rollupContextBand: HTMLDivElement;
 };
 
 export function requiredElement<T extends Element>(selector: string): T {
@@ -135,6 +136,7 @@ export function getAppElements(): AppElements {
     dashboardView: requiredElement<HTMLElement>("#dashboardView"),
     dashboardWrap: requiredElement<HTMLDivElement>("#dashboardWrap"),
     dashboardCloseButton: requiredElement<HTMLButtonElement>("#dashboardCloseButton"),
+    rollupContextBand: requiredElement<HTMLDivElement>("#rollupContextBand"),
   };
 }
 
