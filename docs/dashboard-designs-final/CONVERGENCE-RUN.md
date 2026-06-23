@@ -293,3 +293,98 @@ converged, but the gap between it and convergence is three known, scoped edits r
 structural or conceptual flaw. The honesty discipline held where the design claimed it: the only
 place the code contradicted its own honesty annotations (the round-2 loop-elapsed surface) was
 caught and fixed.
+
+---
+
+## Visual review (steelman vs. red team, judged on screenshots)
+
+The adversarial run above debated the *code*: it grepped `index.html`, traced helpers, and argued
+about grounding. This second run debated the *picture*. A steelman and a red team each **looked at
+the rendered captures** — all thirteen-plus screenshots in this folder (the scenario set:
+`scn-calm`, `scn-blocked`, `scn-coldstart`, `scn-loop`, `scn-mixed`, `scn-scale`, `scn-nogit`,
+`scn-dense`, `scn-single`, `scn-empty`, plus the interaction states `state-coldstart-expanded`,
+`state-dormant-expanded`, `state-continue`, `state-drill`, `state-expand`, and `home`) — zoomed
+into contested regions at up to 10x, and argued about what the design *communicates to a human
+looking at it*: hero voice, color meaning, scannability, card silhouette, layout rhythm, and
+whether a glance tells the truth. A convergence judge then re-checked every charge against both the
+pixels and the code and graded the artifact's visual quality directly.
+
+### Per-round scorecard
+
+| Round | Commit    | Steelman grade | Judge visual grade | Charges | Upheld HIGH | Upheld MED | Overruled | Converged |
+| ----- | --------- | -------------- | ------------------ | ------- | ----------- | ---------- | --------- | --------- |
+| 1     | (pre-fix) | 8              | 8                  | 19      | 5           | 3          | 2         | no        |
+| 2     | `8bf3649` | 8              | 8                  | 18      | 1           | 2          | 3         | no        |
+| 3     | `e3ec889` | 8              | 8                  | 16      | 0           | 3          | 4         | no        |
+
+Visual grade held at 8/10 the whole run while the defect profile drained from the top down: five
+HIGH in round 1, one in round 2, zero by round 3. The remaining blockers are bounded medium-grade
+layout and keying issues, not conceptual ones — the same shape as the code run, where the design
+never lost a core invariant.
+
+### Most notable UPHELD visual/UX issues — and how they were fixed
+
+- **The cold-start hero lied at a glance (HIGH, rounds 1–2).** A registered project with *no*
+  Definition of Done rendered as `healthy` at every collapsed surface — `newsvc … healthy` under
+  "HEALTHY & DORMANT", and a hero reading "Nothing needs you." The eye was told everything was fine
+  when a project explicitly needed setup. **Fixed structurally:** cold-start now gets its own indigo
+  voice-changing hero — "1 project needs setup — author a Definition of Done to start tracking." —
+  its own "NEEDS SETUP" project group, a filled "Set a Definition of Done" CTA, and a purple
+  `Needs setup` chip (see `scn-coldstart.png` / `state-coldstart-expanded.png`). The unset state is
+  routed out of `healthy`/`dormant` entirely instead of silently folding into calm.
+- **"Continue the conversation" was not the consistent primary (MED, rounds 1–2).** The failed
+  cal-sync card taught "Re-authenticate" as its filled button while the neighboring blocked card said
+  "Continue" — breaking the reflex that *the answer is always to continue*. **Fixed:** every NEEDS
+  YOU card now carries a single filled-primary "Continue the conversation"; the remedy
+  (Re-authenticate / Re-run) is demoted to the secondary outline style (`scn-blocked.png`,
+  `home.png`).
+- **A status hue leaked onto an action control (MED, round 2).** The "Triage all in focus" bulk
+  button was painted the same amber reserved for Blocked status, on a six-blocked screen. **Fixed:**
+  the focus button now uses the indigo interaction accent, never a status color — matching the
+  sign-off bulk button, which already proved the pattern (action ≠ status).
+- **Three card silhouettes in one scale row + an indented auto-expanded card (MED, round 3,
+  open).** In `scn-scale.png` the project cards don't share one silhouette (filled vs. empty
+  top-right slot, ring vs. `∞` baseline, one subtitle truncates), and the auto-expanded mixed card
+  in `scn-mixed.png` renders narrower/indented than the full-bleed panels above it and clips at the
+  fold. These are the bounded layout fixes still queued at the cap.
+
+### Most notable OVERRULED charges (where the adversary was wrong on looking)
+
+The red team's loudest "dishonesty" charges mostly failed once the judge actually looked at the
+pixels:
+
+- **"The calm ring is a lie" — overruled.** The "1/1 met DoD" ring counts only the merged
+  workstream and discloses "1 loop running" separately; both numbers are literally true at their own
+  grain (`scn-calm.png`).
+- **"A free-floating amber blast-radius pill" — overruled.** The blast-radius pill is *red* on the
+  failed card and amber on the blocked card — each follows its own card's single status hue, not a
+  stray amber (`scn-blocked.png` / `home.png`).
+- **"The dormant green dots are fake idle indicators" — overruled.** The green dots are a
+  per-merged-workstream tally mapping 1:1 to the "N merged" count — green means merged, exactly as
+  labeled.
+- **"The sign-off strip is a faint unreadable ledger" — overruled.** The strip is comfortably
+  spaced and legible (`home.png`, `scn-nogit.png`); the only residue is a low-grade scan double-take
+  between a workstream-grain ring and a session-grain badge.
+- **"Verified receipts are loop auto-merges" / "PROJECTS 51 shows only 3" — overruled (round 1).**
+  The receipt carries an inline `?` provenance glyph on a real terminal merge sha, and the "only 3"
+  was a viewport-fold crop — the rollup group and rail jump exist below it (`scn-scale.png`).
+
+A recurring adversary failure mode, mirroring the code run, was reading a two-grain truth as a
+contradiction: a workstream-level ring and a session-level badge can disagree numerically and both
+be honest. The judge narrowed those to their real residue — a scannability nit — rather than
+accepting the "lie" framing.
+
+### Final verdict
+
+Looked at, not just read, this is a genuinely accomplished and opinionated dashboard. The single
+voice-changing hero that owns the only obligation count holds from one project to fifty-one; color
+is rationed to a disciplined status palette so the only saturated things on screen are the things
+that need a human; the k-of-n rings are honest about what they count; the quiet-Sunday view is
+truly calm and brave enough to say "You can close this tab"; and "Continue the conversation" is the
+one filled verb on every card that needs you. The visual run earned a steady 8/10 and drove the
+honesty defect the code reviews never saw — a cold-start project rendering as `healthy` to the
+naked eye — from a five-HIGH cluster down to zero, fixing it structurally rather than papering over
+it. It stops short of converged only on three bounded medium layout/keying issues (uneven scale-row
+silhouettes, an indented auto-expanded card, and a fixture-keyed mixed-source fork): real, visible,
+and worth fixing, but mechanical, not conceptual. The experience a person actually sees is calm,
+legible, and honest — and now honest in exactly the place a glance used to be reassured by a lie.
