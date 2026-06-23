@@ -53,8 +53,6 @@ function toProg(ps: ProgressSnapshot | null | undefined): VProg | null {
     allMet: ps.allMet,
     unrun: ps.unrun,
     stale: ps.stale,
-    metW: ps.metWeight,
-    totW: ps.totalWeight,
   };
 }
 

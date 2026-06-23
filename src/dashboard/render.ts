@@ -23,20 +23,11 @@ export interface VProg {
   allMet: boolean;
   unrun: number;
   stale: number;
-  metW?: number;
-  totW?: number;
-  gateOnly?: boolean;
 }
 export interface VGauge {
   done: number;
   total: number;
   percent: number;
-}
-export interface VCheck {
-  cmd?: string;
-  exit?: number;
-  at?: string;
-  kind?: string;
 }
 export interface VArtifact {
   kind?: string;
@@ -48,7 +39,6 @@ export interface VArtifact {
   ahead?: number;
   note?: string;
   files?: number;
-  check?: VCheck;
   mergedAgo?: string;
 }
 export interface VCrit {
@@ -103,7 +93,6 @@ export interface VWorkstream {
   _prog?: VProg | null;
   _mixed?: boolean;
   _sessGauge?: VGauge;
-  _crit?: VCrit[];
   loop?: boolean;
   mergedAgo?: string;
 }
@@ -517,7 +506,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
     const railEl = document.getElementById("rail"); if (!railEl) return;
     const pills: Array<[string, string, number | string, string, boolean]> = [];
     const calm = c.needs === 0;
-    if (c.sign) pills.push(["sign", "Sign-off", calm ? "" : c.sign, "sec-signoff", true]);
+    if (c.sign) pills.push(["sign", "Sign-off", c.sign, "sec-signoff", true]);
     if (c.active) pills.push(["", "Running", calm ? "" : c.active, "sec-proj", false]);
     if (c.plan) pills.push(["", "Planned", c.plan, "sec-planned", false]);
     if (c.merge) pills.push(["", "Merged", calm ? "" : c.merge, "sec-done", false]);
@@ -984,7 +973,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
         ${queue}
         ${s.loop ? proposedLoop(s) : ""}
       </div>
-      <div class="sess-act" onclick="event.stopPropagation()">
+      <div class="sess-act">
         ${primary}
         ${secondary}
       </div>

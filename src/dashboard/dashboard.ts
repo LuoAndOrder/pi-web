@@ -194,11 +194,11 @@ export function createDashboard(options: {
     const target = event.target as HTMLElement | null;
     if (!target) return;
 
-    const open = target.closest<HTMLElement>("[data-open]");
-    if (open) {
+    const openEl = target.closest<HTMLElement>("[data-open]");
+    if (openEl) {
       event.preventDefault();
       event.stopPropagation();
-      const id = open.getAttribute("data-open");
+      const id = openEl.getAttribute("data-open");
       if (id) void openSessionFromCard(id);
       return;
     }
