@@ -318,17 +318,20 @@ export function applyProjectRegistryPatch(
   return normalizeProjectRegistry(next);
 }
 
-function findCriterion(
+// Single project→workstream traversal that returns BOTH the criterion and its
+// owning Project/Workstream, so callers that need to bump `owner.updatedAt` don't
+// re-walk the registry.
+function findCriterionWithOwner(
   registry: ProjectRegistry,
   criterionId: string,
-): DoDCriterion | undefined {
+): { owner: Project | Workstream; criterion: DoDCriterion } | undefined {
   for (const project of registry.projects) {
     const criterion = project.dod?.criteria.find((item) => item.id === criterionId);
-    if (criterion) return criterion;
+    if (criterion) return { owner: project, criterion };
   }
   for (const workstream of registry.workstreams) {
     const criterion = workstream.dod?.criteria.find((item) => item.id === criterionId);
-    if (criterion) return criterion;
+    if (criterion) return { owner: workstream, criterion };
   }
   return undefined;
 }
@@ -584,36 +587,17 @@ export function createProjectRegistryStore(file: string) {
   ): Promise<{ registry: ProjectRegistry; criterion: DoDCriterion }> {
     return serializeWrite(async () => {
       const current = await read();
-      let owner: Project | Workstream | undefined;
-      let target: DoDCriterion | undefined;
-      for (const project of current.projects) {
-        const criterion = project.dod?.criteria.find((item) => item.id === criterionId);
-        if (criterion) {
-          owner = project;
-          target = criterion;
-          break;
-        }
-      }
-      if (!target) {
-        for (const workstream of current.workstreams) {
-          const criterion = workstream.dod?.criteria.find((item) => item.id === criterionId);
-          if (criterion) {
-            owner = workstream;
-            target = criterion;
-            break;
-          }
-        }
-      }
-      if (!target || !owner) {
+      const found = findCriterionWithOwner(current, criterionId);
+      if (!found) {
         throw new RegistryError(`No DoD criterion with id ${criterionId}`, "not_found");
       }
-      if (target.source.kind !== "manual") {
+      if (found.criterion.source.kind !== "manual") {
         throw new RegistryError(`Criterion ${criterionId} is not a manual criterion`, "not_manual");
       }
-      target.met = met === true;
-      owner.updatedAt = new Date().toISOString();
+      found.criterion.met = met === true;
+      found.owner.updatedAt = new Date().toISOString();
       const registry = await writeState(current);
-      return { registry, criterion: findCriterion(registry, criterionId)! };
+      return { registry, criterion: findCriterionWithOwner(registry, criterionId)!.criterion };
     });
   }
 

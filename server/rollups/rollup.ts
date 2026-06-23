@@ -109,7 +109,9 @@ export function isCwdUnder(child: string, parent: string): boolean {
   return c.startsWith(p.endsWith("/") ? p : `${p}/`);
 }
 
-function critFamily(kind: DoDSourceKind | undefined): "git" | "cmd" | "user" | "other" {
+type CritFamily = "git" | "cmd" | "user" | "other";
+
+function critFamily(kind: DoDSourceKind | undefined): CritFamily {
   if (!kind) return "other";
   if (GIT_KINDS.has(kind)) return "git";
   if (kind === "command") return "cmd";
@@ -117,11 +119,27 @@ function critFamily(kind: DoDSourceKind | undefined): "git" | "cmd" | "user" | "
   return "other";
 }
 
-/** Mixed-source = the non-gate criteria span >1 evaluator family (DATA-MODEL §5.5),
- *  keyed off the STRUCTURED source kind (not the mockup's substring matcher). */
+/** Whether ONE session's (non-gate) criteria span >1 evaluator family, keyed off
+ *  the STRUCTURED source kind (not the mockup's substring matcher). This is the
+ *  per-session heterogeneity test that backs `sessFamily`. */
 export function isMixed(evals: CriterionEval[]): boolean {
   const fams = new Set(evals.filter((e) => !e.gate).map((e) => critFamily(e.sourceKind)));
   return fams.size > 1;
+}
+
+/** Collapse ONE session's (non-gate) criteria to a SINGLE family label
+ *  (DATA-MODEL §5.5 / mockup `sessFamily`): the session's family, "mixed" if it is
+ *  internally heterogeneous, or undefined when it has no scorable criteria so it
+ *  doesn't widen the workstream's family set. The workstream-level mixed decision
+ *  (buildWorkstreamRollup) is the size of the SET of these per-session labels —
+ *  NOT the family span of the flattened criteria aggregate, so a workstream of
+ *  same-DoD sessions (even the §5.2 default `manual + git` DoD) blends into a
+ *  k-of-n ring instead of degrading to a 0/1 session gauge. */
+function sessFamily(evals: CriterionEval[]): CritFamily | "mixed" | undefined {
+  const scorable = evals.filter((e) => !e.gate);
+  if (!scorable.length) return undefined;
+  if (isMixed(scorable)) return "mixed";
+  return critFamily(scorable[0].sourceKind);
 }
 
 function countStatuses(sessions: SessionRollup[]): StatusCounts {
@@ -409,7 +427,15 @@ export function buildWorkstreamRollup(
 ): WorkstreamRollup {
   const counts = countStatuses(sessions);
   const aggregate = aggregateSessionCriteria(sessions);
-  const mixed = isMixed(aggregate);
+  // Mixed-source = the workstream's SESSIONS span >1 evaluator family
+  // (types.ts:221 / DATA-MODEL §5.5). Each session collapses to ONE family via
+  // `sessFamily`, so a heterogeneous DoD shared by every session is NOT mixed and
+  // its criteria blend into a k-of-n ring (sessionGauge is reserved for sessions
+  // that genuinely differ in family).
+  const sessionFamilies = sessions
+    .map((s) => sessFamily(s.progress?.criteria ?? s.dod?.criteria ?? []))
+    .filter((f): f is CritFamily | "mixed" => f !== undefined);
+  const mixed = new Set(sessionFamilies).size > 1;
 
   let progress: ProgressSnapshot | null;
   let sessionGauge: WorkstreamRollup["sessionGauge"];
@@ -533,10 +559,11 @@ function computeLineage(
 }
 
 /** Every distinct git cwd the assembly below will `gitStatusFor`, deduped by
- *  resolved path. The route pre-warms these IN PARALLEL so distinct repo roots are
- *  evaluated concurrently rather than once-per-project sequentially (Gate B
- *  latency budget). The per-root TTL cache de-dups, so each distinct root still
- *  loads exactly once; the per-project loop then reads from the warm cache. */
+ *  resolved path. The route pre-warms these through a bounded-concurrency pool
+ *  (runPooled) so distinct repo roots are evaluated concurrently rather than
+ *  once-per-project sequentially (Gate B latency budget) without spawning hundreds
+ *  of git processes at once. The per-root TTL cache de-dups, so each distinct root
+ *  still loads exactly once; the per-project loop then reads from the warm cache. */
 function collectRepoRoots(
   registry: ProjectRegistry,
   byProject: Map<string, Map<string, RollupSessionInput[]>>,
@@ -593,6 +620,32 @@ function memoizeIsAncestor(
   };
 }
 
+/** Run `task` over `items` with at most `limit` promises in flight. Bounds the
+ *  pre-warm git fan-out: each gitStatus() itself spawns ~5-6 git subprocesses, so
+ *  an unbounded Promise.all over N distinct repo roots would briefly spawn ~6*N
+ *  concurrent processes and can hit OS fd/process limits (EMFILE / spawn EAGAIN)
+ *  once N reaches dozens. The per-root TTL cache still guarantees each root loads
+ *  exactly once; this only caps how many load simultaneously. */
+async function runPooled<T>(
+  items: T[],
+  limit: number,
+  task: (item: T) => Promise<unknown>,
+): Promise<void> {
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      await task(items[index]);
+    }
+  };
+  const lanes = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: lanes }, () => worker()));
+}
+
+/** Cap on concurrent gitStatus pre-warm loads (see runPooled). */
+const PREWARM_CONCURRENCY = 8;
+
 export async function assembleRollups(
   registry: ProjectRegistry,
   sessions: RollupSessionInput[],
@@ -621,14 +674,17 @@ export async function assembleRollups(
     else wsBuckets.set(key, [session]);
   }
 
-  // Pre-warm every distinct repo root in parallel BEFORE the per-project loop, so
-  // N distinct repos cost ~max(one git fan-out) instead of the sum. gitStatusFor
-  // is guarded by the caller (never rejects); the extra catch keeps a single bad
-  // root from failing the whole warm-up (S3: never throw on a messy session).
-  await Promise.all(
-    collectRepoRoots(registry, byProject).map((root) =>
-      ctx.gitStatusFor(root).catch(() => undefined),
-    ),
+  // Pre-warm every distinct repo root BEFORE the per-project loop, so N distinct
+  // repos cost ~max(one git fan-out) instead of the sum — but through a bounded
+  // worker pool (runPooled) so dozens of repos can't spawn hundreds of concurrent
+  // git subprocesses and trip OS limits. The per-root TTL cache still loads each
+  // root exactly once. gitStatusFor is guarded by the caller (never rejects); the
+  // extra catch keeps a single bad root from failing the whole warm-up (S3: never
+  // throw on a messy session).
+  await runPooled(
+    collectRepoRoots(registry, byProject),
+    PREWARM_CONCURRENCY,
+    (root) => ctx.gitStatusFor(root).catch(() => undefined),
   );
 
   const rollups: ProjectRollup[] = [];
