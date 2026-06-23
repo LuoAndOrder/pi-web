@@ -59,7 +59,12 @@ export interface RollupSessionInput {
   messageCount?: number;
   runtime?: Partial<SessionRuntime> | null;
   unread?: boolean;
+  /** Representative one-liner — the last assistant summary from the live session. */
   live?: string;
+  /** An abnormal terminal (assistant error / tool error after the agent stopped),
+   *  surfaced by the server's liveSessionSignals. The ONLY non-git source of a hard
+   *  `fail` need; never synthesized from a clean idle stop. */
+  fail?: boolean;
 }
 
 export interface AssembleContext {
@@ -378,13 +383,28 @@ export async function buildSessionRollup(
   const progress = computeProgress(evals);
   const gate = pendingGate(evals);
 
+  // ── Honest-degradation seam (which signals are wired vs. intentionally unset) ──
+  // WIRED from the live session (server/liveSessionSignals → RollupSessionInput):
+  //   - `live`     : last assistant summary (the representative one-liner).
+  //   - `fail`     : abnormal terminal (assistant/tool error after the agent stopped).
+  //   - git block  : `git.blocked` (conflicted working tree) flows from sessionGitInfo.
+  // INTENTIONALLY UNPOPULATED pending pi plumbing pi does NOT expose today
+  // (DATA-MODEL §4.4 / §6) — a future reader must NOT assume these are derivable:
+  //   - `elicitation` : pi emits no STRUCTURED ask (`ask_user`); a free-text stop is
+  //                     NOT a structured elicitation, so this stays false and the stop
+  //                     degrades to the quiet "may be waiting" soft wait, never amber.
+  //   - `softWait`    : would need a durable "stopped, awaiting human" marker pi does
+  //                     not write; left false so we never fabricate a "waiting" alarm.
+  //   - `artifact` / `blast` / `plannedQueue` : need durable receipts/notes pi does not
+  //                     emit; the renderer degrades gracefully when absent.
+  const fail = session.fail === true;
   const uiStatus = deriveUiStatus({
     runtime,
     git,
     progress,
     pendingGate: Boolean(gate),
     elicitation: false,
-    fail: false,
+    fail,
     hasDoD: evals.length > 0,
     softWait: false,
   });

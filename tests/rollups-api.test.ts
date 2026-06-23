@@ -389,8 +389,8 @@ describe("POST /api/dod/evaluate (command DoD, enabled)", () => {
         PI_WEB_GIT_CACHE_TTL_MS: "1",
         // A short command timeout so `sleep 999` is killed in-test (no 60s hang).
         PI_WEB_DOD_COMMAND_TIMEOUT_MS: "400",
-        // A session in the repo so the workstream ring aggregates its criteria.
-        PI_WEB_MOCK_EXTRA_SESSIONS: JSON.stringify([{ id: "eval-sess", cwd: repo }]),
+        // Sessions in the repo so each workstream ring aggregates its criteria.
+        PI_WEB_MOCK_EXTRA_SESSIONS: JSON.stringify([{ id: "eval-sess", cwd: repo }, { id: "evict-sess", cwd: repo }]),
       },
     });
     realtime = await openRealtime(server);
@@ -488,6 +488,39 @@ describe("POST /api/dod/evaluate (command DoD, enabled)", () => {
     // The 400ms timeout must have fired well before the 999s sleep would finish.
     expect(elapsed).toBeLessThan(10_000);
   }, 15_000);
+
+  it("replacing a DoD evicts the old command eval — a recreated criterion id is NOT stale", async () => {
+    // Regression guard for the unbounded/orphaned commandEvalCache finding: evaluate a
+    // passing command (caches its met=true under that criterion id), then REPLACE the
+    // workstream DoD (PUT mints NEW criterion ids). A subsequent /api/rollups must show
+    // the fresh criterion as `unrun` (the old cached met must not leak onto a new id) and
+    // the orphaned cache entry must be gone.
+    const evictWs = await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "evict" });
+    const evictId = evictWs.body.workstream.id;
+    await server.api("PUT", `/api/workstreams/${evictId}/sessions`, { sessionIds: ["evict-sess"] });
+    const first = await server.api("PUT", `/api/workstreams/${evictId}/dod`, {
+      criteria: [{ text: "tests pass", source: { kind: "command", cwd: repo, cmd: "exit 0" } }],
+    });
+    const firstCritId = (first.body.workstream.dod.criteria as any[])[0].id;
+    // Evaluate → caches met=true under firstCritId.
+    const ev = await server.api("POST", "/api/dod/evaluate", { criterionId: firstCritId });
+    expect((ev.body.evals as any[])[0].met).toBe(true);
+
+    // Replace the DoD (new criterion id) — the old cached eval is now orphaned + evicted.
+    const second = await server.api("PUT", `/api/workstreams/${evictId}/dod`, {
+      criteria: [{ text: "tests pass", source: { kind: "command", cwd: repo, cmd: "exit 0" } }],
+    });
+    const secondCritId = (second.body.workstream.dod.criteria as any[])[0].id;
+    expect(secondCritId).not.toBe(firstCritId); // normalizer minted a fresh id
+
+    const rollups = await server.api("GET", "/api/rollups");
+    const proj = (rollups.body.rollups as any[]).find((r) => r.project.id === projectId);
+    const ws = proj.workstreams.find((w: any) => w.workstream.id === evictId);
+    const crit = (ws.progress?.criteria || []).find((c: any) => c.sourceKind === "command");
+    // The new criterion has never been evaluated → unrun, NOT the stale met=true.
+    expect(crit.unrun).toBe(true);
+    expect(crit.met).toBe(false);
+  }, 20_000);
 });
 
 describe("POST /api/dod/evaluate (command DoD, disabled by default)", () => {

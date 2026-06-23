@@ -413,6 +413,34 @@ describe("assembleRollups", () => {
     expect(s.messageCount).toBe(0);
     expect(s.modified).toBe("");
   });
+
+  it("an input `fail` flows through to uiStatus 'fail' + a hard 'blocked' status", async () => {
+    // Regression guard for the high-severity finding: buildSessionRollup used to
+    // hardcode fail:false, so a real abnormal-end session could NEVER reach uiStatus
+    // 'fail'. The server's liveSessionSignals now sets `fail` and it must reach the ring.
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["w1"] })],
+      workstreams: [workstream({ id: "w1", projectId: "A", sessionIds: ["boom"] })],
+    };
+    const failed = session({ id: "boom", cwd: "/a", fail: true });
+    const rollups = await assembleRollups(registry, [failed], cleanStub);
+    const s = rollups[0].workstreams.flatMap((w) => w.sessions).find((x) => x.id === "boom")!;
+    expect(s.uiStatus).toBe("fail");
+    expect(s.status).toBe("blocked");
+  });
+
+  it("a representative `live` one-liner rides onto the SessionRollup", async () => {
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["w1"] })],
+      workstreams: [workstream({ id: "w1", projectId: "A", sessionIds: ["chatty"] })],
+    };
+    const live = session({ id: "chatty", cwd: "/a", live: "Refactored the auth flow." });
+    const rollups = await assembleRollups(registry, [live], cleanStub);
+    const s = rollups[0].workstreams.flatMap((w) => w.sessions).find((x) => x.id === "chatty")!;
+    expect(s.live).toBe("Refactored the auth flow.");
+  });
 });
 
 describe("isMixed", () => {

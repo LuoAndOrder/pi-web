@@ -176,6 +176,10 @@ function toSession(sr: SessionRollup, wsLoop?: WorkstreamRollup["loop"]): VSessi
   const crit = (sr.dod?.criteria ?? []).map(toCrit);
   const gate = crit.find((c) => c.gate && !c.met) ?? null;
   const elicited = !!sr.elicitation;
+  // A git-conflicted working tree is a HARD blocker (DATA-MODEL §5.3) even without a
+  // structured ask — surface it so the client isNeed/isSoftWait treat it as an
+  // obligation, matching the server's status.ts isHardNeed (the high-severity finding).
+  const gitBlocked = !!sr.git?.blocked;
   // Loop info is the workstream's (the registry's source of truth), with the
   // per-session `sr.loop` taking precedence if present. `elapsedMin` flows from
   // `loopStartedAt` only — never from `sr.runtime.startedAt`.
@@ -211,6 +215,7 @@ function toSession(sr: SessionRollup, wsLoop?: WorkstreamRollup["loop"]): VSessi
     meta: !sr.runtime?.isRunning ? relTime(sr.modified) : "running",
     kind: elicited ? "question" : status === "fail" ? "failed" : undefined,
     elicited,
+    gitBlocked,
     chips: sr.elicitation?.options ?? [],
     blast: sr.blast,
     failAction: sr.failAction,

@@ -67,6 +67,9 @@ export interface VSession {
   meta?: string;
   kind?: string;
   elicited?: boolean;
+  // A git-conflicted working tree — a HARD blocker (DATA-MODEL §5.3) even without a
+  // structured ask, so isNeed/isSoftWait treat it as an obligation, not a quiet wait.
+  gitBlocked?: boolean;
   chips?: string[];
   blast?: string;
   failAction?: string;
@@ -191,6 +194,19 @@ export interface DashboardRenderer {
 export const STATUS_RANK: Record<string, number> = { block: 0, fail: 0, unset: 1, run: 2, loop: 2, sign: 3, queued: 4, planned: 4, merge: 5 };
 export function statusRank(st: string) { return STATUS_RANK[st] != null ? STATUS_RANK[st] : 9; }
 
+// A HARD need (enters Needs-you / the hero obligation count): a FAILURE, a
+// STRUCTURALLY-ELICITED block, OR a git-CONFLICT block (DATA-MODEL §5.3 lists a
+// conflicted working tree as a hard blocker). Mirrors the server's status.ts
+// `isHardNeed` so a real git-conflicted session surfaces as an obligation instead of
+// degrading to a quiet "may be waiting" (the high-severity review finding). A
+// non-elicited, non-conflict idle stop stays a SOFT wait, never amber.
+export function isHardNeedV(s: { status?: string; elicited?: boolean; gitBlocked?: boolean }): boolean {
+  return s.status === "fail" || (s.status === "block" && (!!s.elicited || !!s.gitBlocked));
+}
+export function isSoftWaitV(s: { status?: string; elicited?: boolean; gitBlocked?: boolean }): boolean {
+  return s.status === "block" && !s.elicited && !s.gitBlocked;
+}
+
 // ── loop elapsed (S11), the SINGLE grounded source ────────────────────────────
 // A live loop's "∞ looping {elapsed}" badge derives its elapsed STRICTLY from the
 // stored `loopStartedAt` (registry field, spec §5.4), surfaced on the view model as
@@ -245,10 +261,11 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
   const deferTip = (what: string) => ` title="${esc(what)}"`;
   // The sign-off CTAs are live one-click controls again, so drop the "soon" treatment + tag.
   const soonTag = ``;
-  // a HARD need = a FAILURE or a STRUCTURALLY-ELICITED block; a non-elicited free-text stop can't be
-  // PROVEN a blocker (spec §5.3), so it degrades to a quiet "may be waiting", never Needs-you.
-  const isNeed = (s: VSession) => s.status === "fail" || (s.status === "block" && !!s.elicited);
-  const isSoftWait = (s: VSession) => s.status === "block" && !s.elicited;
+  // a HARD need = a FAILURE, a STRUCTURALLY-ELICITED block, or a git-CONFLICT block
+  // (spec §5.3); a non-elicited, non-conflict free-text stop can't be PROVEN a blocker, so
+  // it degrades to a quiet "may be waiting", never Needs-you. Uses the shared module helpers.
+  const isNeed = (s: VSession) => isHardNeedV(s);
+  const isSoftWait = (s: VSession) => isSoftWaitV(s);
   const isRecent = (ago?: string) => /(^now|sec|min|m ago|h ago|hour)/i.test(ago || "");
   function blastRadius(s: VSession): string {
     if (s.blast) return s.blast;
@@ -340,7 +357,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
   function projNeeds(p: VProject) {
     let you = 0, fail = 0, sign = 0, run = 0;
     p.workstreams.forEach((w) => w.sessions.forEach((s) => {
-      if (s.status === "block" && s.elicited) you++;
+      if (s.status === "block" && (s.elicited || s.gitBlocked)) you++;
       if (s.status === "fail") fail++;
       if (s.status === "sign") sign++;
       if (s.status === "run" || s.status === "loop") run++;
@@ -362,8 +379,8 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     if (!top || !topW) return { tone: "calm", loop: false, txt: "All quiet.", id: null };
     const t: VSession = top, w: VWorkstream = topW;
     const st = t.status, wn = shortWs(w.name);
-    if (st === "block" && !t.elicited) return { tone: "calm", loop: false, txt: `${wn} went idle — may be waiting, or may have finished`, id: t.id };
-    if (st === "block") return { tone: "block", loop: false, pointUp: "sec-needs", txt: `${wn} needs your input — ${t.live}`, id: t.id };
+    if (isSoftWaitV(t)) return { tone: "calm", loop: false, txt: `${wn} went idle — may be waiting, or may have finished`, id: t.id };
+    if (st === "block") return { tone: "block", loop: false, pointUp: "sec-needs", txt: t.gitBlocked ? `${wn} has a git conflict — resolve to continue` : `${wn} needs your input — ${t.live}`, id: t.id };
     if (st === "fail") return { tone: "fail", loop: false, pointUp: "sec-needs", txt: `${wn} failed — ${t.live}`, id: t.id };
     if (st === "run" || st === "loop") {
       const qd = (st === "loop" && t.queueTotal != null) ? { total: t.queueTotal } : null;
@@ -436,7 +453,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       const inDorm = dorm.has(p.id);
       if (s.status === "run") c.run++;
       else if (s.status === "loop") c.loop++;
-      else if (s.status === "block") { if (s.elicited) c.block++; else c.softwait++; }
+      else if (s.status === "block") { if (s.elicited || s.gitBlocked) c.block++; else c.softwait++; }
       else if (s.status === "sign") c.sign++;
       else if (s.status === "queued" || s.status === "planned") { if (!inDorm) c.plan++; }
       else if (s.status === "merge") { if (!inDorm) c.merge++; }
@@ -474,7 +491,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       if (s.status === "merge" && sinceVisit((s.artifact && s.artifact.mergedAgo) || (w && w.mergedAgo) || "")) {
         merges++; if (s.artifact) { add += s.artifact.add || 0; del += s.artifact.del || 0; }
       }
-      if (s.status === "block" && s.elicited && sinceVisit(s.meta)) blocked++;
+      if (s.status === "block" && (s.elicited || s.gitBlocked) && sinceVisit(s.meta)) blocked++;
     });
     return { merges, add, del, blocked, since: state.lastVisit };
   }
@@ -601,7 +618,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     let html = top.map(({ s, w, p }) => {
       const cls = s.status === "block" ? "block" : "fail";
       const blast = blastRadius(s);
-      const soft = s.status === "block" && !s.elicited;
+      const soft = isSoftWaitV(s);
       const statusBadge = s.status === "fail" ? badge("fail") : badge("block", soft);
       const blastTag = (blast === "hi" || blast === "md") ? `<span class="blast ${cls}" title="Blast radius is a HEURISTIC triage hint. It only ORDERS Needs-you; it gates nothing.">${blastLabel(blast)}</span>` : "";
       const wait = waitLabel(s);
@@ -698,8 +715,13 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       <section class="signoff" id="signoffHost" data-testid="signoff"></section>`;
   }
   function mergeAffordance(s: VSession) {
+    // The merge button actually SENDS the merge prompt via POST /api/prompt (data-merge,
+    // handled in dashboard.ts like a quick-reply chip) — the tooltip now matches what it
+    // does instead of asserting a send the old data-open (open-only) button never made
+    // (review honesty finding). Merge stays a SEPARATE step from sign-off.
+    const br = branchOf(s);
     return hasGitBranch(s)
-      ? `<button class="btn ghost sm" data-open="${s.id}">Ask pi to merge ${esc(branchOf(s))} → main</button><span class="infg" title="Merge is a SEPARATE step — this sends the agent the prompt &quot;merge ${esc(branchOf(s))} into main&quot; via /api/prompt.">i</span>`
+      ? `<button class="btn ghost sm" data-merge="${s.id}" data-branch="${esc(br)}">Ask pi to merge ${esc(br)} → main</button><span class="infg" title="Merge is a SEPARATE step — sends the agent the prompt &quot;merge ${esc(br)} into main&quot; via /api/prompt, then opens the conversation so you can watch it land.">i</span>`
       : `<button class="btn ghost sm" data-open="${s.id}">Archive</button>`;
   }
   function renderSignoff() {
@@ -1036,7 +1058,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       : dodInline(s.dod, s.dodSrc);
     const dodHoisted = w && w.status !== "unset" && s.status !== "unset" && s.dod === w.dod && s.dodSrc === w.dodSrc;
     const loopTag = s.loop ? `<span class="loopBadge"><span class="inf">∞</span> looping ${esc(fmtMin(loopMinutes(s)))}</span>` : "";
-    const softTag = (s.status === "block" && !s.elicited) ? ` ${badge("block", true)}` : "";
+    const softTag = isSoftWaitV(s) ? ` ${badge("block", true)}` : "";
 
     return `<div class="sess" data-open="${s.id}">
       ${dot}
@@ -1244,7 +1266,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const hasCrit = !!(s.crit && s.crit.length);
     const crit = hasCrit ? `<div class="cb-crit">${s.crit!.map(critRow).join("")}</div>` : "";
     const exp = hasCrit ? `<span class="cb-exp">${chevIcon()}</span>` : "";
-    const soft = s.status === "block" && !s.elicited;
+    const soft = isSoftWaitV(s);
     return `<div class="cb-bar"${hasCrit ? ' data-cb-toggle role="button" tabindex="0"' : ""}>
       <div class="cb-ring">${ringSvg(ringItem, 40)}</div>
       <div class="cb-main">

@@ -665,11 +665,44 @@ function makeCommandEval(
   return out;
 }
 
+// Hard backstop on the command-eval cache size so a long-lived process can't grow it
+// unbounded even if eviction misses an id (registry replaced while no render ran).
+const COMMAND_EVAL_CACHE_MAX = 500;
+
+/** Collect every DoD criterion id the registry currently knows (project + workstream
+ *  DoDs). Cached command evals for an id NOT in this set are orphans — a deleted /
+ *  replaced criterion (PUT /api/workstreams/:id/dod mints new ids) — and are evicted so
+ *  they can't grow the cache forever or surface a stale exit code on an id collision
+ *  (review finding). */
+function liveCriterionIds(registry: ProjectRegistry): Set<string> {
+  const ids = new Set<string>();
+  for (const project of registry.projects) {
+    for (const c of project.dod?.criteria ?? []) ids.add(c.id);
+  }
+  for (const ws of registry.workstreams) {
+    for (const c of ws.dod?.criteria ?? []) ids.add(c.id);
+  }
+  return ids;
+}
+
+/** Drop cached command evals whose criterion id is no longer in the registry. Called on
+ *  the render path (against the current registry) and after any DoD replace/delete, so
+ *  orphaned entries never accumulate. */
+function pruneCommandEvalCache(registry: ProjectRegistry): void {
+  const live = liveCriterionIds(registry);
+  for (const id of commandEvalCache.keys()) {
+    if (!live.has(id)) commandEvalCache.delete(id);
+  }
+}
+
 /** The cached command evals as the rollup join consumes them, with a freshness pass
  *  applied: an eval older than COMMAND_STALE_MS is marked `stale` so it can no longer
  *  back a 100% / sign-off (critStale), and an `unrun` (disabled) eval stays unrun.
- *  Never mutates the cache; returns a fresh Map for one render pass. */
-function commandEvalsForRender(now = Date.now()): Map<string, CriterionEval> {
+ *  Prunes orphaned ids (deleted/replaced criteria) against the live registry first so
+ *  the cache stays bounded; never mutates a surviving entry — returns a fresh Map for
+ *  one render pass. */
+function commandEvalsForRender(registry: ProjectRegistry, now = Date.now()): Map<string, CriterionEval> {
+  pruneCommandEvalCache(registry);
   const out = new Map<string, CriterionEval>();
   for (const [id, eval_] of commandEvalCache) {
     if (eval_.unrun) {
@@ -1152,7 +1185,51 @@ function runtimeActivityTimestamp(event: any, fallback = new Date().toISOString(
   return fallback;
 }
 
+// Derive the rollup-facing live signals for a session from its in-memory live
+// entry (only LOADED sessions have these — a session pi disposed after the 60s idle
+// grace has none, which is honest: we report nothing rather than fabricate). Returns:
+//   - live: the last assistant text summary (the representative one-liner the
+//     "Needs you" / card render reads; without this it was permanently blank).
+//   - fail: an ABNORMAL terminal — the last assistant message errored / stopped
+//     unexpectedly, OR the most recent tool result is an error AND the agent has
+//     stopped (a tool error mid-run is not yet a failure). This is the ONLY non-git
+//     source of a hard `fail` need; it is never synthesized from a clean idle stop.
+// pi exposes no STRUCTURED elicitation (`ask_user`) today, so `elicitation` stays
+// intentionally unpopulated here (see the buildSessionRollup seam doc) — a free-text
+// stop degrades to the quiet "may be waiting" soft wait, never a fabricated amber ask.
+function liveSessionSignals(path: string): { live?: string; fail?: boolean } {
+  const live = liveSessions.get(path)?.session;
+  if (!live || !Array.isArray(live.messages)) return {};
+  const isRunning = Boolean(live.isStreaming || live.isCompacting);
+
+  let lastAssistantText = "";
+  let lastAssistantErrored = false;
+  let lastToolErrored: boolean | undefined;
+  for (const message of live.messages as any[]) {
+    if (!message || typeof message !== "object") continue;
+    if (message.role === "assistant") {
+      const errored = Boolean(message.errorMessage) || message.stopReason === "error"
+        || Boolean(assistantStopReasonPreview(message));
+      const text = textFromContent(message.content).trim();
+      // Track the most recent assistant turn's text + error state.
+      lastAssistantErrored = errored;
+      if (text) lastAssistantText = text;
+      lastToolErrored = undefined; // a new assistant turn supersedes prior tool results
+    } else if (message.role === "toolResult") {
+      lastToolErrored = Boolean(message.isError);
+    }
+  }
+
+  const out: { live?: string; fail?: boolean } = {};
+  if (lastAssistantText) out.live = truncatePreview(lastAssistantText, 160);
+  // A failure is only honest once the agent has actually stopped — a transient tool
+  // error mid-run is not surfaced as a hard need until the turn ends.
+  if (!isRunning && (lastAssistantErrored || lastToolErrored === true)) out.fail = true;
+  return out;
+}
+
 function simplifySessionInfo(info: Awaited<ReturnType<typeof SessionManager.list>>[number], cwd = piCwd) {
+  const signals = liveSessionSignals(info.path);
   return {
     id: info.id,
     name: info.name,
@@ -1163,6 +1240,8 @@ function simplifySessionInfo(info: Awaited<ReturnType<typeof SessionManager.list
     cwd: info.cwd || cwd,
     isCurrent: false,
     runtime: runtimeForPath(info.path),
+    ...(signals.live ? { live: signals.live } : {}),
+    ...(signals.fail ? { fail: true } : {}),
   };
 }
 
@@ -2923,6 +3002,9 @@ const server = createServer(async (req, res) => {
         if (method === "DELETE") {
           const result = await projectRegistryStore.deleteProject(projectId);
           if (!result) return sendJson(res, 404, { ok: false, error: "Project not found" });
+          // Deleting a project drops its workstreams (and their criteria) — evict their
+          // orphaned cached command evals so the cache can't leak across the lifetime.
+          pruneCommandEvalCache(await projectRegistryStore.read());
           broadcast({ type: "project_registry_changed" });
           return sendJson(res, 200, { ok: true });
         }
@@ -3001,6 +3083,9 @@ const server = createServer(async (req, res) => {
         }
         const result = await projectRegistryStore.setWorkstreamDoD(workstreamId, parsed.body.criteria);
         if (!result) return sendJson(res, 404, { ok: false, error: "Workstream not found" });
+        // Replacing the DoD mints new criterion ids — evict any cached command evals
+        // for the criteria that just disappeared so they can't surface a stale exit code.
+        pruneCommandEvalCache(await projectRegistryStore.read());
         broadcast({ type: "project_registry_changed" });
         return sendJson(res, 200, { ok: true, workstream: result.workstream });
       }
@@ -3060,7 +3145,20 @@ const server = createServer(async (req, res) => {
             const evaluated = await runCommandCriterion(criterion, now);
             // Cache a RUN result (not the disabled `unrun` sentinel) so /api/rollups
             // reflects it; a disabled eval is returned but never cached as truth.
-            if (!evaluated.unrun) commandEvalCache.set(criterion.id, evaluated);
+            if (!evaluated.unrun) {
+              commandEvalCache.set(criterion.id, evaluated);
+              // Backstop: if the cache grew past its cap (e.g. many criteria churned
+              // between renders), prune orphans against the live registry, then evict
+              // the oldest surviving entries until under the cap.
+              if (commandEvalCache.size > COMMAND_EVAL_CACHE_MAX) {
+                pruneCommandEvalCache(registry);
+                while (commandEvalCache.size > COMMAND_EVAL_CACHE_MAX) {
+                  const oldest = commandEvalCache.keys().next().value;
+                  if (oldest === undefined) break;
+                  commandEvalCache.delete(oldest);
+                }
+              }
+            }
             evals.push(evaluated);
           } else if (source.kind === "git_clean" || source.kind === "git_ahead_zero" || source.kind === "git_merged") {
             const repo = typeof (source as { repo?: string }).repo === "string" && (source as { repo?: string }).repo
@@ -3125,8 +3223,9 @@ const server = createServer(async (req, res) => {
           isAncestor: (ancestor, into, cwd) => gitIsAncestor(ancestor, into, cwd).catch(() => false),
           // On-demand command DoD evals (S10), with a staleness pass applied so an
           // old result asterisks the ring and can't back a 100%. NEVER spawns a
-          // command here — only reads what /api/dod/evaluate already ran.
-          commandEvals: commandEvalsForRender(),
+          // command here — only reads what /api/dod/evaluate already ran. Prunes
+          // orphaned ids against this registry first so the cache stays bounded.
+          commandEvals: commandEvalsForRender(registry),
         });
         if (seg.length === 3) {
           const projectId = safeDecode(seg[2]);

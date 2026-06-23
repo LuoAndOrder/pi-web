@@ -82,6 +82,12 @@ export function createDashboard(options: {
   let open = false;
   let fetchToken = 0;
   let refetchTimer: number | undefined;
+  // Per-project realtime coalescing (S8). The server scopes rollup_changed to a single
+  // dirty project; we collect those ids and splice ONLY those projects on flush via
+  // GET /api/rollups/:id, falling back to a full refetch only when a registry change
+  // (project_registry_changed, no projectId) needs the whole set re-assembled.
+  const dirtyProjectIds = new Set<string>();
+  let fullRefetchPending = false;
   const state: DashboardState = { rollups: [], loading: false, error: null };
 
   // The mockup-shaped view model the ported render core reads. `toViewModel` (the
@@ -198,6 +204,14 @@ export function createDashboard(options: {
     }
   }
 
+  // Rebuild the mockup-shaped view model from the current state.rollups and (when open)
+  // re-render. The single seam from server ProjectRollup[] → renderer view model.
+  function rebuildView() {
+    const vm = toViewModel(state.rollups);
+    view.data = vm.data;
+    view.SESS = vm.SESS;
+  }
+
   async function refetch() {
     const token = ++fetchToken;
     state.loading = true;
@@ -216,9 +230,7 @@ export function createDashboard(options: {
       const data = await res.json();
       if (token !== fetchToken) return;
       state.rollups = Array.isArray(data?.rollups) ? (data.rollups as ProjectRollup[]) : [];
-      const vm = toViewModel(state.rollups);
-      view.data = vm.data;
-      view.SESS = vm.SESS;
+      rebuildView();
       // Cold-start: an empty registry renders the first-run onboarding, which needs candidate
       // cwds derived from /api/sessions. Fetch them BEFORE the empty render so the card shows
       // real folders to register, not a bare disclaimer (impl-plan S9).
@@ -234,6 +246,43 @@ export function createDashboard(options: {
       state.error = error instanceof Error ? error.message : String(error);
       if (open) renderWrap();
       addMessage("system", `Failed to load project rollups: ${state.error}`, "error");
+    }
+  }
+
+  // Splice the dirty projects' updated rollups into state.rollups via the per-project
+  // endpoint (GET /api/rollups/:id) instead of re-assembling the WHOLE fleet's git
+  // fan-out on every terminal event in any one project (review finding — the server
+  // already scopes rollup_changed to one project). A project that 404s (deleted) is
+  // dropped from state. Falls back to a full refetch if we have no baseline yet.
+  async function refetchDirtyProjects(ids: string[]) {
+    if (!state.rollups.length) { await refetch(); return; }
+    const token = ++fetchToken;
+    let changed = false;
+    await Promise.all(ids.map(async (id) => {
+      try {
+        const res = await fetch(`/api/rollups/${encodeURIComponent(id)}`, { headers: api.headers() });
+        if (token !== fetchToken) return;
+        if (res.status === 404) {
+          const idx = state.rollups.findIndex((r) => r.project?.id === id);
+          if (idx >= 0) { state.rollups.splice(idx, 1); changed = true; }
+          return;
+        }
+        if (!res.ok) return;
+        const data = await res.json();
+        const one = data?.rollup as ProjectRollup | undefined;
+        if (!one || !one.project?.id) return;
+        const idx = state.rollups.findIndex((r) => r.project?.id === one.project.id);
+        if (idx >= 0) state.rollups[idx] = one;
+        else state.rollups.push(one);
+        changed = true;
+      } catch {
+        /* a single project's splice failing must not blow up the others */
+      }
+    }));
+    if (token !== fetchToken) return;
+    if (changed) {
+      rebuildView();
+      if (open) renderWrap();
     }
   }
 
@@ -272,12 +321,27 @@ export function createDashboard(options: {
     else openDashboard();
   }
 
-  function applyRollupChange(_projectId?: string) {
+  // Realtime entry point (S8). A `rollup_changed{projectId}` marks ONE project dirty
+  // (spliced via the per-project endpoint on flush); a `project_registry_changed`
+  // (no projectId) forces a full refetch since the whole set may have re-shaped. The
+  // 250ms debounce coalesces a burst either way; a full refetch supersedes any pending
+  // per-project splices in the same window.
+  function applyRollupChange(projectId?: string) {
     if (!open) return; // only the open dashboard refetches
+    if (typeof projectId === "string" && projectId) dirtyProjectIds.add(projectId);
+    else fullRefetchPending = true;
     if (refetchTimer !== undefined) window.clearTimeout(refetchTimer);
     refetchTimer = window.setTimeout(() => {
       refetchTimer = undefined;
-      void refetch();
+      if (fullRefetchPending) {
+        fullRefetchPending = false;
+        dirtyProjectIds.clear();
+        void refetch();
+        return;
+      }
+      const ids = Array.from(dirtyProjectIds);
+      dirtyProjectIds.clear();
+      if (ids.length) void refetchDirtyProjects(ids);
     }, REFETCH_DEBOUNCE_MS);
   }
 
@@ -311,17 +375,42 @@ export function createDashboard(options: {
   // Flip the gate locally + re-render immediately, THEN fire PATCH /api/dod/criterion/:id {met}.
   // On failure: revert the local flip + error toast. Undo sends the INVERSE PATCH. Sign-off is
   // NEVER fused with merge — the toast copy says so, and there is no merge call here.
-  async function patchCriterion(criterionId: string, met: boolean): Promise<boolean> {
-    try {
-      const res = await fetch(`/api/dod/criterion/${encodeURIComponent(criterionId)}`, {
-        method: "PATCH",
-        headers: api.headers(),
-        body: JSON.stringify({ met }),
+  //
+  // Concurrency guard (review finding): sign-off → revert-on-fail AND Undo can race —
+  // two PATCHes for ONE criterion could land server-side out of order, leaving persisted
+  // `met` out of sync with the rendered flip. A per-criterion GENERATION token (mirrors
+  // refetch's fetchToken) makes the LAST user intent win: each new intent bumps the
+  // criterion's gen and serializes its PATCH after any in-flight one; a PATCH result whose
+  // gen is stale is IGNORED (a newer intent already superseded it). The next /api/rollups
+  // reconciles the truth regardless.
+  const critGen = new Map<string, number>();
+  const critChain = new Map<string, Promise<boolean>>();
+
+  // Serialize PATCHes for one criterion so they can't land out of order. Returns whether
+  // THIS call's intent is still the latest (its gen is current) AND the PATCH succeeded.
+  function patchCriterionGuarded(criterionId: string, met: boolean): Promise<boolean> {
+    const gen = (critGen.get(criterionId) ?? 0) + 1;
+    critGen.set(criterionId, gen);
+    const prior = critChain.get(criterionId) ?? Promise.resolve(true);
+    const next = prior
+      .catch(() => false)
+      .then(async () => {
+        // A newer intent superseded this one before its turn — skip the network call.
+        if (critGen.get(criterionId) !== gen) return false;
+        try {
+          const res = await fetch(`/api/dod/criterion/${encodeURIComponent(criterionId)}`, {
+            method: "PATCH",
+            headers: api.headers(),
+            body: JSON.stringify({ met }),
+          });
+          // Only report success if we're STILL the latest intent (else a later one owns the truth).
+          return res.ok && critGen.get(criterionId) === gen;
+        } catch {
+          return false;
+        }
       });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    critChain.set(criterionId, next);
+    return next;
   }
   function flipLocal(sessionId: string, met: boolean) {
     const ref = view.SESS[sessionId];
@@ -338,14 +427,18 @@ export function createDashboard(options: {
     flipLocal(sessionId, true);
     renderer.renderSignoff();
     showToast(`<b>${escText(ref.s.name)}</b> signed off — merge is a separate step.`, () => {
-      // Undo: inverse flip locally + inverse PATCH.
+      // Undo: inverse flip locally + serialized inverse PATCH (bumps the gen so a late
+      // sign-off PATCH result for this criterion is ignored).
       flipLocal(sessionId, false);
       renderer.renderSignoff();
-      void patchCriterion(critId, false);
+      void patchCriterionGuarded(critId, false);
     });
-    void patchCriterion(critId, true).then((ok) => {
-      if (!ok) {
-        // Server rejected — revert the optimistic flip and surface the failure.
+    void patchCriterionGuarded(critId, true).then((ok) => {
+      // Revert ONLY when the PATCH failed AND the local state still reflects THIS sign-off
+      // (view.signed===true). If a newer Undo superseded it, the local state is already
+      // false and that intent owns the truth — don't churn it back. The next /api/rollups
+      // reconciles regardless. This avoids the double-flip the un-guarded revert caused.
+      if (!ok && view.signed[sessionId] === true) {
         flipLocal(sessionId, false);
         renderer.renderSignoff();
         showToast(`Couldn't sign off <b>${escText(ref.s.name)}</b> — try again.`);
@@ -365,11 +458,13 @@ export function createDashboard(options: {
     showToast(`<b>${flipped.length}</b> signed off — merges are separate steps.`, () => {
       flipped.forEach(({ id }) => flipLocal(id, false));
       renderer.renderSignoff();
-      flipped.forEach(({ critId }) => void patchCriterion(critId, false));
+      flipped.forEach(({ critId }) => void patchCriterionGuarded(critId, false));
     });
     flipped.forEach(({ id, critId }) => {
-      void patchCriterion(critId, true).then((ok) => {
-        if (!ok) { flipLocal(id, false); renderer.renderSignoff(); }
+      // Same generation guard as signOff: revert only if the PATCH failed AND this
+      // sign-off is still the latest local intent for that session.
+      void patchCriterionGuarded(critId, true).then((ok) => {
+        if (!ok && view.signed[id] === true) { flipLocal(id, false); renderer.renderSignoff(); }
       });
     });
   }
@@ -386,10 +481,19 @@ export function createDashboard(options: {
     s._evaluating = true;
     renderer.renderGrid();
     showToast(`Re-checking <b>${escText(s.name)}</b>… (on-demand command DoD)`);
+    // resolveDodTarget (server) routes only by criterionId / workstreamId / projectId — a body keyed
+    // by sessionId matches NOTHING (404). When the card has no command criterion / manual gate, fall
+    // back to the owning WORKSTREAM's DoD (then the project's), resolved via the SESS index, so the
+    // eval request is always routable instead of silently 404ing (review finding).
+    const body = critId
+      ? { criterionId: critId }
+      : !ref.w.id.endsWith(":unfiled")
+        ? { workstreamId: ref.w.id }
+        : { projectId: ref.p.id };
     void fetch("/api/dod/evaluate", {
       method: "POST",
       headers: api.headers(),
-      body: JSON.stringify(critId ? { criterionId: critId } : { sessionId }),
+      body: JSON.stringify(body),
     }).catch(() => undefined).finally(() => {
       // The eval endpoint lands in S10; until then clear the pulsing ring and re-render from the
       // server snapshot (a fresh refetch reconciles any change the stub produced).
@@ -672,6 +776,37 @@ export function createDashboard(options: {
     }
   }
 
+  // ── merge affordance → POST /api/prompt (the merge button's real action) ──
+  // Sign-off ≠ merge: this is a SEPARATE step that asks the agent to merge the session's
+  // branch into main via a steer message, then opens the conversation so the user watches
+  // it land — exactly what the button's tooltip claims (the old button only opened the
+  // conversation and sent nothing, a UI honesty break; review finding). No local git merge
+  // endpoint exists, so an agent prompt is the honest v1 path (impl-plan S11 / §6).
+  async function mergeRequest(sessionId: string, branch: string) {
+    const ref = view.SESS[sessionId];
+    const cwd = ref?.s.cwd ?? "";
+    const message = branch ? `merge ${branch} into main` : "merge this branch into main";
+    let accepted = false;
+    try {
+      const res = await fetch("/api/prompt", {
+        method: "POST",
+        headers: api.headers(),
+        body: JSON.stringify({ sessionId, message }),
+      });
+      accepted = res.status === 202;
+    } catch {
+      accepted = false;
+    }
+    if (accepted) {
+      showToast(`Asked pi to merge <b>${escText(branch || "the branch")}</b> → main — watch it land in the conversation.`);
+      closeDashboard();
+      await sessions.openSession(sessionId, cwd);
+      showContextBand(sessionId);
+    } else {
+      showToast(`Couldn't send the merge request — open the conversation to retry.`);
+    }
+  }
+
   // Find an overlay element by id WITHOUT touching the host document — keeps every
   // `data-jump` target scoped under #dashboardView (HARD RULE: nothing leaks out).
   function byId(id: string): HTMLElement | null {
@@ -734,6 +869,18 @@ export function createDashboard(options: {
       const id = reply.getAttribute("data-reply");
       const text = reply.getAttribute("data-text") || "";
       if (id) void replyChip(id, text);
+      return;
+    }
+
+    // Merge affordance → POST /api/prompt "merge <branch> into main" then open the session
+    // (what the button's tooltip promises). Checked before data-open like the reply chip.
+    const merge = target.closest<HTMLElement>("[data-merge]");
+    if (merge) {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = merge.getAttribute("data-merge");
+      const branch = merge.getAttribute("data-branch") || "";
+      if (id) void mergeRequest(id, branch);
       return;
     }
 
@@ -808,7 +955,8 @@ export function createDashboard(options: {
       event.stopPropagation();
       const needs = Object.values(view.SESS)
         .map(({ s }) => s)
-        .filter((s) => s.status === "fail" || (s.status === "block" && s.elicited))
+        // A hard need = fail, an elicited block, OR a git-conflict block (matches render.ts isHardNeedV).
+        .filter((s) => s.status === "fail" || (s.status === "block" && (s.elicited || s.gitBlocked)))
         .sort((a, b) => (a.status === "block" ? 0 : 1) - (b.status === "block" ? 0 : 1) || String(a.id).localeCompare(String(b.id)));
       if (needs[0]) void openSessionFromCard(needs[0].id);
       return;
