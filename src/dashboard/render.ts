@@ -105,12 +105,33 @@ export interface VProject {
   nest?: string;
   workstreams: VWorkstream[];
 }
+// A cold-start onboarding candidate: an unregistered cwd that pi has sessions in. Derived
+// client-side from GET /api/sessions (impl-plan S9 — prefer client-derive to stay
+// frontend-only), with the registered project roots filtered out. `path` is the absolute
+// cwd POSTed to /api/projects; `display` is the ~-shortened label.
+export interface OnboardCandidate {
+  name: string;
+  path: string;
+  display: string;
+  sessions: number;
+}
 export interface RenderState {
   data: VProject[];
   SESS: Record<string, { s: VSession; w: VWorkstream; p: VProject }>;
   signed: Record<string, boolean>;
   lastVisit: string | null;
   _pingId: string | null;
+  // Cold-start onboarding candidates (S9). Populated by the controller before an empty render.
+  candidates?: OnboardCandidate[];
+}
+
+// Onboarding intent callbacks the controller wires to the REAL REST surface (S9). The
+// renderer stays render-only: it draws the onboarding card + binds buttons to these.
+export interface OnboardHandlers {
+  // Register a candidate (or the generic "Add a project") → POST /api/projects {name, roots}.
+  onRegister: (name: string, path: string) => void;
+  // Start the user's first pi session → sessions.startNewSession() then close the overlay.
+  onStartSession: () => void;
 }
 
 type RingItem = {
@@ -174,8 +195,8 @@ export interface DashboardRenderer {
 export const STATUS_RANK: Record<string, number> = { block: 0, fail: 0, unset: 1, run: 2, loop: 2, sign: 3, queued: 4, planned: 4, merge: 5 };
 export function statusRank(st: string) { return STATUS_RANK[st] != null ? STATUS_RANK[st] : 9; }
 
-export function createRenderer(options: { wrap: HTMLElement; state: RenderState }): DashboardRenderer {
-  const { wrap, state } = options;
+export function createRenderer(options: { wrap: HTMLElement; state: RenderState; onboard?: OnboardHandlers }): DashboardRenderer {
+  const { wrap, state, onboard } = options;
 
   const ST: Record<string, { label: string; cls: string; color: string }> = {
     block: { label: "Blocked · needs input", cls: "block", color: "var(--st-block)" },
@@ -1151,11 +1172,25 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
     return `<p class="calmnote">All other loops are quiet. pi will surface them here the moment they need you.</p>`;
   }
 
-  // ─────────────────────────── first-run onboarding ───────────────────────────
-  function onboardHtml(candidates: number) {
-    const disc = candidates > 0 ? `
+  // ─────────────────────────── first-run onboarding (S9) ───────────────────────────
+  // The folder glyph for an unregistered candidate cwd (mockup L2795 `candglyph`).
+  const folderIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="15" height="15"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></svg>`;
+  function onboardHtml(_candidates: number) {
+    // Candidate roots are DERIVED CLIENT-SIDE from GET /api/sessions cwds (impl-plan S9 —
+    // prefer client-derive to stay frontend-only). Each card registers THAT specific root on
+    // tap via POST /api/projects, so cold-start setup is one click, not three manual layers.
+    const cands = state.candidates || [];
+    const disc = cands.length > 0 ? `
       <div class="disc">
-        pi found <b>${candidates} recent session folder${candidates > 1 ? "s" : ""}</b> that look like projects. Register one to start tracking.
+        pi found <b>${cands.length} recent session folder${cands.length > 1 ? "s" : ""}</b> that look like projects. Add one with a tap:
+        <div class="cands">
+          ${cands.map((c) => `<div class="cand">
+            <span class="candglyph" title="unregistered folder — no rollup, status or DoD computed yet" style="color:var(--muted);display:inline-flex;align-items:center">${folderIcon()}</span>
+            <span class="cpath mono" title="${esc(c.path)}">${esc(c.display)}</span>
+            <span class="cmeta">${c.sessions} session${c.sessions > 1 ? "s" : ""}</span>
+            <button class="btn ghost sm" data-cand="${esc(c.name)}" data-candpath="${esc(c.path)}">Add</button>
+          </div>`).join("")}
+        </div>
       </div>` : `
       <div class="disc">No sessions yet — once you start one, pi will offer to roll its folder up into a project automatically.</div>`;
     return `<div class="onboard" data-testid="first-run">
@@ -1180,8 +1215,25 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
       ${disc}
     </div>`;
   }
-  // S5 is read-only — onboarding actions (register / start) are wired in S9.
-  function bindOnboard() { /* no-op until S9 */ }
+  // Wire the onboarding intents to the controller's REAL REST handlers (impl-plan S9). The
+  // conversion flow gates ALL of the dashboard's value, so its handlers must be EXERCISED, not
+  // no-ops: each candidate's Add registers THAT root (POST /api/projects), "Add a project"
+  // registers the first candidate (or no-ops with a hint when none), and "Start your first
+  // session" opens a real pi session that the next rollup folds in by cwd-prefix.
+  function bindOnboard() {
+    if (!onboard) return;
+    const add = wrap.querySelector<HTMLButtonElement>("#obAdd");
+    if (add) add.onclick = () => {
+      const first = (state.candidates || [])[0];
+      if (first) onboard.onRegister(first.name, first.path);
+      else onboard.onStartSession(); // nothing to register yet → start a session to seed a candidate
+    };
+    const start = wrap.querySelector<HTMLButtonElement>("#obStart");
+    if (start) start.onclick = () => onboard.onStartSession();
+    wrap.querySelectorAll<HTMLButtonElement>("[data-cand]").forEach((b) => {
+      b.onclick = () => onboard.onRegister(b.getAttribute("data-cand") || "project", b.getAttribute("data-candpath") || "");
+    });
+  }
 
   // The Needs-you "jump to item" filter is driven by a single delegated `input` listener on
   // `wrap` (mirroring the delegated click discipline) — no inline `oninput` attribute, no

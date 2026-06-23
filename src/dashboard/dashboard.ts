@@ -34,6 +34,16 @@ type DashboardState = {
 const REFETCH_DEBOUNCE_MS = 250;
 const LAST_VISIT_KEY = "pi-dashboard-last-visit";
 
+// `/Users/<name>/foo` → `~/foo` for a calmer onboarding display path (matches the adapter).
+function prettyPath(root: string): string {
+  return root.replace(/^\/(?:Users|home)\/[^/]+/, "~");
+}
+// The trailing folder name of an absolute cwd — the default project name when registering.
+function basename(p: string): string {
+  const parts = p.replace(/\/+$/, "").split("/");
+  return parts[parts.length - 1] || p;
+}
+
 // Persist a real "last looked at the dashboard" timestamp so the hero delta clause counts
 // only work merged/blocked since the PREVIOUS visit — never treating a null baseline as the
 // beginning of time (which made `fleetDelta` count every merged item all-time). Returns an
@@ -77,8 +87,13 @@ export function createDashboard(options: {
   // The mockup-shaped view model the ported render core reads. `toViewModel` (the
   // adapter seam) fills `data`/`SESS` from the server `ProjectRollup[]`; the client
   // trusts the server `ProgressSnapshot` and never re-derives it here.
-  const view: RenderState = { data: [], SESS: {}, signed: {}, lastVisit: null, _pingId: null };
-  const renderer = createRenderer({ wrap: elements.dashboardWrap, state: view });
+  const view: RenderState = { data: [], SESS: {}, signed: {}, lastVisit: null, _pingId: null, candidates: [] };
+  const renderer = createRenderer({
+    wrap: elements.dashboardWrap,
+    state: view,
+    // Cold-start onboarding intents (S9), wired to the REAL REST surface.
+    onboard: { onRegister: registerProject, onStartSession: startFirstSession },
+  });
 
   function escapeHtml(value: string) {
     return value.replace(/[&<>"']/g, (char) =>
@@ -113,10 +128,74 @@ export function createDashboard(options: {
   }
 
   // Drive the ported render core (rollupAdapter.toViewModel → render.renderAll). An
-  // empty registry renders the first-run onboarding; otherwise the full rollup grid.
+  // empty registry renders the first-run onboarding (with candidate cwds derived from
+  // /api/sessions); otherwise the full rollup grid.
   function renderWrap() {
     if (renderLoadingOrError()) return;
-    renderer.renderAll(view.data.length === 0 ? { empty: true, candidates: 0 } : {});
+    renderer.renderAll(view.data.length === 0 ? { empty: true, candidates: (view.candidates || []).length } : {});
+  }
+
+  // ── cold-start onboarding (impl-plan S9) ──
+  // Derive candidate project roots CLIENT-SIDE from GET /api/sessions cwds (prefer client-derive
+  // to stay frontend-only). A candidate is a cwd pi has sessions in that no registered project
+  // root already covers (longest-prefix). Sorted by session count so the busiest folder leads.
+  async function refreshCandidates() {
+    try {
+      const res = await fetch("/api/sessions", { headers: api.headers() });
+      if (!res.ok) { view.candidates = []; return; }
+      const data = await res.json();
+      const sessions: Array<{ cwd?: string }> = Array.isArray(data?.sessions) ? data.sessions : [];
+      // Roots already registered — a candidate under one of these is NOT offered again.
+      const registeredRoots = state.rollups.flatMap((r) => r.project?.roots ?? []);
+      const covered = (cwd: string) => registeredRoots.some((root) => cwd === root || cwd.startsWith(root.endsWith("/") ? root : root + "/"));
+      const byCwd = new Map<string, number>();
+      for (const s of sessions) {
+        const cwd = (s.cwd || "").trim();
+        if (!cwd || covered(cwd)) continue;
+        byCwd.set(cwd, (byCwd.get(cwd) || 0) + 1);
+      }
+      view.candidates = Array.from(byCwd.entries())
+        .map(([path, n]) => ({ path, display: prettyPath(path), name: basename(path), sessions: n }))
+        .sort((a, b) => b.sessions - a.sessions || a.path.localeCompare(b.path));
+    } catch {
+      view.candidates = [];
+    }
+  }
+
+  // Register a candidate (or "Add a project") → POST /api/projects {name, roots}; then refetch the
+  // rollups so the freshly-registered project re-renders into the grid (needs-setup, no DoD yet —
+  // an honest "?" ring, never a fabricated percent). The toast names the real API.
+  async function registerProject(name: string, path: string) {
+    const root = (path || "").trim();
+    if (!root) { showToast("Pick a folder to register, or start a session first."); return; }
+    const projName = (name || basename(root) || "New project").trim();
+    try {
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: api.headers(),
+        body: JSON.stringify({ name: projName, roots: [root] }),
+      });
+      if (res.ok || res.status === 201) {
+        showToast(`Registered <b>${escText(projName)}</b> — its sessions roll up by cwd-prefix. Set a Definition of Done to track progress.`);
+        await refreshCandidates();
+        await refetch();
+      } else {
+        showToast(`Couldn't register <b>${escText(projName)}</b> — ${escText(await res.text())}`);
+      }
+    } catch (error) {
+      showToast(`Couldn't register <b>${escText(projName)}</b> — ${escText(error instanceof Error ? error.message : String(error))}`);
+    }
+  }
+
+  // Start the user's first pi session, then close the overlay so they land in the live composer.
+  // The next rollup folds the new session into a project by cwd-prefix.
+  async function startFirstSession() {
+    closeDashboard();
+    try {
+      await sessions.startNewSession();
+    } catch (error) {
+      addMessage("system", `Couldn't start a session: ${error instanceof Error ? error.message : String(error)}`, "error");
+    }
   }
 
   async function refetch() {
@@ -140,6 +219,13 @@ export function createDashboard(options: {
       const vm = toViewModel(state.rollups);
       view.data = vm.data;
       view.SESS = vm.SESS;
+      // Cold-start: an empty registry renders the first-run onboarding, which needs candidate
+      // cwds derived from /api/sessions. Fetch them BEFORE the empty render so the card shows
+      // real folders to register, not a bare disclaimer (impl-plan S9).
+      if (view.data.length === 0) {
+        await refreshCandidates();
+        if (token !== fetchToken) return;
+      }
       state.loading = false;
       if (open) renderWrap();
     } catch (error) {
