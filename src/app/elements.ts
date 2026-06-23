@@ -49,6 +49,7 @@ export type AppElements = {
   settingDensitySelect: HTMLSelectElement;
   settingQueueModeSelect: HTMLSelectElement;
   settingComposerExpandedCheckbox: HTMLInputElement;
+  settingDashboardOnLaunchCheckbox: HTMLInputElement;
   settingDefaultBucketColorSelect: HTMLSelectElement;
   settingModelDefaultsValue: HTMLSpanElement;
   settingSaveModelDefaultsButton: HTMLButtonElement;
@@ -123,6 +124,7 @@ export function getAppElements(): AppElements {
     settingDensitySelect: requiredElement<HTMLSelectElement>("#settingDensitySelect"),
     settingQueueModeSelect: requiredElement<HTMLSelectElement>("#settingQueueModeSelect"),
     settingComposerExpandedCheckbox: requiredElement<HTMLInputElement>("#settingComposerExpandedCheckbox"),
+    settingDashboardOnLaunchCheckbox: requiredElement<HTMLInputElement>("#settingDashboardOnLaunchCheckbox"),
     settingDefaultBucketColorSelect: requiredElement<HTMLSelectElement>("#settingDefaultBucketColorSelect"),
     settingModelDefaultsValue: requiredElement<HTMLSpanElement>("#settingModelDefaultsValue"),
     settingSaveModelDefaultsButton: requiredElement<HTMLButtonElement>("#settingSaveModelDefaultsButton"),

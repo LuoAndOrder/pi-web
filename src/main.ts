@@ -7,7 +7,7 @@ import { getAppElements, initAppHeightSync } from "./app/elements.js";
 import { initSwAutoReload } from "./app/sw-update.js";
 import { setIcon } from "./app/icons.js";
 import { initKeyboardShortcuts } from "./app/shortcuts.js";
-import { createAppState, readActiveSessionIdFromUrl } from "./app/types.js";
+import { createAppState, readActiveSessionIdFromUrl, readDashboardViewFromUrl } from "./app/types.js";
 import { createComposer, type ComposerController } from "./composer/composer.js";
 import { createContextMeter, type ContextMeterController } from "./composer/contextMeter.js";
 import { createDashboard, type DashboardController } from "./dashboard/dashboard.js";
@@ -301,6 +301,9 @@ initKeyboardShortcuts([
 composer.updateQueueToggle();
 initGitPanel({ button: elements.gitButton, panel: elements.gitPanel, apiHeaders: api.headers, getSessionId: () => state.currentSessionId });
 window.addEventListener("popstate", () => {
+  // Reconcile the dashboard overlay to the URL's `?view=dashboard` first, independent of the
+  // session change below — Back/Forward must open/close the deep-linked overlay on its own.
+  dashboard.reconcileFromUrl();
   const nextSessionId = readActiveSessionIdFromUrl();
   if (nextSessionId === state.currentSessionId) return;
   state.currentSessionId = nextSessionId;
@@ -311,5 +314,27 @@ window.addEventListener("popstate", () => {
   refreshState().catch(showSystemError);
 });
 composer.updatePrimaryAction();
-refreshState().catch(showSystemError);
+
+// Deep-link: `?view=dashboard` opens the rollups overlay on load. Use `replace` so reload
+// doesn't push a spurious history entry (the param is already in the URL). This fires before
+// the settings-driven launch default so an explicit deep-link always wins.
+const dashboardDeepLinked = readDashboardViewFromUrl();
+if (dashboardDeepLinked) dashboard.open({ mode: "replace" });
+
+// Whether the user deep-linked a SPECIFIC session via `?sessionId=` at load. Captured from the
+// URL up front (before refreshState's updateMeta overwrites state.currentSessionId with the
+// server's default/mock session), so the launch default means "no session was explicitly
+// requested" — not "the server happened to have no current session".
+const sessionDeepLinkedAtLaunch = Boolean(readActiveSessionIdFromUrl());
+
+refreshState()
+  .then(() => {
+    // Launch default (Settings → "Open dashboard on launch"): open the dashboard when the app
+    // loads WITHOUT a specific session in the URL and WITHOUT the deep-link already having opened
+    // it. Guard on the current overlay state so a session the user opened meanwhile isn't clobbered.
+    if (!dashboardDeepLinked && !sessionDeepLinkedAtLaunch && state.settings.dashboard.openOnLaunch && !dashboard.isOpen()) {
+      dashboard.open({ mode: "replace" });
+    }
+  })
+  .catch(showSystemError);
 realtime.connect();

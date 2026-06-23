@@ -12,17 +12,28 @@
 import type { ApiClient } from "../app/api.js";
 import type { AppElements } from "../app/elements.js";
 import type { SessionsController } from "../sessions/sessionDrawer.js";
+import { readDashboardViewFromUrl, writeDashboardViewToUrl } from "../app/types.js";
 import type { ProjectRollup } from "./types.js";
 import { createRenderer, type RenderState } from "./render.js";
 import { toViewModel } from "./rollupAdapter.js";
 
+// Open/close can be driven either by a user gesture (push `?view=dashboard` onto
+// history so Back/reload behave), by an explicit deep-link or launch default (replace,
+// so the route isn't a spurious extra history entry), or by a `popstate` reconcile —
+// where the URL is ALREADY the source of truth and must NOT be re-written (that would
+// loop / corrupt the history stack).
+type ViewSyncOptions = { syncUrl?: boolean; mode?: "push" | "replace" };
+
 export type DashboardController = {
   init: () => void;
-  open: () => void; // fetch /api/rollups, render, reveal overlay
-  close: () => void; // hide overlay (keeps DOM)
+  open: (opts?: ViewSyncOptions) => void; // fetch /api/rollups, render, reveal overlay
+  close: (opts?: ViewSyncOptions) => void; // hide overlay (keeps DOM)
   isOpen: () => boolean;
   toggle: () => void;
   applyRollupChange: (projectId?: string) => void; // debounced refetch on realtime
+  // Reconcile the overlay's open/closed state to match `?view=dashboard` in the URL,
+  // called from the app's `popstate` handler. Never writes the URL back.
+  reconcileFromUrl: () => void;
 };
 
 type DashboardState = {
@@ -323,7 +334,15 @@ export function createDashboard(options: {
     elements.dashboardView.hidden = true;
   }
 
-  function openDashboard() {
+  // Mirror the overlay's open/closed state into the URL (`?view=dashboard`) so the route is
+  // deep-linkable and survives reload + Back — exactly as `?sessionId=` works. `syncUrl:false`
+  // (the popstate path) skips the write because the URL is already the source of truth.
+  function syncUrl(isOpen: boolean, opts?: ViewSyncOptions) {
+    if (opts?.syncUrl === false) return;
+    writeDashboardViewToUrl(isOpen, opts?.mode ?? "push");
+  }
+
+  function openDashboard(opts?: ViewSyncOptions) {
     if (open) return;
     hideContextBand(); // the band is the drill-in frame; reopening the dashboard supersedes it
     // Establish the "since you last looked" baseline from the previous visit, then record
@@ -331,21 +350,31 @@ export function createDashboard(options: {
     view.lastVisit = readLastVisit();
     writeLastVisit();
     reveal();
+    syncUrl(true, opts);
     // Show the loading hero (not the empty-onboarding flash) until the first fetch lands.
     if (view.data.length === 0) state.loading = true;
     renderWrap();
     void refetch();
   }
 
-  function closeDashboard() {
+  function closeDashboard(opts?: ViewSyncOptions) {
     if (!open) return;
     closeDodDrawer(); // a left-open authoring drawer must not survive the overlay closing
     hide();
+    syncUrl(false, opts);
   }
 
   function toggle() {
     if (open) closeDashboard();
     else openDashboard();
+  }
+
+  // Bring the overlay in line with `?view=dashboard` after a Back/Forward navigation.
+  // The URL already reflects the desired state, so neither branch re-writes it.
+  function reconcileFromUrl() {
+    const wantOpen = readDashboardViewFromUrl();
+    if (wantOpen && !open) openDashboard({ syncUrl: false });
+    else if (!wantOpen && open) closeDashboard({ syncUrl: false });
   }
 
   // Realtime entry point (S8). A `rollup_changed{projectId}` marks ONE project dirty
@@ -1195,5 +1224,6 @@ export function createDashboard(options: {
     isOpen: () => open,
     toggle,
     applyRollupChange,
+    reconcileFromUrl,
   };
 }

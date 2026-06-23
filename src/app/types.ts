@@ -65,6 +65,9 @@ export type PiWebSettings = {
     queueMode: QueueMode;
     expanded: boolean;
   };
+  dashboard: {
+    openOnLaunch: boolean;
+  };
   defaults: {
     model?: PiWebModelSetting;
     thinkingLevel?: string;
@@ -269,12 +272,15 @@ export const defaultPiWebSettings: PiWebSettings = {
   version: 1,
   appearance: { density: "comfortable" },
   composer: { queueMode: "steer", expanded: false },
+  dashboard: { openOnLaunch: false },
   defaults: {},
 };
 
 const tokenStorageKey = "pi-web-token";
 const collapsedFoldersStorageKey = "pi-web-collapsed-session-folders";
 const sessionIdUrlParam = "sessionId";
+const viewUrlParam = "view";
+const dashboardViewValue = "dashboard";
 
 function consumeUrlToken() {
   const urlToken = new URLSearchParams(location.search).get("token");
@@ -294,6 +300,21 @@ export function writeActiveSessionIdToUrl(sessionId: string, mode: "push" | "rep
   const url = new URL(location.href);
   if (sessionId) url.searchParams.set(sessionIdUrlParam, sessionId);
   else url.searchParams.delete(sessionIdUrlParam);
+  if (url.href === location.href) return;
+  history[mode === "replace" ? "replaceState" : "pushState"](null, "", url.toString());
+}
+
+// Deep-link for the Project Rollups dashboard overlay. Mirrors the `?sessionId=`
+// pattern above: `?view=dashboard` opens the overlay on load and is pushed/replaced
+// as the overlay opens/closes, so the route is reachable and survives reload + Back.
+export function readDashboardViewFromUrl(): boolean {
+  return new URLSearchParams(location.search).get(viewUrlParam) === dashboardViewValue;
+}
+
+export function writeDashboardViewToUrl(open: boolean, mode: "push" | "replace" = "push") {
+  const url = new URL(location.href);
+  if (open) url.searchParams.set(viewUrlParam, dashboardViewValue);
+  else if (url.searchParams.get(viewUrlParam) === dashboardViewValue) url.searchParams.delete(viewUrlParam);
   if (url.href === location.href) return;
   history[mode === "replace" ? "replaceState" : "pushState"](null, "", url.toString());
 }

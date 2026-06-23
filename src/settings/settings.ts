@@ -29,6 +29,9 @@ function normalizeSettings(value: unknown): PiWebSettings {
   if (composer?.queueMode === "steer" || composer?.queueMode === "followUp") settings.composer.queueMode = composer.queueMode;
   if (typeof composer?.expanded === "boolean") settings.composer.expanded = composer.expanded;
 
+  const dashboard = isRecord(value.dashboard) ? value.dashboard : undefined;
+  if (typeof dashboard?.openOnLaunch === "boolean") settings.dashboard.openOnLaunch = dashboard.openOnLaunch;
+
   const defaults = isRecord(value.defaults) ? value.defaults : undefined;
   const model = isRecord(defaults?.model) ? defaults.model : undefined;
   const provider = typeof model?.provider === "string" ? model.provider.trim() : "";
@@ -97,6 +100,7 @@ export function createSettings(options: {
     elements.settingDensitySelect.value = settings.appearance.density;
     elements.settingQueueModeSelect.value = settings.composer.queueMode;
     elements.settingComposerExpandedCheckbox.checked = settings.composer.expanded;
+    elements.settingDashboardOnLaunchCheckbox.checked = settings.dashboard.openOnLaunch;
     elements.settingDefaultBucketColorSelect.value = settings.defaults.sessionBucketColor || "";
     elements.settingModelDefaultsValue.textContent = settingsLabel(settings);
 
@@ -171,6 +175,13 @@ export function createSettings(options: {
 
     elements.settingComposerExpandedCheckbox.addEventListener("change", () => {
       patchSettings({ composer: { expanded: elements.settingComposerExpandedCheckbox.checked } }).catch((error) => {
+        setSettingsStatus(error instanceof Error ? error.message : String(error), true);
+        addMessage("system", error instanceof Error ? error.message : String(error), "error");
+      });
+    });
+
+    elements.settingDashboardOnLaunchCheckbox.addEventListener("change", () => {
+      patchSettings({ dashboard: { openOnLaunch: elements.settingDashboardOnLaunchCheckbox.checked } }).catch((error) => {
         setSettingsStatus(error instanceof Error ? error.message : String(error), true);
         addMessage("system", error instanceof Error ? error.message : String(error), "error");
       });

@@ -19,6 +19,9 @@ export type PiWebSettings = {
     queueMode: "steer" | "followUp";
     expanded: boolean;
   };
+  dashboard: {
+    openOnLaunch: boolean;
+  };
   defaults: {
     model?: PiWebModelSetting;
     thinkingLevel?: string;
@@ -33,6 +36,9 @@ export type PiWebSettingsPatch = Partial<{
   composer: Partial<{
     queueMode: unknown;
     expanded: unknown;
+  }>;
+  dashboard: Partial<{
+    openOnLaunch: unknown;
   }>;
   defaults: Partial<{
     model: unknown;
@@ -49,6 +55,9 @@ export const defaultPiWebSettings: PiWebSettings = {
   composer: {
     queueMode: "steer",
     expanded: false,
+  },
+  dashboard: {
+    openOnLaunch: false,
   },
   defaults: {},
 };
@@ -89,6 +98,9 @@ export function normalizeSettings(value: unknown): PiWebSettings {
   }
   if (typeof composer?.expanded === "boolean") settings.composer.expanded = composer.expanded;
 
+  const dashboard = isRecord(value.dashboard) ? value.dashboard : undefined;
+  if (typeof dashboard?.openOnLaunch === "boolean") settings.dashboard.openOnLaunch = dashboard.openOnLaunch;
+
   const defaults = isRecord(value.defaults) ? value.defaults : undefined;
   const model = normalizeModel(defaults?.model);
   if (model) settings.defaults.model = model;
@@ -116,6 +128,10 @@ export function applySettingsPatch(current: PiWebSettings, patch: unknown): PiWe
       next.composer.queueMode = patch.composer.queueMode;
     }
     if (typeof patch.composer.expanded === "boolean") next.composer.expanded = patch.composer.expanded;
+  }
+
+  if (isRecord(patch.dashboard)) {
+    if (typeof patch.dashboard.openOnLaunch === "boolean") next.dashboard.openOnLaunch = patch.dashboard.openOnLaunch;
   }
 
   if (isRecord(patch.defaults)) {

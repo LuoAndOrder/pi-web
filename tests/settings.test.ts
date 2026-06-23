@@ -23,11 +23,13 @@ describe("pi-web settings", () => {
       version: 999,
       appearance: { density: "tiny" },
       composer: { queueMode: "bad", expanded: "yes" },
+      dashboard: { openOnLaunch: "nope" },
       defaults: { model: { provider: "", id: "model" }, thinkingLevel: "", sessionBucketColor: "orange" },
     })).toEqual({
       version: 1,
       appearance: { density: "comfortable" },
       composer: { queueMode: "steer", expanded: false },
+      dashboard: { openOnLaunch: false },
       defaults: {},
     });
   });
@@ -36,6 +38,7 @@ describe("pi-web settings", () => {
     const next = applySettingsPatch(normalizeSettings(undefined), {
       appearance: { density: "compact" },
       composer: { queueMode: "followUp", expanded: true },
+      dashboard: { openOnLaunch: true },
       defaults: { model: { provider: "mock", id: "model" }, thinkingLevel: "low", sessionBucketColor: "purple" },
       unknown: true,
     });
@@ -44,8 +47,21 @@ describe("pi-web settings", () => {
       version: 1,
       appearance: { density: "compact" },
       composer: { queueMode: "followUp", expanded: true },
+      dashboard: { openOnLaunch: true },
       defaults: { model: { provider: "mock", id: "model" }, thinkingLevel: "low", sessionBucketColor: "purple" },
     });
+  });
+
+  it("toggles the open-dashboard-on-launch flag and ignores non-boolean patches", () => {
+    const enabled = applySettingsPatch(normalizeSettings(undefined), { dashboard: { openOnLaunch: true } });
+    expect(enabled.dashboard.openOnLaunch).toBe(true);
+
+    const disabled = applySettingsPatch(enabled, { dashboard: { openOnLaunch: false } });
+    expect(disabled.dashboard.openOnLaunch).toBe(false);
+
+    // A non-boolean value is ignored (the prior value is preserved, never coerced).
+    const untouched = applySettingsPatch(enabled, { dashboard: { openOnLaunch: "yes" } });
+    expect(untouched.dashboard.openOnLaunch).toBe(true);
   });
 
   it("persists settings atomically as JSON", async () => {

@@ -232,4 +232,62 @@ test.describe("Project Rollups dashboard", () => {
 
     expect(pageErrors).toEqual([]);
   });
+
+  // M2 — deep-linkable route. The overlay is reachable via `?view=dashboard`, mirroring
+  // how `?sessionId=` works: opening pushes the param, closing removes it, and reload
+  // preserves the open state. These cases mutate nothing (no projects), so they ride the
+  // shared playwright server safely.
+  test.describe("M2: ?view=dashboard route", () => {
+    test("deep-link opens the overlay on load", async ({ page }) => {
+      const pageErrors = trackPageErrors(page);
+      await page.goto("/?view=dashboard");
+      await expect(page.locator("#connectionStatus")).toBeHidden();
+
+      // The overlay is open straight from the URL — no click needed.
+      await expect(page.locator("#dashboardView")).toBeVisible();
+      // The deep-link uses `replace` on load, so the param is still present (reload-safe).
+      expect(new URL(page.url()).searchParams.get("view")).toBe("dashboard");
+
+      expect(pageErrors).toEqual([]);
+    });
+
+    test("opening via the button adds view=dashboard; closing removes it", async ({ page }) => {
+      const pageErrors = trackPageErrors(page);
+      const view = page.locator("#dashboardView");
+      await expect(view).toBeHidden();
+      expect(new URL(page.url()).searchParams.get("view")).toBeNull();
+
+      // Opening via the statusBar button pushes the param into the URL.
+      await page.locator("#dashboardButton").click();
+      await expect(view).toBeVisible();
+      await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("dashboard");
+
+      // Closing (Escape) removes the param.
+      await page.keyboard.press("Escape");
+      await expect(view).toBeHidden();
+      await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBeNull();
+
+      // Back navigation restores the open overlay (the open was a pushState entry).
+      await page.goBack();
+      await expect(view).toBeVisible();
+      await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("dashboard");
+
+      expect(pageErrors).toEqual([]);
+    });
+
+    test("reload preserves the open overlay", async ({ page }) => {
+      const pageErrors = trackPageErrors(page);
+      await page.locator("#dashboardButton").click();
+      await expect(page.locator("#dashboardView")).toBeVisible();
+      await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("dashboard");
+
+      await page.reload();
+      await expect(page.locator("#connectionStatus")).toBeHidden();
+      // Still open after reload — the route survives, not just the in-memory toggle.
+      await expect(page.locator("#dashboardView")).toBeVisible();
+      expect(new URL(page.url()).searchParams.get("view")).toBe("dashboard");
+
+      expect(pageErrors).toEqual([]);
+    });
+  });
 });
