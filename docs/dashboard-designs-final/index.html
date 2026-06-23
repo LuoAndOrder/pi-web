@@ -184,6 +184,12 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .needmore.open .needmore-h .chev{transform:rotate(90deg);}
 .needmore-b{display:none;padding:2px 8px 8px;}
 .needmore.open .needmore-b{display:block;}
+/* (C4) jump-to-item filter — muted utility chrome, NOT a status hue (invariant #2 keeps colour to status) */
+.needjump{display:block;width:100%;margin:4px 0 8px;height:30px;padding:0 11px;border:1px solid var(--border);border-radius:8px;
+  background:color-mix(in srgb,var(--panel) 70%,transparent);color:var(--text);font-size:12px;}
+.needjump::placeholder{color:color-mix(in srgb,var(--muted) 75%,transparent);}
+.needjump:focus{outline:none;border-color:color-mix(in srgb,var(--accent) 45%,var(--border));}
+.needjump-empty{padding:8px 6px;color:var(--muted);font-size:12px;}
 .needrow{display:flex;align-items:center;gap:11px;padding:10px 8px;border-top:1px solid color-mix(in srgb,var(--border) 50%,transparent);}
 .needrow:first-child{border-top:0;}
 .needrow .nleft{flex:1;min-width:0;}
@@ -917,7 +923,7 @@ const WORLD_DEFAULT = [
               {text:"you review & sign off", met:false, src:"manual", gate:true, ev:"awaiting your sign-off"},
             ]},
         ]},
-      { id:"sweep", name:"Nightly bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 38m",
+      { id:"sweep", name:"Nightly bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true,
         sessions:[
           { id:"s5", name:"bug-sweep", status:"loop",
             dod:"0 failing tests (open-ended autonomous loop)", dodSrc:"orchestrator-defined",
@@ -941,7 +947,7 @@ const WORLD_DEFAULT = [
     ]},
   { id:"zippy", name:"zippy", path:"~/zippy", desc:"personal assistant",
     workstreams:[
-      { id:"inbox", name:"Inbox triage loop", dod:"inbox at zero, replies drafted", dodSrc:"agent-defined", status:"loop", loop:true, loopTime:"looping",
+      { id:"inbox", name:"Inbox triage loop", dod:"inbox at zero, replies drafted", dodSrc:"agent-defined", status:"loop", loop:true,
         sessions:[
           { id:"s6", name:"inbox-triage", status:"loop",
             dod:"inbox at zero, replies drafted (open-ended)", dodSrc:"agent-defined",
@@ -1070,7 +1076,7 @@ const WORLD_DENSE = [ (function(){
        crit:[c("branch merged into main",true,"git_merged","ancestor @ 9f3a1c2"),c("npm test → exit 0",true,"command","exit 0","at","2h ago"),c("working tree clean",true,"git_clean","dirtyCount 0")]}),
       "Auth task", ["merge","merge","merge","merge"]),
     mk("d_sweep","bug-sweep loop","0 failing tests","orchestrator-defined","loop",
-      {live:"Triaging failing tests (5 of 12 fixed).",meta:"looping 38m · iter 12",iter:12,elapsedMin:38,iterspark:[3,5,4,6,5,7,6,8,7,9,8,10],queue:["fix flaky e2e","upgrade vitest"],queueTotal:6,ws:{loop:true,loopTime:"looping 38m"}}),
+      {live:"Triaging failing tests (5 of 12 fixed).",meta:"looping 38m · iter 12",iter:12,elapsedMin:38,iterspark:[3,5,4,6,5,7,6,8,7,9,8,10],queue:["fix flaky e2e","upgrade vitest"],queueTotal:6,ws:{loop:true}}),
     // the session-heavy workstream (14 sessions) — proves the per-workstream "+N more sessions" cap (#20d, #8)
     pad(mk("d_tax","Tax form mappings","npm test → exit 0 + merged","rule-based","run",
       {live:"Mapping 1099 categories to ledger (step 7/8).",meta:"running 3m",
@@ -1103,7 +1109,7 @@ const WORLD_DENSE = [ (function(){
 const WORLD_CALM = [
   { id:"wealthlens", name:"wealthlens", path:"~/workspace/wealthlens", desc:"personal finance app",
     workstreams:[
-      { id:"sweep", name:"Nightly bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 22m",
+      { id:"sweep", name:"Nightly bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true,
         sessions:[{id:"c1",name:"bug-sweep",status:"loop",dod:"0 failing tests (open-ended)",dodSrc:"orchestrator-defined",
           live:"Triaging the failing test suite (7 of 11 fixed).",meta:"looping 22m · iter 9",loop:true,iter:9,elapsedMin:22,iterspark:[3,4,5,6,5,7,6,8,7],queue:["dedupe fixtures","fix flaky e2e"],queueTotal:2}]},
       { id:"auth", name:"Auth hardening", dod:"merged into local main", dodSrc:"merged", status:"merge", mergedAgo:"3h ago",
@@ -1113,7 +1119,7 @@ const WORLD_CALM = [
     ]},
   { id:"zippy", name:"zippy", path:"~/zippy", desc:"personal assistant",
     workstreams:[
-      { id:"inbox", name:"Inbox triage loop", dod:"inbox at zero", dodSrc:"agent-defined", status:"loop", loop:true, loopTime:"looping",
+      { id:"inbox", name:"Inbox triage loop", dod:"inbox at zero", dodSrc:"agent-defined", status:"loop", loop:true,
         sessions:[{id:"c3",name:"inbox-triage",status:"loop",dod:"inbox at zero (open-ended)",dodSrc:"agent-defined",
           live:"Drafting replies, never sending without sign-off.",meta:"looping 7m · iter 3",loop:true,iter:3,elapsedMin:7,iterspark:[5,6,7],queue:["draft reply to Maya"],queueTotal:1}]},
       { id:"cal", name:"Calendar sync", dod:"merged into local main", dodSrc:"merged", status:"merge", mergedAgo:"5h ago",
@@ -1198,7 +1204,7 @@ const WORLD_BLOCKED = [
 const WORLD_LOOP = [
   { id:"wealthlens", name:"wealthlens", path:"~/workspace/wealthlens", desc:"personal finance app",
     workstreams:[
-      { id:"sweep", name:"Nightly bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 38m",
+      { id:"sweep", name:"Nightly bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true,
         sessions:[
           { id:"g1", name:"bug-sweep", status:"loop",
             dod:"0 failing tests — open-ended, no fixed scope", dodSrc:"orchestrator-defined",
@@ -1213,7 +1219,7 @@ const WORLD_LOOP = [
     ]},
   { id:"datapipe", name:"datapipe", path:"~/workspace/datapipe", desc:"ETL service",
     workstreams:[
-      { id:"backfill", name:"Nightly backfill loop", dod:"0 dropped rows", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 2h 40m",
+      { id:"backfill", name:"Nightly backfill loop", dod:"0 dropped rows", dodSrc:"orchestrator-defined", status:"loop", loop:true,
         sessions:[
           { id:"g3", name:"backfill", status:"loop",
             dod:"0 dropped rows — open-ended", dodSrc:"orchestrator-defined",
@@ -1305,7 +1311,7 @@ function genScale(){
             live:"Which Plaid scopes should I request — transactions only, or also investments & liabilities?",kind:"question",meta:"idle 12m ago",
             chips:["transactions only","+ investments","+ liabilities"],
             crit:[{text:"OAuth scaffolded",met:true,src:"manual",ev:"ok"},{text:"scope decided",met:false,src:"manual",ev:"needs you"},{text:"integration test passes",met:false,src:"command",ev:"blocked",at:"never run"}]}]},
-        { id:"sweep", name:"bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 38m",
+        { id:"sweep", name:"bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true,
           sessions:[{id:"x2",name:"bug-sweep",status:"loop",dod:"0 failing tests (open-ended)",dodSrc:"orchestrator-defined",
             live:"Triaging failing tests (4 of 11 fixed).",meta:"looping 38m · iter 12",loop:true,iter:12,elapsedMin:38,iterspark:[3,5,4,6,5,7,6,8,7,9,8,10],queue:["fix flaky e2e","upgrade vitest"],queueTotal:6}]},
       ]},
@@ -1315,13 +1321,13 @@ function genScale(){
           sessions:[{id:"x3",name:"cal-sync",status:"fail",blast:"md",failAction:"Re-authenticate",dod:"npm test → exit 0 + merged",dodSrc:"rule-based",
             live:"Google OAuth token expired — needs re-auth.",kind:"failed",meta:"failed 21m ago",
             crit:[{text:"OAuth token valid",met:false,src:"command",ev:"401",at:"21m ago"},{text:"npm test → exit 0",met:false,src:"command",ev:"blocked",at:"21m ago"}]}]},
-        { id:"inbox", name:"Inbox triage loop", dod:"inbox at zero", dodSrc:"agent-defined", status:"loop", loop:true, loopTime:"looping",
+        { id:"inbox", name:"Inbox triage loop", dod:"inbox at zero", dodSrc:"agent-defined", status:"loop", loop:true,
           sessions:[{id:"x4",name:"inbox-triage",status:"loop",dod:"inbox at zero (open-ended)",dodSrc:"agent-defined",
             live:"Summarizing 14 emails, drafting 3 replies.",meta:"looping 9m · iter 4",loop:true,iter:4,elapsedMin:9,iterspark:[4,6,5,7],queue:["draft reply to Maya"],queueTotal:3}]},
       ]},
     { id:"datapipe", name:"datapipe", path:"~/workspace/datapipe", desc:"ETL service",
       workstreams:[
-        { id:"backfill", name:"Nightly backfill loop", dod:"0 dropped rows", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 2h",
+        { id:"backfill", name:"Nightly backfill loop", dod:"0 dropped rows", dodSrc:"orchestrator-defined", status:"loop", loop:true,
           sessions:[{id:"x6",name:"backfill",status:"loop",dod:"0 dropped rows (open-ended)",dodSrc:"orchestrator-defined",
             live:"Reprocessing 2024-Q4 partitions.",meta:"looping 2h · iter 31",loop:true,iter:31,elapsedMin:120,iterspark:[6,7,6,8,7,9,8,10,9,8],queue:["retry 3 failed shards"],queueTotal:1}]},
       ]},
@@ -1358,7 +1364,7 @@ function genScale(){
   // collapse to ~6 full cards + a "Running · N more" grouped row card, not 10 instrument panels.
   const loopNames = ["etl-nightly","index-rebuild","crawl-news","retrain-rec","cache-warm","log-compact","img-thumbs","feed-sync","metrics-roll"];
   const activeLoops = loopNames.map((nm,i)=>({ id:nm, name:nm, path:"~/workspace/"+nm, desc:"",
-    workstreams:[{ id:nm+"_loop", name:"Nightly "+nm+" loop", dod:"0 errors", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping "+(10+i*7)+"m",
+    workstreams:[{ id:nm+"_loop", name:"Nightly "+nm+" loop", dod:"0 errors", dodSrc:"orchestrator-defined", status:"loop", loop:true,
       sessions:[{ id:nm+"_s", name:nm, status:"loop", dod:"0 errors (open-ended)", dodSrc:"orchestrator-defined",
         live:"Processing batch "+(i+2)+"/"+(i+8)+".", meta:"looping "+(10+i*7)+"m · iter "+(3+i), loop:true, iter:3+i, elapsedMin:(10+i*7),
         iterspark:[3,4,5,6,5,7,6], queue:["next batch"], queueTotal:1 }]}]}));
@@ -1536,6 +1542,10 @@ function dotStrip(p){
 function projNeeds(p){ let you=0,fail=0,sign=0,run=0; p.workstreams.forEach(w=>w.sessions.forEach(s=>{
   if(s.status==="block" && s.elicited) you++; if(s.status==="fail") fail++; if(s.status==="sign") sign++; if(s.status==="run"||s.status==="loop") run++; })); return {you,fail,sign,run}; }
 function pClass(p){ const c=projNeeds(p); if(c.you||c.fail) return "attn"; if(c.run) return "active"; if(c.sign) return "signoff"; return "calm"; }
+/* (round-3 adv-fix C3) project-level blast = the STRONGEST blast radius among its need (block/fail)
+   sessions, so the attn-card cap keeps the highest-blast projects as full cards and folds the rest. Reuses
+   the same heuristic blastRadius() Needs-you triages on — no new signal, just a project rollup. */
+function cardBlast(p){ let best="lo"; p.workstreams.forEach(w=>w.sessions.forEach(s=>{ if(isNeed(s)){ const b=blastRadius(s); if(blastRank(b)<blastRank(best)) best=b; } })); return best; }
 function firstSessId(p, statuses){ for(const w of p.workstreams) for(const s of w.sessions) if(statuses.includes(s.status)) return s.id; return null; }
 
 /* representative live one-liner (carry-fwd #A — the core attention-routing fix): the card surfaces the
@@ -1653,9 +1663,12 @@ function fleetCounts(){
    throughput; numstat is demoted to the merged fragment's tooltip; each fragment is a jump-link. */
 const fmtN = n => n>=1000?(n/1000).toFixed(1)+"k":n;
 const shortWs = nm => String(nm||"").replace("Nightly ","").replace("Spike: ","").replace(" loop","");
-/* live loop label = elapsed only (from stored loopStartedAt). The "· iter N" count needs a durable
-   iteration log pi does not expose, so it is stripped from the live view and shown only as proposed (#D). */
-const loopElapsed = txt => String(txt||"looping").replace(/\s*·\s*iter\s*\d+/i,"");
+/* live loop label = elapsed ONLY, and that elapsed traces to the SINGLE grounded source (the stored
+   loopStartedAt, encoded in fixtures as the numeric elapsedMin). The old loopElapsed() text-parse of the
+   free-text meta/loopTime string has been DELETED (round-3 adv-fix C1/C2) so no badge can ever re-derive
+   elapsed from un-grounded free text — every loop badge now flows through loopMinutes()/fmtMin like the
+   hero, giving one un-desyncable signal. The "· iter N" count still needs a durable iteration log pi does
+   not expose, so it is never shown live (proposed band only, #D). */
 function fleetDelta(){
   let merges=0, add=0, del=0, blocked=0;
   // "since your last visit" must mean SINCE the stored lastDashboardVisitAt — not a fixed "few hours"
@@ -1702,6 +1715,15 @@ function loopMinutes(s,w){
   return s.elapsedMin!=null ? s.elapsedMin : 0;
 }
 function fmtMin(min){ if(min>=60){ const h=Math.floor(min/60), m=min%60; return m?`${h}h ${m}m`:`${h}h`; } return `${min}m`; }
+/* workstream-level grounded loop elapsed (round-3 adv-fix C1/C2): a loop workstream's badge derives its
+   elapsed from the SAME stored loopStartedAt as everything else — take the max elapsedMin across the
+   workstream's loop sessions. No free-text loopTime parse; an un-grounded loop workstream yields 0m, not
+   a banned string. fmtMin formats it so the ws badge, the per-row badge, the drawer line and the hero are
+   one signal that cannot silently desync. */
+function wsLoopMinutes(w){
+  let best=0; (w.sessions||[]).forEach(s=>{ if(s.loop){ const m=loopMinutes(s,w); if(m>best) best=m; } });
+  return best;
+}
 function longestLoop(){
   let best=null;
   Object.values(state.SESS).forEach(({s,w})=>{ if(s.loop){ const min=loopMinutes(s,w); if(!best||min>best.min) best={min, label:fmtMin(min)}; } });
@@ -1817,10 +1839,15 @@ function renderNeeds(){
   const host=document.getElementById("needs"); if(!host) return;
   const items=[];
   Object.values(state.SESS).forEach(({s,w,p})=>{ if(isNeed(s)) items.push({s,w,p}); });
-  // blast radius is the primary triage axis; ties break by AGE (oldest waiting first), then block-before-fail (#7)
+  // blast radius is the primary triage axis; ties break by AGE (oldest waiting first), then block-before-fail (#7),
+  // then a DETERMINISTIC id tiebreaker (round-3 adv-fix C4): at N=200 backlog, blast+age+status routinely
+  // tie across many items, and without a stable final key the order silently collapses toward iteration
+  // order (which differs run-to-run as SESS rebuilds). The id sort makes the triage order reproducible so a
+  // user re-finds the same blocked item #100 across renders.
   items.sort((a,b)=> blastRank(blastRadius(a.s))-blastRank(blastRadius(b.s))
     || (agoToMin(b.s.meta)-agoToMin(a.s.meta))
-    || (a.s.status==="block"?0:1)-(b.s.status==="block"?0:1));
+    || (a.s.status==="block"?0:1)-(b.s.status==="block"?0:1)
+    || String(a.s.id).localeCompare(String(b.s.id)));
   const top = items.slice(0,2);
   const rest = items.slice(2);
   let html = top.map(({s,w,p})=>{
@@ -1881,7 +1908,11 @@ function renderNeeds(){
       const rowBtn = s.status==="fail"
         ? `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} ${esc(s.failAction||"Re-run")}</button>`
         : `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} Continue</button>`;
-      return `<div class="needrow">
+      // (round-3 adv-fix C4) each overflow row carries a stable id + a lowercase searchable haystack
+      // (project · workstream · item · live) so the "jump to item" filter can reach blocked item #100 in a
+      // large backlog without scrolling 198 rows.
+      const hay = esc(`${p.name} ${w.name} ${s.name} ${s.live||""}`.toLowerCase());
+      return `<div class="needrow" id="needrow-${esc(s.id)}" data-needfilter="${hay}">
         <span class="sess-dot ${(ST[s.status]||{}).cls||'idle'}" style="background:${(ST[s.status]||{}).color}"></span>
         <div class="nleft">
           <div class="ncrumb"><b>${esc(p.name)}</b> › ${esc(w.name)} ${blastTag}${waitTag}</div>
@@ -1892,12 +1923,38 @@ function renderNeeds(){
       </div>`;
     };
     const RCAP=6, rShown=rest.slice(0,RCAP), rExtra=rest.slice(RCAP);   // cap the reveal too (#9)
+    // (round-3 adv-fix C4) at a large backlog the capped reveal alone can't reach a deep item — add a
+    // "jump to item" filter that narrows the overflow to matching rows (it auto-reveals the hidden tail so
+    // even item #100 is reachable). Gated on a threshold so a small backlog stays calm and uncluttered.
+    const JUMP_MIN = 8;
+    const jumpBox = rest.length>=JUMP_MIN
+      ? `<input class="needjump" type="search" placeholder="jump to item — filter ${rest.length} by project / workstream / name" aria-label="jump to a blocked item" oninput="filterNeeds(this)">`
+      : "";
     html += `<div class="needmore" id="needmore" style="grid-column:1/-1">
-      <div class="needmore-h" data-toggle="needmore"><b>+${rest.length} more need you</b> — collapsed to stay calm; ordered by blast radius<span class="chev">${chevIcon()}</span></div>
-      <div class="needmore-b">${rShown.map(needRow).join("")}${rExtra.length?`<div class="more-rows" hidden>${rExtra.map(needRow).join("")}</div><button class="morelink" data-toggle="more">+${rExtra.length} more — show all</button>`:""}</div>
+      <div class="needmore-h" data-toggle="needmore"><b>+${rest.length} more need you</b> — collapsed to stay calm; ordered by blast radius, then waiting time<span class="chev">${chevIcon()}</span></div>
+      <div class="needmore-b">${jumpBox}<div class="needjump-empty" hidden>No matching item.</div>${rShown.map(needRow).join("")}${rExtra.length?`<div class="more-rows" hidden>${rExtra.map(needRow).join("")}</div><button class="morelink" data-toggle="more">+${rExtra.length} more — show all</button>`:""}</div>
     </div>`;
   }
   host.innerHTML = html;
+}
+/* (round-3 adv-fix C4) "jump to item" — filter the Needs-you overflow so a deep blocked item in a large
+   backlog is reachable without scrolling. While a query is active the hidden tail (the +N more-rows block)
+   is force-shown so EVERY matching row surfaces, not just the first capped page; clearing the box restores
+   the calm capped state. Pure client-side text match against the row's data-needfilter haystack. */
+function filterNeeds(inp){
+  const wrap = inp.closest(".needmore-b"); if(!wrap) return;
+  const q = String(inp.value||"").trim().toLowerCase();
+  const tail = wrap.querySelector(".more-rows");
+  const moreBtn = wrap.querySelector(".morelink");
+  const empty = wrap.querySelector(".needjump-empty");
+  const rows = Array.from(wrap.querySelectorAll(".needrow"));
+  if(q){ if(tail) tail.hidden=false; if(moreBtn) moreBtn.style.display="none"; }
+  else { if(moreBtn) moreBtn.style.display=""; }
+  let shown=0;
+  rows.forEach(r=>{ const hit = !q || (r.getAttribute("data-needfilter")||"").includes(q); r.style.display = hit?"":"none"; if(hit) shown++; });
+  // when the query is cleared, re-hide the tail rows so the overflow returns to its capped resting state
+  if(!q && tail){ tail.hidden=true; tail.querySelectorAll(".needrow").forEach(r=>{ r.style.display=""; }); }
+  if(empty) empty.hidden = !(q && shown===0);
 }
 
 /* ─────────────────────────── sign-off — first-class to-do LIST (#1,#4,#5,#6) ─────────────────────────── */
@@ -2034,12 +2091,31 @@ function renderGrid(){
       <div class="grpcard" id="sec-collapsed"><div class="grp-h" data-toggle="grp"><span class="gt">In Needs you</span> <span class="gc">${fullCandidates.length} project${fullCandidates.length>1?"s":""} · drill in for full context</span><span class="chev">${chevIcon()}</span></div>
         <div class="grp-b">`+fullCandidates.map(p=>renderRow(p)).join("")+`</div></div>`;
   } else {
+    // (round-3 adv-fix C3) cap ATTN full-cards too — a correlated-failure surge (every project blocked at
+    // once, e.g. one dependency stops N sub-agents) must NOT paint one full ring-card per blocked project,
+    // or the grid becomes the instrument-panel wall invariant #6 forbids "at ANY scale". The first N render
+    // as full cards (sorted so the highest-blast attn projects keep their rich card); the rest fold into a
+    // grouped "N more need attention" overflow row that points up to Needs-you, mirroring activeOverflow.
+    const ATTN_CAP = 4;
+    const attnSorted = attn.slice().sort((a,b)=> blastRank(cardBlast(a))-blastRank(cardBlast(b)));
+    const attnFull = attnSorted.slice(0, ATTN_CAP);
+    const attnOverflow = attnSorted.slice(attnFull.length);
     const ACTIVE_CAP = 4;   // cap ACTIVE full-cards too (carry-fwd #F) — overflow folds into "Running · N more"
     const activeFull = active.slice(0, ACTIVE_CAP);
     const activeOverflow = active.slice(activeFull.length);
-    const full = attn.concat(activeFull).concat(fullSign);
-    const single = full.length===1 && !signoff.length && !dormant.length && !activeOverflow.length;
+    const full = attnFull.concat(activeFull).concat(fullSign);
+    const single = full.length===1 && !signoff.length && !dormant.length && !activeOverflow.length && !attnOverflow.length;
     if(full.length) out += `<div class="grid ${single?'single':''}">`+full.map(p=>renderCard(p)).join("")+`</div>`;
+    // (C3) fold attn overflow into a "Needs attention · N more" grouped-row card. Windowing (#9 more-rows
+    // cap) keeps even a fleet-wide block from rendering an unbounded row list — overflow tail folds again
+    // behind "+N more — show all". Each row still NAMES its blocker and jumps up to Needs you (invariant #4).
+    if(attnOverflow.length){
+      const AOC=6, aoShown=attnOverflow.slice(0,AOC), aoExtra=attnOverflow.slice(AOC);
+      out += `<div class="grpcard" id="sec-attn-more"><div class="grp-h" data-toggle="grp"><span class="gt">Needs attention</span> <span class="gc">${attnOverflow.length} more need attention · answer in Needs you above</span><button class="jump" data-jump="sec-needs">answer ↑</button><span class="chev">${chevIcon()}</span></div>
+        <div class="grp-b">`+aoShown.map(p=>renderRow(p)).join("")
+          +(aoExtra.length?`<div class="more-rows" hidden>${aoExtra.map(p=>renderRow(p)).join("")}</div><button class="morelink" data-toggle="more">+${aoExtra.length} more — show all</button>`:"")
+        +`</div></div>`;
+    }
     // #2: fold active overflow into a "Running · N more" grouped-row card (name + dot-strip + live one-liner)
     if(activeOverflow.length){
       out += `<div class="grpcard" id="sec-running"><div class="grp-h" data-toggle="grp"><span class="gt">Running</span> <span class="gc">${activeOverflow.length} more loop${activeOverflow.length>1?"s":""} · live · nothing needs you</span><span class="chev">${chevIcon()}</span></div>
@@ -2204,7 +2280,7 @@ function renderRow(p, opts){
 function renderWorkstream(w,p,opts){
   let extra="";
   if(w.status==="loop"){
-    extra = `<span class="loopBadge"><span class="inf">∞</span> ${esc(loopElapsed(w.loopTime||"looping"))}</span>`;
+    extra = `<span class="loopBadge"><span class="inf">∞</span> looping ${esc(fmtMin(wsLoopMinutes(w)))}</span>`;
   } else extra = badge(w.status);
   // session-list cap (#20d): only the first 6 (by attention) render; the rest fold behind "+N more"
   const sorted = w.sessions.slice().sort(byAttention);
@@ -2304,8 +2380,10 @@ function renderSession(s,w,p,opts){
   // workstream header already states it — so suppress the repeated per-row line. It re-appears only on
   // rows whose source/criteria DEVIATE (e.g. a sign-off or merged row inside a rule-based workstream).
   const dodHoisted = w && w.status!=="unset" && s.status!=="unset" && s.dod===w.dod && s.dodSrc===w.dodSrc;
-  // live loop badge = elapsed only (from stored loopStartedAt); iter count / rhythm / budget are PROPOSED (#D)
-  const loopTag = s.loop ? `<span class="loopBadge"><span class="inf">∞</span> ${esc(loopElapsed(s.meta||'looping'))}</span>` : "";
+  // live loop badge = elapsed only, derived from the stored loopStartedAt via loopMinutes() — the SAME
+  // grounded source the hero uses, never the free-text meta string (round-3 adv-fix C1/C2). iter count /
+  // rhythm / budget are PROPOSED (#D).
+  const loopTag = s.loop ? `<span class="loopBadge"><span class="inf">∞</span> looping ${esc(fmtMin(loopMinutes(s,w)))}</span>` : "";
   // (#it6-p7b) a NON-elicited idle stop can't be PROVEN blocked — surface the honest "Idle · may be waiting"
   // degradation (grey, no alarm hue), never a fabricated amber block. This is the only place it renders on a row.
   const softTag = (s.status==="block" && !s.elicited) ? ` ${badge("block", true)}` : "";
@@ -2514,7 +2592,7 @@ function transcript(s,w,p){
     body += ai(tool("cron · run","$ node sync.js\n→ refreshing token\n✗ 401 invalid_grant: token expired or revoked", false)
       + `<div class="ferr"><b>⚠ Failed — ${esc(s.live)}</b><br>I can resume the moment you ${esc((s.failAction||'re-run').toLowerCase())}. Nothing else is blocked on this.</div>`);
   } else if(s.status==="loop"){
-    body += `<div class="m sys">Autonomous loop · ${esc(loopElapsed(s.meta||'looping'))} · DoD: ${esc(s.dod)}</div>`;
+    body += `<div class="m sys">Autonomous loop · looping ${esc(fmtMin(loopMinutes(s,w)))} · DoD: ${esc(s.dod)}</div>`;
     body += ai(think("Thought · picking the next item","Open-ended loop. I work the highest-signal item, re-evaluate, and append new findings. Stopping condition is the DoD, not a fixed list.")
       + tool("run · latest iteration","… progress this iteration", false)
       + `<p>${esc(s.live)} I will keep looping until the Definition of Done is met.</p>`);
