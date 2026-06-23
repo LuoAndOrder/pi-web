@@ -154,6 +154,10 @@ export interface RenderState {
   _pingId: string | null;
   // Cold-start onboarding candidates (S9). Populated by the controller before an empty render.
   candidates?: OnboardCandidate[];
+  // M4 — Unfiled session multi-select. The set of session ids currently checked in the
+  // synthetic Unfiled bucket, so the renderer can paint the checked state + the assignment
+  // bar (driven by the controller's transient selection). Cleared on every refetch.
+  mnSelection?: Set<string>;
 }
 
 // Onboarding intent callbacks the controller wires to the REAL REST surface (S9). The
@@ -172,7 +176,7 @@ type RingItem = {
   loop?: boolean;
   _evaluating?: boolean;
 };
-type RowOpts = { navOnly?: boolean; setup?: boolean; live?: boolean };
+type RowOpts = { navOnly?: boolean; setup?: boolean; live?: boolean; selectable?: boolean };
 interface Counts {
   run: number;
   loop: number;
@@ -214,6 +218,9 @@ export interface DashboardRenderer {
   // M3 — repaint the Archived section after a lifecycle action (archive / cancel / restore)
   // re-shapes which workstreams are shelved, without a full master re-render.
   renderArchived: () => void;
+  // M4 — repaint just the Unfiled bucket(s)' sess-list after a selection change (checkbox
+  // toggle / clear) so the assignment bar + checked state update without a full grid repaint.
+  renderUnfiled: () => void;
   // Tells whether a `sign`-status session still rests on stale/unrun evidence — used to decide
   // batch sign-off eligibility (only clean items flip).
   signPending: (sessionId: string) => boolean;
@@ -255,6 +262,64 @@ export function fmtMin(min: number): string {
   if (min >= 1440) { const d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60); return h ? `${d}d ${h}h` : `${d}d`; }
   if (min >= 60) { const h = Math.floor(min / 60), m = min % 60; return m ? `${h}h ${m}m` : `${h}h`; }
   return `${min}m`;
+}
+
+// ── M4 auto-group clustering (the SINGLE grounded heuristic) ──────────────────
+// Cluster Unfiled sessions by a shared, normalized name prefix so the dashboard can
+// offer a one-click "Group these N related sessions?" chip that pre-creates a real
+// workstream. Purely client-side + deterministic: it only suggests a grouping when ≥2
+// sessions share a meaningful leading token sequence (a normalized prefix of ≥3 chars),
+// never inventing a relationship from thin signal. Exported (module-level, pure) so it is
+// directly unit-testable and the renderer + controller share ONE formula.
+//
+// `label` is the human-readable shared phrase (Title Cased), `key` the normalized prefix.
+export interface AutoGroup {
+  key: string;
+  label: string;
+  sessionIds: string[];
+}
+// Lowercase, strip a trailing "(2)"/"#3"/": foo" tail + non-alphanumerics → comparable tokens.
+function groupTokens(name: string): string[] {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[#(]\s*\d+\s*\)?$/g, "") // a trailing "#3" / "(2)" disambiguator is not part of the topic
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+// Title-case the shared token sequence for the chip label ("auth refactor" → "Auth Refactor").
+function titleCase(tokens: string[]): string {
+  return tokens.map((t) => t.charAt(0).toUpperCase() + t.slice(1)).join(" ");
+}
+export function clusterUnfiledSessions(
+  sessions: Array<{ id: string; name?: string }>,
+): AutoGroup[] {
+  // Bucket by the FIRST shared token (the dominant topic word), then keep extending the
+  // shared prefix while every member in the bucket still agrees, so the suggested name is
+  // as specific as the evidence supports.
+  const byFirst = new Map<string, Array<{ id: string; tokens: string[] }>>();
+  for (const s of sessions) {
+    const tokens = groupTokens(s.name ?? "");
+    if (!tokens.length) continue;
+    const head = tokens[0];
+    if (head.length < 3) continue; // a 1-2 char head (e.g. "wip") is too weak to group on
+    if (!byFirst.has(head)) byFirst.set(head, []);
+    byFirst.get(head)!.push({ id: s.id, tokens });
+  }
+  const groups: AutoGroup[] = [];
+  for (const [head, members] of byFirst) {
+    if (members.length < 2) continue; // need ≥2 to suggest a grouping
+    // Longest common leading token run across all members → the most specific shared phrase.
+    let shared = members[0].tokens.slice();
+    for (const m of members.slice(1)) {
+      let i = 0;
+      while (i < shared.length && i < m.tokens.length && shared[i] === m.tokens[i]) i++;
+      shared = shared.slice(0, i);
+    }
+    if (!shared.length) shared = [head];
+    groups.push({ key: shared.join("-"), label: titleCase(shared), sessionIds: members.map((m) => m.id) });
+  }
+  // Largest suggestions first; stable tiebreak by key so the chip order never churns.
+  return groups.sort((a, b) => b.sessionIds.length - a.sessionIds.length || a.key.localeCompare(b.key));
 }
 
 export function createRenderer(options: { wrap: HTMLElement; state: RenderState; onboard?: OnboardHandlers }): DashboardRenderer {
@@ -1115,20 +1180,26 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     if (w.status === "loop") {
       extra = `<span class="loopBadge"><span class="inf">∞</span> looping ${esc(fmtMin(wsLoopMinutes(w)))}</span>`;
     } else extra = badge(w.status);
+    // M4: the synthetic Unfiled bucket lets the user organize loose sessions — its rows are
+    // multi-selectable and it carries an assignment bar + auto-group suggestions. Real
+    // workstreams keep their existing (non-selectable) rows.
+    const isUnfiled = !!w._synthetic;
+    const rowOpts: RowOpts | undefined = isUnfiled ? { ...(opts || {}), selectable: true } : opts;
     const sorted = w.sessions.slice().sort(byAttention);
     const CAP = 6, shown = sorted.slice(0, CAP), more = sorted.slice(CAP);
-    const sess = shown.map((s) => renderSession(s, w, p, opts)).join("")
-      + (more.length ? `<div class="sess-extra" hidden>${more.map((s) => renderSession(s, w, p, opts)).join("")}</div><button class="sessmore" data-toggle="sessmore">+${more.length} more session${more.length > 1 ? "s" : ""}</button>` : "");
+    const sess = shown.map((s) => renderSession(s, w, p, rowOpts)).join("")
+      + (more.length ? `<div class="sess-extra" hidden>${more.map((s) => renderSession(s, w, p, rowOpts)).join("")}</div><button class="sessmore" data-toggle="sessmore">+${more.length} more session${more.length > 1 ? "s" : ""}</button>` : "");
     const mixedNote = w._mixed && w._sessGauge ? ` <span class="srcTag" title="this workstream's sessions use different DoD evaluators, so the ring is a 'k of n sessions done' gauge — not a blended percent">mixed sources · ${w._sessGauge.done}/${w._sessGauge.total} done</span>` : "";
     const wsDod = (w.status === "unset"
       ? `<span style="color:var(--st-sign)">not set</span> ${srcTag(w.dodSrc)}`
       : dodInline(w.dod, w.dodSrc)) + mixedNote;
-    return `<div class="ws" data-w="${w.id}" data-ws-id="${w.id}">
+    const unfiledTools = isUnfiled ? unfiledAssignHtml(w, p) : "";
+    return `<div class="ws${isUnfiled ? " ws-unfiled" : ""}" data-w="${w.id}" data-ws-id="${w.id}"${isUnfiled ? ` data-unfiled-project="${esc(p.id)}"` : ""}>
       <div class="ws-head" data-toggle="ws">
         <div class="ws-ring">${ringSvg(w, 44)}</div>
         <div class="ws-id">
           <div class="ws-name">${esc(w.name)} ${extra}</div>
-          <div class="ws-dod">${wsDod}</div>
+          <div class="ws-dod">${isUnfiled ? `<span class="muted">loose sessions matched to this project root — select to group them into a workstream</span>` : wsDod}</div>
         </div>
         <div class="ws-meta">
           <span class="ws-cnt">${w.sessions.length} session${w.sessions.length > 1 ? "s" : ""}</span>
@@ -1136,8 +1207,46 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
           <span class="ws-chev chev">${chevIcon()}</span>
         </div>
       </div>
-      <div class="sess-list">${sess}</div>
+      <div class="sess-list">${unfiledTools}${sess}</div>
     </div>`;
+  }
+
+  // ── M4 Unfiled organizer: auto-group suggestions + the multi-select assignment bar ──────
+  // Both live INSIDE the Unfiled bucket's sess-list (above the rows). The data-attributes are
+  // the delegated-handler contract (dashboard.ts): data-autogroup (one-click pre-create),
+  // data-mn-newws / data-mn-movews (act on the current selection), data-mn-clear. The bar's
+  // count + disabled state reflect the controller's transient `mnSelection` set, re-rendered on
+  // every selection change. The "Move to existing" picker lists the project's REAL workstreams
+  // (never the synthetic bucket itself).
+  function realWorkstreamsOf(p: VProject): VWorkstream[] {
+    return [...(p.workstreams || []), ...(p.archivedWorkstreams || [])].filter((x) => !x._synthetic);
+  }
+  function unfiledAssignHtml(w: VWorkstream, p: VProject): string {
+    const groups = clusterUnfiledSessions(w.sessions.map((s) => ({ id: s.id, name: s.name })));
+    const selected = w.sessions.filter((s) => state.mnSelection?.has(s.id));
+    const n = selected.length;
+    const targets = realWorkstreamsOf(p);
+    // Auto-group chips: only surface a suggestion that isn't already fully selected, so a chip
+    // stays a one-click shortcut, not a no-op. Cap to keep the strip calm.
+    const chips = groups.slice(0, 4).map((g) => {
+      const count = g.sessionIds.length;
+      return `<button class="mn-suggest" type="button" data-autogroup="${esc(g.key)}" data-project="${esc(p.id)}" data-sessions="${esc(g.sessionIds.join(","))}" title="Create a workstream &quot;${esc(g.label)}&quot; from these ${count} similarly-named sessions">✦ Group ${count} “${esc(g.label)}” →</button>`;
+    }).join("");
+    const suggestRow = chips
+      ? `<div class="mn-suggests"><span class="mn-suggest-lbl" title="Heuristic only — clustered by shared session-name prefix. One click pre-creates a workstream; nothing is grouped until you confirm.">Suggested groups</span>${chips}</div>`
+      : "";
+    // The assignment bar — visible (with actions enabled) only when ≥1 row is selected.
+    const movePicker = targets.length
+      ? `<div class="mn-move"><select class="mn-move-sel" data-mn-movesel aria-label="Move to existing workstream"><option value="">Move to…</option>${targets.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("")}</select><button class="btn ghost sm" type="button" data-mn-movews="${esc(p.id)}"${n ? "" : " disabled"}>Move ${n || ""}</button></div>`
+      : "";
+    const bar = `<div class="mn-bar${n ? " active" : ""}" data-mn-bar>
+      <span class="mn-count">${n ? `<b>${n}</b> selected` : "Select sessions to organize"}</span>
+      <span class="mn-grow"></span>
+      <button class="btn primary sm" type="button" data-mn-newws="${esc(p.id)}"${n ? "" : " disabled"}>${plusIcon()} New workstream from selection</button>
+      ${movePicker}
+      ${n ? `<button class="mn-clear" type="button" data-mn-clear title="Clear selection">Clear</button>` : ""}
+    </div>`;
+    return `<div class="mn-organize">${suggestRow}${bar}</div>`;
   }
 
   function artChip(s: VSession) {
@@ -1180,6 +1289,15 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
   function renderSession(s: VSession, w: VWorkstream, p: VProject, opts?: RowOpts) {
     const navOnly = !!(opts && opts.navOnly);
     const cls = (ST[s.status] || {}).cls || "idle";
+    // M4: a checkbox to multi-select Unfiled sessions for "New workstream from selection" /
+    // "Move to existing". Only the synthetic Unfiled bucket is selectable; clicking the box
+    // must NOT open the session (the delegated handler stops there). `mnSelection` is the
+    // controller's transient set, so a re-render preserves the checked state.
+    const selectable = !!(opts && opts.selectable);
+    const checked = selectable && !!state.mnSelection?.has(s.id);
+    const checkbox = selectable
+      ? `<label class="mnselect" title="Select to group / move this session" onclick="event.stopPropagation()"><input type="checkbox" data-mnselect="${esc(s.id)}"${checked ? " checked" : ""} aria-label="Select ${esc(s.name)}"></label>`
+      : "";
     const dot = `<span class="sess-dot ${cls}" style="background:${(ST[s.status] || {}).color || "var(--st-idle)"}"></span>`;
     const artifact = s.artifact ? `<div style="margin-top:8px">${artChip(s)}</div>` : "";
     let queue = "";
@@ -1205,7 +1323,8 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const loopTag = s.loop ? `<span class="loopBadge"><span class="inf">∞</span> looping ${esc(fmtMin(loopMinutes(s)))}</span>` : "";
     const softTag = isSoftWaitV(s) ? ` ${badge("block", true)}` : "";
 
-    return `<div class="sess" data-open="${s.id}">
+    return `<div class="sess${selectable ? " selectable" : ""}${checked ? " mnchecked" : ""}" data-open="${s.id}">
+      ${checkbox}
       ${dot}
       <div class="sess-main">
         <div class="sess-top"><span class="sess-name">${esc(s.name)}</span>${softTag} ${loopTag}</div>
@@ -1423,12 +1542,35 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     </div>${crit}`;
   }
 
+  // M4 — repaint each Unfiled bucket's sess-list in place from the current `mnSelection`,
+  // so toggling a checkbox updates the bar + the checked rows without re-rendering the whole
+  // grid (which would collapse open cards / lose scroll). Each `.ws-unfiled` carries its
+  // project id; we re-derive its session rows + organizer and swap only the sess-list.
+  function renderUnfiled() {
+    wrap.querySelectorAll<HTMLElement>(".ws-unfiled").forEach((wsEl) => {
+      const wsId = wsEl.getAttribute("data-ws-id") || "";
+      const projectId = wsEl.getAttribute("data-unfiled-project") || "";
+      const p = state.data.find((x) => x.id === projectId);
+      const w = p && [...(p.workstreams || []), ...(p.archivedWorkstreams || [])].find((x) => x.id === wsId);
+      if (!p || !w) return;
+      const list = wsEl.querySelector<HTMLElement>(".sess-list");
+      if (!list) return;
+      const sorted = w.sessions.slice().sort(byAttention);
+      const CAP = 6, shown = sorted.slice(0, CAP), more = sorted.slice(CAP);
+      const rowOpts: RowOpts = { selectable: true };
+      const sess = shown.map((s) => renderSession(s, w, p, rowOpts)).join("")
+        + (more.length ? `<div class="sess-extra" hidden>${more.map((s) => renderSession(s, w, p, rowOpts)).join("")}</div><button class="sessmore" data-toggle="sessmore">+${more.length} more session${more.length > 1 ? "s" : ""}</button>` : "");
+      list.innerHTML = unfiledAssignHtml(w, p) + sess;
+    });
+  }
+
   return {
     renderAll,
     contextBandHtml,
     renderSignoff,
     renderGrid: () => renderGrid(fleetCounts()),
     renderArchived,
+    renderUnfiled,
     signPending: (id: string) => { const ref = state.SESS[id]; return !!ref && signPending(ref.s); },
   };
 }

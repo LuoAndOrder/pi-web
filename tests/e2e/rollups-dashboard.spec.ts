@@ -400,4 +400,95 @@ test.describe("Project Rollups dashboard", () => {
       expect(pageErrors).toEqual([]);
     });
   });
+
+  // ── M4: create & assign workstreams from the Unfiled bucket ──────────────────
+  // Register a project whose root IS the mock sessions' cwd (read off /api/sessions) so the
+  // built-in mocks (mock-current / mock-older) fall into the project's synthetic Unfiled
+  // bucket with no stored workstream. Then multi-select them and create a real workstream —
+  // asserting they leave Unfiled and fold under the new .ws (the round-trip the M4 WORK
+  // specifies). The dedicated playwright server has its OWN PI_WEB_PROJECTS_FILE, so this
+  // never touches the real registry.
+  test.describe("M4: organize Unfiled sessions", () => {
+    // The cwd the mock sessions live in (PI_WEB_CWD = repo root on the playwright server).
+    async function mockCwd(page: Page): Promise<string> {
+      const res = await page.request.get("/api/sessions");
+      expect(res.ok()).toBe(true);
+      const sessions = (await res.json()).sessions as Array<{ id: string; cwd?: string }>;
+      const cur = sessions.find((s) => s.id === "mock-current");
+      expect(cur?.cwd, "mock-current must have a cwd").toBeTruthy();
+      return cur!.cwd!;
+    }
+    async function unfiledRollup(page: Page, projectId: string) {
+      const res = await page.request.get("/api/rollups");
+      expect(res.ok()).toBe(true);
+      const rollups = (await res.json()).rollups as Array<{
+        project: { id: string };
+        workstreams: Array<{ workstream: { id: string; name: string }; sessions: Array<{ id: string }> }>;
+      }>;
+      return rollups.find((r) => r.project.id === projectId);
+    }
+
+    test("multi-select two Unfiled sessions → New workstream moves them out of Unfiled", async ({ page }) => {
+      const pageErrors = trackPageErrors(page);
+      const root = await mockCwd(page);
+      const name = `E2E Unfiled ${Date.now()}`;
+      const pRes = await page.request.post("/api/projects", { data: { name, roots: [root] } });
+      expect(pRes.status(), await pRes.text()).toBe(201);
+      const projectId = (await pRes.json()).project.id as string;
+      createdProjectIds.push(projectId);
+
+      // Baseline: both mock sessions sit in the synthetic Unfiled bucket (no stored workstream).
+      const before = await unfiledRollup(page, projectId);
+      const unfiledBefore = before?.workstreams.find((w) => w.workstream.id.endsWith(":unfiled"));
+      expect(unfiledBefore, "an Unfiled bucket must hold the matched mock sessions").toBeTruthy();
+      expect(unfiledBefore!.sessions.map((s) => s.id).sort()).toEqual(["mock-current", "mock-older"]);
+
+      await page.locator("#dashboardButton").click();
+      const view = page.locator("#dashboardView");
+      await expect(view).toBeVisible();
+
+      // A no-DoD project with only unset sessions renders in the "Needs setup" group as a
+      // compact .prow (not a full .pcard). Either container holds the same Unfiled bucket;
+      // target by data-project-id, expand whichever chrome wraps it, then open the bucket.
+      const card = view.locator(`[data-project-id="${projectId}"]`).first();
+      await expect(card).toBeVisible();
+      await card.click(); // expand the card / prow to reveal its workstreams
+      const unfiledWs = view.locator(`.ws-unfiled[data-unfiled-project="${projectId}"]`);
+      await expect(unfiledWs).toBeVisible();
+      await unfiledWs.locator(".ws-head").click();
+
+      // The assignment bar starts disabled (no selection); New workstream is disabled.
+      const newBtn = unfiledWs.locator("[data-mn-newws]");
+      await expect(newBtn).toBeDisabled();
+
+      // Select both sessions via their checkboxes.
+      await unfiledWs.locator('[data-mnselect="mock-current"]').check();
+      await unfiledWs.locator('[data-mnselect="mock-older"]').check();
+      await expect(unfiledWs.locator(".mn-count")).toContainText("2 selected");
+      await expect(newBtn).toBeEnabled();
+
+      // Name the new workstream via the prompt, then create it.
+      const wsName = `Image attachments ${Date.now()}`;
+      page.once("dialog", (d) => d.accept(wsName));
+      await newBtn.click();
+
+      // Persisted: a real workstream now carries both sessions, and the Unfiled bucket is gone.
+      await expect.poll(async () => {
+        const r = await unfiledRollup(page, projectId);
+        const real = r?.workstreams.find((w) => !w.workstream.id.endsWith(":unfiled") && w.workstream.name === wsName);
+        return real?.sessions.map((s) => s.id).sort().join(",");
+      }).toBe("mock-current,mock-older");
+      await expect.poll(async () => {
+        const r = await unfiledRollup(page, projectId);
+        return r?.workstreams.some((w) => w.workstream.id.endsWith(":unfiled")) ?? false;
+      }).toBe(false);
+
+      // The UI re-rendered: the new real workstream row is present in the grid (its row may be
+      // collapsed inside the re-rendered card chrome), and no Unfiled bucket remains.
+      await expect(view.locator(`.ws-unfiled[data-unfiled-project="${projectId}"]`)).toHaveCount(0);
+      await expect(view.locator(`.ws[data-ws-id]`, { hasText: wsName })).toHaveCount(1);
+
+      expect(pageErrors).toEqual([]);
+    });
+  });
 });

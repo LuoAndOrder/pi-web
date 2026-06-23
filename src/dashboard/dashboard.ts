@@ -104,7 +104,7 @@ export function createDashboard(options: {
   // The mockup-shaped view model the ported render core reads. `toViewModel` (the
   // adapter seam) fills `data`/`SESS` from the server `ProjectRollup[]`; the client
   // trusts the server `ProgressSnapshot` and never re-derives it here.
-  const view: RenderState = { data: [], SESS: {}, signed: {}, lastVisit: null, _pingId: null, candidates: [] };
+  const view: RenderState = { data: [], SESS: {}, signed: {}, lastVisit: null, _pingId: null, candidates: [], mnSelection: new Set<string>() };
   const renderer = createRenderer({
     wrap: elements.dashboardWrap,
     state: view,
@@ -221,6 +221,27 @@ export function createDashboard(options: {
     view.data = vm.data;
     view.SESS = vm.SESS;
     reconcileSigned();
+    pruneSelection();
+  }
+
+  // M4 — the multi-select set only ever holds sessions that are STILL in an Unfiled bucket.
+  // After a refetch, a session that was assigned into a real workstream has left Unfiled, so
+  // it's dropped from the selection (otherwise the bar would keep counting a row no longer
+  // selectable). Mutates the set in place so the renderer's `state.mnSelection` reference holds.
+  function unfiledSessionIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const p of view.data) {
+      for (const w of p.workstreams) {
+        if (w._synthetic) w.sessions.forEach((s) => ids.add(s.id));
+      }
+    }
+    return ids;
+  }
+  function pruneSelection() {
+    const sel = view.mnSelection;
+    if (!sel || !sel.size) return;
+    const valid = unfiledSessionIds();
+    for (const id of [...sel]) if (!valid.has(id)) sel.delete(id);
   }
 
   // Sessions with an optimistic sign-off PATCH still genuinely in flight — their local
@@ -970,6 +991,122 @@ export function createDashboard(options: {
     }
   }
 
+  // ── M4: create & assign workstreams from the Unfiled bucket ─────────────────
+  // The Unfiled bucket holds sessions matched to a project root but to no workstream. The
+  // user organizes them straight from the UI (operability lens): multi-select rows → "New
+  // workstream from selection" (name prompt → POST /api/projects/:id/workstreams with the
+  // selected sessionIds) or "Move to existing" (PUT /api/workstreams/:id/sessions, UNION with
+  // the target's current members). Plus one-click auto-group suggestion chips that pre-create
+  // a workstream from a similarly-named cluster. After every mutation we refetch so the
+  // assigned sessions leave Unfiled and fold under the new/target workstream.
+
+  function selectionIds(): string[] {
+    return Array.from(view.mnSelection ?? []);
+  }
+
+  // Toggle one Unfiled session's selection, then repaint just the Unfiled bucket(s) so the
+  // assignment bar's count + the checked state update without collapsing the open grid.
+  function toggleSelect(sessionId: string, on: boolean) {
+    const sel = view.mnSelection ?? (view.mnSelection = new Set<string>());
+    if (on) sel.add(sessionId);
+    else sel.delete(sessionId);
+    renderer.renderUnfiled();
+  }
+  function clearSelection() {
+    view.mnSelection?.clear();
+    renderer.renderUnfiled();
+  }
+
+  // Create a real workstream under `projectId` carrying `sessionIds` (the registry attaches
+  // them at create time). Used by BOTH the manual "New workstream from selection" flow and the
+  // one-click auto-group chip. `name` is required; the caller prompts / derives it.
+  async function createWorkstreamWithSessions(projectId: string, name: string, sessionIds: string[]): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/workstreams`, {
+        method: "POST",
+        headers: api.headers(),
+        body: JSON.stringify({ name, sessionIds }),
+      });
+      return res.ok || res.status === 201;
+    } catch {
+      return false;
+    }
+  }
+
+  // "New workstream from selection" — prompt for a name, create the workstream with the
+  // selected sessions, then refetch (which prunes them out of Unfiled).
+  async function newWorkstreamFromSelection(projectId: string) {
+    const ids = selectionIds();
+    if (!ids.length) { showToast("Select at least one session first."); return; }
+    const suggested = ids.length === 1 ? (view.SESS[ids[0]]?.s.name || "New workstream") : "New workstream";
+    const name = (window.prompt(`Name the new workstream for ${ids.length} session${ids.length === 1 ? "" : "s"}:`, suggested) || "").trim();
+    if (!name) return; // cancelled / empty → no-op (no fabricated default)
+    const ok = await createWorkstreamWithSessions(projectId, name, ids);
+    if (ok) {
+      clearSelection();
+      showToast(`Created <b>${escText(name)}</b> with ${ids.length} session${ids.length === 1 ? "" : "s"} — moved out of Unfiled.`);
+      await refetch();
+    } else {
+      showToast(`Couldn't create <b>${escText(name)}</b> — try again.`);
+    }
+  }
+
+  // "Move to existing workstream" — attach the selected sessions to the picked workstream. The
+  // PUT /api/workstreams/:id/sessions REPLACES the membership, so we UNION the target's current
+  // sessionIds with the selection (else moving 1 session would detach the rest). Targets and
+  // their current members come from the rollup view model (already loaded).
+  function targetCurrentSessionIds(workstreamId: string): string[] {
+    for (const p of view.data) {
+      const w = [...(p.workstreams || []), ...(p.archivedWorkstreams || [])].find((x) => x.id === workstreamId);
+      if (w) return w.sessions.map((s) => s.id);
+    }
+    return [];
+  }
+  async function moveSelectionToWorkstream(projectId: string) {
+    const ids = selectionIds();
+    if (!ids.length) { showToast("Select at least one session first."); return; }
+    // Read the picker's chosen target from the live DOM (the <select> inside this project's bar).
+    const wsEl = elements.dashboardWrap.querySelector<HTMLElement>(`.ws-unfiled[data-unfiled-project="${CSS.escape(projectId)}"]`);
+    const sel = wsEl?.querySelector<HTMLSelectElement>("[data-mn-movesel]");
+    const targetId = (sel?.value || "").trim();
+    if (!targetId) { showToast("Pick a workstream to move the selection into."); return; }
+    const union = Array.from(new Set([...targetCurrentSessionIds(targetId), ...ids]));
+    const ctx = findWsContext(targetId);
+    const targetName = ctx?.wsName || "workstream";
+    try {
+      const res = await fetch(`/api/workstreams/${encodeURIComponent(targetId)}/sessions`, {
+        method: "PUT",
+        headers: api.headers(),
+        body: JSON.stringify({ sessionIds: union }),
+      });
+      if (res.ok) {
+        clearSelection();
+        showToast(`Moved ${ids.length} session${ids.length === 1 ? "" : "s"} into <b>${escText(targetName)}</b>.`);
+        await refetch();
+      } else {
+        showToast(`Couldn't move into <b>${escText(targetName)}</b> — ${escText(await res.text())}`);
+      }
+    } catch (error) {
+      showToast(`Couldn't move into <b>${escText(targetName)}</b> — ${escText(error instanceof Error ? error.message : String(error))}`);
+    }
+  }
+
+  // One-click auto-group: the chip carries the suggested name + the clustered session ids, so
+  // grouping is a single confirmed action (no name prompt — the heuristic already named it; the
+  // user can rename later via the lifecycle menu). Pre-creates the workstream, then refetches.
+  async function autoGroup(projectId: string, name: string, sessionIds: string[]) {
+    const ids = sessionIds.filter((id) => view.SESS[id]); // guard against a stale chip
+    if (ids.length < 2) { showToast("These sessions are no longer groupable."); return; }
+    const ok = await createWorkstreamWithSessions(projectId, name, ids);
+    if (ok) {
+      clearSelection();
+      showToast(`Grouped ${ids.length} sessions into <b>${escText(name)}</b> — moved out of Unfiled.`);
+      await refetch();
+    } else {
+      showToast(`Couldn't group into <b>${escText(name)}</b> — try again.`);
+    }
+  }
+
   // ── per-workstream lifecycle (M3) ──────────────────────────────────────────
   // The full lifecycle is first-class and USER-driven from the kebab menu + the sign-off
   // strip's Cancel action: Mark done / Archive / Cancel (abandon) / Delete / Restore — each
@@ -1231,6 +1368,48 @@ export function createDashboard(options: {
       return;
     }
 
+    // ── M4: Unfiled organize actions ── checked BEFORE data-open since they live inside the
+    // bucket's sess-list (some, like the auto-group chip, sit above the rows; the bar buttons
+    // are siblings of the rows, not inside a `data-open`, but the picker/clear must still
+    // short-circuit). A click on the checkbox label itself is handled by the `change` listener.
+    const autogroup = target.closest<HTMLElement>("[data-autogroup]");
+    if (autogroup) {
+      event.preventDefault();
+      event.stopPropagation();
+      const projectId = autogroup.getAttribute("data-project") || "";
+      const label = autogroup.getAttribute("data-autogroup") || "";
+      const ids = (autogroup.getAttribute("data-sessions") || "").split(",").filter(Boolean);
+      // The chip's data-autogroup is the normalized key; prefer the human label from the button
+      // text fallback — but the key is a safe, descriptive workstream name on its own.
+      const name = label.split("-").map((t) => t.charAt(0).toUpperCase() + t.slice(1)).join(" ") || "Grouped sessions";
+      if (projectId && ids.length) void autoGroup(projectId, name, ids);
+      return;
+    }
+    const newWs = target.closest<HTMLElement>("[data-mn-newws]");
+    if (newWs) {
+      event.preventDefault();
+      event.stopPropagation();
+      void newWorkstreamFromSelection(newWs.getAttribute("data-mn-newws") || "");
+      return;
+    }
+    const moveWs = target.closest<HTMLElement>("[data-mn-movews]");
+    if (moveWs) {
+      event.preventDefault();
+      event.stopPropagation();
+      void moveSelectionToWorkstream(moveWs.getAttribute("data-mn-movews") || "");
+      return;
+    }
+    if (target.closest("[data-mn-clear]")) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearSelection();
+      return;
+    }
+    // A click on the checkbox / its label inside an Unfiled row must NOT open the session.
+    if (target.closest(".mnselect")) { event.stopPropagation(); return; }
+    // The move picker <select> is interactive — let it open without bubbling to data-open.
+    if (target.closest("[data-mn-movesel]")) { event.stopPropagation(); return; }
+
     // Quick-reply chip → POST /api/prompt then open the session. Checked BEFORE data-open so a chip
     // inside a `data-open` session row routes to the reply, not a bare open.
     const reply = target.closest<HTMLElement>("[data-reply]");
@@ -1381,6 +1560,17 @@ export function createDashboard(options: {
     });
     // Delegated drill-in / continue / expand-collapse, scoped to the overlay.
     elements.dashboardWrap.addEventListener("click", handleClick);
+    // M4 — Unfiled multi-select: a delegated `change` on the bucket checkboxes toggles the
+    // selection set (the `change` event fires on the real toggle, separate from the click
+    // delegation that opens sessions).
+    elements.dashboardWrap.addEventListener("change", (event) => {
+      const target = event.target as HTMLElement | null;
+      const box = target?.closest<HTMLInputElement>("[data-mnselect]");
+      if (box) {
+        event.stopPropagation();
+        toggleSelect(box.getAttribute("data-mnselect") || "", box.checked);
+      }
+    });
     // DoD authoring drawer — its own delegated click + Enter handler (the drawer is a sibling of
     // .wrap, mounted lazily into #dashboardView, so it has its own listener wiring once).
     const drawerHost = drawerEl();
