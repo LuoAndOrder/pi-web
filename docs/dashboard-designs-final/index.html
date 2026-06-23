@@ -69,8 +69,12 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .headline em.sign{color:var(--st-sign);}  /* sign-off hero emphasis is PURPLE, never amber — status hue is honest (#2) */
 .subline{color:var(--muted);font-size:13px;max-width:760px;}
 .subline b{color:var(--text);font-weight:650;}
-/* "N may be waiting" — non-elicited idle stops: a quiet hedge, never the bold obligation count (#5) */
-.subline .maybe{color:color-mix(in srgb,var(--muted) 80%,transparent);font-style:italic;cursor:help;}
+/* "N may be waiting" — non-elicited idle stops: a quiet hedge, never the bold obligation count (#5).
+   (round-2 adv-fix #C5) given a touch MORE prominence (full-muted text + a dotted help underline) than
+   the old near-invisible 80%-muted italic — it is the production-dominant state until ask_user ships, so
+   it must be legible. STILL grey, STILL a help-tooltip hedge — NEVER escalated to an amber alarm hue. */
+.subline .maybe{color:var(--muted);cursor:help;border-bottom:1px dotted color-mix(in srgb,var(--muted) 45%,transparent);}
+.subline .maybe b{color:var(--text);font-weight:650;}
 /* since-last-visit delta (#1,#11) — demoted from a bordered band to one muted clause on the subline */
 .subline .delta{color:color-mix(in srgb,var(--muted) 90%,transparent);}
 .subline .delta::before{content:"·";margin:0 7px;color:color-mix(in srgb,var(--muted) 50%,transparent);}
@@ -133,7 +137,11 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .need.fail::before{background:var(--st-fail);}
 .need .crumb{font-size:11px;color:var(--muted);}
 .need .crumb b{color:var(--text);font-weight:650;}
-.need .sname{font-size:15px;font-weight:800;letter-spacing:-.01em;display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
+.need .sname{font-size:15px;font-weight:800;letter-spacing:-.01em;display:flex;align-items:center;gap:9px;flex-wrap:wrap;min-width:0;}
+/* (round-2 adv-fix #C8) clamp the NAME text run only — the inline status/blast/wait tags are separate
+   spans and stay outside the clamp, so a long session name ellipsizes instead of wrapping and reflowing
+   the tags onto new rows (which desynced the 2-col needs grid). Matches the clamp already on .nq/.txt/etc. */
+.need .sname .nm{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .need .ask{
   font-size:13px;color:var(--text);line-height:1.5;
   padding:10px 12px;border-radius:10px;border:1px solid color-mix(in srgb,var(--border) 80%,transparent);
@@ -182,6 +190,14 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .needrow .ncrumb{font-size:11px;color:var(--muted);}
 .needrow .ncrumb b{color:var(--text);font-weight:650;}
 .needrow .nq{font-size:12px;color:color-mix(in srgb,var(--text) 88%,transparent);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* overflow-row quick-reply chips (round-2 adv-fix #C3) — keep "answer IS continue" for items 3+ too.
+   Slightly more compact than the full-card chips so they sit cleanly under the one-line question. */
+.needrow .rowqreply{margin-top:6px;gap:6px;}
+.needrow .rowqreply button{padding:3px 9px;font-size:11px;}
+.needrow .rowqreply .qlbl{font-size:10px;}
+.needrow:has(.rowqreply){align-items:flex-start;}  /* only chip-bearing rows top-align (taller); plain rows stay centered */
+.needrow:has(.rowqreply) .sess-dot,
+.needrow:has(.rowqreply) > .btn{margin-top:3px;}   /* nudge the dot + button to baseline of the first text line */
 
 /* status badge */
 .badge{display:inline-flex;align-items:center;gap:6px;height:21px;padding:0 9px;border-radius:999px;
@@ -243,11 +259,14 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .pcard.open{border-color:color-mix(in srgb,var(--accent) 36%,var(--border));}
 .pcard-head{display:flex;align-items:flex-start;gap:12px;padding:16px 16px 12px;cursor:pointer;}
 .pcard-id{flex:1;min-width:0;}
-.pname{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:800;letter-spacing:-.01em;flex-wrap:wrap;}
+.pname{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:800;letter-spacing:-.01em;flex-wrap:wrap;min-width:0;}
+/* (round-2 adv-fix #C8) clamp the project NAME text run only; the ⤷ nest lineage badge stays outside it. */
+.pname .nm{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 /* lineage badge neutral (#5) */
 .nest{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 7px;border-radius:5px;font-size:11px;font-weight:650;
   letter-spacing:0;color:var(--muted);border:1px solid color-mix(in srgb,var(--border) 92%,transparent);background:transparent;}
-.ppath{font-size:12px;color:var(--muted);margin-top:3px;}
+/* (round-2 adv-fix #C8) the path/desc line is a single text run — clamp it like its .pp/.txt siblings. */
+.ppath{font-size:12px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .pcard-counts{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;}
 .chev{color:var(--muted);transition:transform .18s ease;display:inline-grid;place-items:center;width:20px;height:20px;}
 .pcard.open .chev{transform:rotate(90deg);}
@@ -739,6 +758,42 @@ button{font:inherit;cursor:pointer;color:inherit;}
    LOAD/REALTIME (two-phase): first paint = registry + runtime only; git/DoD stream per card lazily with
      a short TTL cache; dormant rows render last-known cached status. The page consumes a DEBOUNCED
      per-project rollup_changed and ignores message_update/tool_execution_update from the /ws firehose.
+
+   ── ROADMAP & SCALE (round-2 adv-fix: honest record of what is shippable now vs. net-new) ──────────
+   LOOP ELAPSED IS GROUNDED, TELEMETRY IS NOT (#C1,#C6): the live "∞ looping {elapsed}" badge and the
+     hero "Longest loop running {elapsed}" now trace ONLY to a stored loopStartedAt (encoded in fixtures
+     as the numeric elapsedMin = now − loopStartedAt) — the meta/loopTime text-parse fallback the code
+     forbade has been DELETED, so the demo can never silently render the banned path. ROADMAP PRIORITY:
+     land the loopStartedAt registry writer FIRST; it is the single net-new field that ships the grounded
+     elapsed/over-the-line-elapsed value. The flagship loop scenario's DIFFERENTIATED telemetry (iter
+     count, rhythm sparkbar, budget cap, stall detection) depends on a durable per-iteration log
+     (CustomEntry 'pi-web:loop-iter') + an orchestrator pi does NOT expose today — so it stays quarantined
+     in the muted, explicitly-"proposed" band (proposedLoop), never drawn live. Near-term shippable value
+     of the loop scenario is therefore thin (grounded elapsed + cyan ∞) until that log lands.
+   GIT DoD SCOPE (#C2): git_clean ("working tree clean" / dirtyCount) is a property of gitStatus(cwd) at
+     the REPO ROOT — co-located sessions SHARE that tree — so it is scoped OUT of every per-session
+     k-of-n ring (rootScoped()/computeProgress) and rendered once, at repo-root scope, in critListHtml.
+     A clean tree is never credited/poisoned onto one of several co-located sessions. Branch-derived
+     criteria (git_merged / git_ahead_zero) stay PER-SESSION via the artifact.branch channel — those are
+     per-branch and remain honest; merge-base --is-ancestor on that branch is well-defined.
+   DoD AUTHORING & FRESHNESS (#C7): production keys evaluator family off the structured DoDSource.kind on
+     each criterion (manual|command|git_clean|git_merged|git_ahead_zero|session_idle), NOT the fixture-only
+     substring match in srcFamily()/sessFamily() (which exists purely so this mockup can classify string
+     fixtures). MATURITY GAPS, named honestly: (a) there is NO full criterion-authoring UI yet — only
+     "Define done" stubs; a real authoring flow (add/edit/remove criteria + pick evaluator) is net-new.
+     (b) command-DoD evidence goes stale ~1h (critStale); the honest response is k/n* + "Done — pending
+     recheck" gated behind a one-click Re-check on the card face, NOT a silent promotion on stale evidence.
+     A short auto-re-run schedule for visible active cards would keep steady-state rings off the asterisk.
+     NOTE: merged cards render a SOLID ✓ glyph (not k-of-n), so critStale never asterisks a merged ring.
+   ROLLUP SCALE (#C9): /api/rollups evaluates git DoD (gitStatus + merge-base, cheap/inline) per repo
+     ROOT — command DoD is EXCLUDED from rollup reads (on-demand only). Beyond the "short TTL cache" hedge,
+     the contract NEEDS a concrete scale story before 200 multi-root projects: (1) server-side pagination
+     + projection of the project list (don't serialize the whole fleet per read); (2) BOUND the per-read
+     git fan-out — cache per repo root with a TTL, evaluate lazily, and SKIP recompute for dormant
+     projects whose HEAD hasn't moved (an fs/git watcher emitting dirty-project-scoped rollup_changed).
+     CLIENT-side the grid is already capped at every section (ACTIVE_CAP=4 "+N more", dormant/Done/Planned
+     CAP=6 "show all"), so the page never tiles an instrument-panel wall — the residual risk is server git
+     fan-out latency, which is hedged-not-solved and flagged here as net-new work.
    ════════════════════════════════════════════════════════════════════ */
 
 const ST = {
@@ -772,9 +827,16 @@ function critStale(c){
    never-run command criteria are excluded from the denominator (shown as an unfilled "not yet checked"
    segment + an asterisked "k/n" number, never folded into a flattering percent). allMet (which gates the
    sign-off promotion) requires every evaluable criterion to be RUN and FRESH. */
+/* (round-2 adv-fix) git_clean ("working tree clean" / dirtyCount) is a property of the REPO ROOT's
+   gitStatus(cwd), not of any one session — co-located sessions share that working tree. So it must NOT
+   be folded into a per-session k-of-n ring (it would credit/poison every sibling identically and let a
+   session claim a clean tree it didn't earn). We scope it OUT of the per-session percent here and render
+   it once, at repo-root scope, in critListHtml. Branch-derived criteria (git_merged / git_ahead_zero)
+   stay per-session via the artifact branch channel — those ARE per-branch and remain honest. */
+function rootScoped(c){ return c.src==="git_clean"; }
 function computeProgress(crit){
   if(!crit || !crit.length) return null;
-  const evaluable = crit.filter(c=>!c.gate);
+  const evaluable = crit.filter(c=>!c.gate && !rootScoped(c));
   if(!evaluable.length) return {met:0,total:0,metW:0,totW:0,percent:0,allMet:false,gateOnly:true,unrun:0,stale:0};
   const run = evaluable.filter(c=>!critUnrun(c));
   const unrun = evaluable.length - run.length;
@@ -883,7 +945,7 @@ const WORLD_DEFAULT = [
         sessions:[
           { id:"s6", name:"inbox-triage", status:"loop",
             dod:"inbox at zero, replies drafted (open-ended)", dodSrc:"agent-defined",
-            live:"Summarizing 14 new emails, drafting 3 replies.", meta:"looping 9m · iter 4", loop:true, iter:4,
+            live:"Summarizing 14 new emails, drafting 3 replies.", meta:"looping 9m · iter 4", loop:true, iter:4, elapsedMin:9,
             iterspark:[4,6,5,7],
             queue:["draft reply to Maya","archive 9 newsletters","flag invoice"], queueTotal:3 },
         ]},
@@ -966,7 +1028,7 @@ const WORLD_DENSE = [ (function(){
     sessions:[{id:id+"_s",name:name.replace(/ loop$/,""),status:status==="loop"?"loop":status,dod,dodSrc,
       live:extra&&extra.live||"…",meta:extra&&extra.meta,loop:status==="loop",elicited:extra&&extra.elicited,
       artifact:extra&&extra.artifact, crit:extra&&extra.crit, queue:extra&&extra.queue, queueTotal:extra&&extra.queueTotal,
-      iterspark:extra&&extra.iterspark, iter:extra&&extra.iter, kind:extra&&extra.kind, blast:extra&&extra.blast, failAction:extra&&extra.failAction}]}, extra&&extra.ws||{});
+      iterspark:extra&&extra.iterspark, iter:extra&&extra.iter, elapsedMin:extra&&extra.elapsedMin, kind:extra&&extra.kind, blast:extra&&extra.blast, failAction:extra&&extra.failAction}]}, extra&&extra.ws||{});
   // density generator: append N grounded sessions (status-matched crit/artifacts) to a workstream so the
   // project reaches spec density (~40 sessions) without 40 hand-written objects. Each session still traces
   // to a real signal — git merge / command exit / manual sign-off — so no ring is faked at scale.
@@ -1008,7 +1070,7 @@ const WORLD_DENSE = [ (function(){
        crit:[c("branch merged into main",true,"git_merged","ancestor @ 9f3a1c2"),c("npm test → exit 0",true,"command","exit 0","at","2h ago"),c("working tree clean",true,"git_clean","dirtyCount 0")]}),
       "Auth task", ["merge","merge","merge","merge"]),
     mk("d_sweep","bug-sweep loop","0 failing tests","orchestrator-defined","loop",
-      {live:"Triaging failing tests (5 of 12 fixed).",meta:"looping 38m · iter 12",iter:12,iterspark:[3,5,4,6,5,7,6,8,7,9,8,10],queue:["fix flaky e2e","upgrade vitest"],queueTotal:6,ws:{loop:true,loopTime:"looping 38m"}}),
+      {live:"Triaging failing tests (5 of 12 fixed).",meta:"looping 38m · iter 12",iter:12,elapsedMin:38,iterspark:[3,5,4,6,5,7,6,8,7,9,8,10],queue:["fix flaky e2e","upgrade vitest"],queueTotal:6,ws:{loop:true,loopTime:"looping 38m"}}),
     // the session-heavy workstream (14 sessions) — proves the per-workstream "+N more sessions" cap (#20d, #8)
     pad(mk("d_tax","Tax form mappings","npm test → exit 0 + merged","rule-based","run",
       {live:"Mapping 1099 categories to ledger (step 7/8).",meta:"running 3m",
@@ -1043,7 +1105,7 @@ const WORLD_CALM = [
     workstreams:[
       { id:"sweep", name:"Nightly bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 22m",
         sessions:[{id:"c1",name:"bug-sweep",status:"loop",dod:"0 failing tests (open-ended)",dodSrc:"orchestrator-defined",
-          live:"Triaging the failing test suite (7 of 11 fixed).",meta:"looping 22m · iter 9",loop:true,iter:9,iterspark:[3,4,5,6,5,7,6,8,7],queue:["dedupe fixtures","fix flaky e2e"],queueTotal:2}]},
+          live:"Triaging the failing test suite (7 of 11 fixed).",meta:"looping 22m · iter 9",loop:true,iter:9,elapsedMin:22,iterspark:[3,4,5,6,5,7,6,8,7],queue:["dedupe fixtures","fix flaky e2e"],queueTotal:2}]},
       { id:"auth", name:"Auth hardening", dod:"merged into local main", dodSrc:"merged", status:"merge", mergedAgo:"3h ago",
         sessions:[{id:"c2",name:"Auth hardening",status:"merge",dod:"merged into local main",dodSrc:"merged",live:"Merged and green.",
           artifact:{kind:"diff",branch:"feat/auth → main",add:331,del:96,merged:true,sha:"9f3a1c2",mergedAgo:"3h ago",check:{cmd:"npm test",exit:0,at:"3h ago"}},
@@ -1053,7 +1115,7 @@ const WORLD_CALM = [
     workstreams:[
       { id:"inbox", name:"Inbox triage loop", dod:"inbox at zero", dodSrc:"agent-defined", status:"loop", loop:true, loopTime:"looping",
         sessions:[{id:"c3",name:"inbox-triage",status:"loop",dod:"inbox at zero (open-ended)",dodSrc:"agent-defined",
-          live:"Drafting replies, never sending without sign-off.",meta:"looping 7m · iter 3",loop:true,iter:3,iterspark:[5,6,7],queue:["draft reply to Maya"],queueTotal:1}]},
+          live:"Drafting replies, never sending without sign-off.",meta:"looping 7m · iter 3",loop:true,iter:3,elapsedMin:7,iterspark:[5,6,7],queue:["draft reply to Maya"],queueTotal:1}]},
       { id:"cal", name:"Calendar sync", dod:"merged into local main", dodSrc:"merged", status:"merge", mergedAgo:"5h ago",
         sessions:[{id:"c4",name:"cal-sync",status:"merge",dod:"merged into local main",dodSrc:"merged",live:"Sync stable, merged.",
           artifact:{kind:"diff",branch:"feat/cal → main",add:120,del:40,merged:true,sha:"a1b2c3d",mergedAgo:"5h ago",check:{cmd:"npm test",exit:0,at:"5h ago"}},
@@ -1080,7 +1142,16 @@ const WORLD_BLOCKED = [
             dod:"OAuth returns valid token AND integration test passes", dodSrc:"agent-defined",
             live:"Which Plaid product scopes — transactions only, or also investments & liabilities?", kind:"question", meta:"idle 18m ago",
             chips:["transactions only","+ investments","+ investments & liabilities"],
-            crit:[{text:"OAuth scaffolded",met:true,src:"manual",ev:"you checked"},{text:"product scope decided",met:false,src:"manual",ev:"needs your decision"},{text:"integration test passes",met:false,src:"command",ev:"blocked on scope",at:"never run"}] }]},
+            crit:[{text:"OAuth scaffolded",met:true,src:"manual",ev:"you checked"},{text:"product scope decided",met:false,src:"manual",ev:"needs your decision"},{text:"integration test passes",met:false,src:"command",ev:"blocked on scope",at:"never run"}] },
+          // (round-2 adv-fix #C5) a SECOND non-elicited soft-wait stop (besides default's s2b), so the
+          // production-dominant "N may be waiting" path is exercised in more than one scenario. NOTE: no
+          // `elicited` → pi can't PROVE it's blocked, so it stays OUT of the bold "6 blocked" obligation
+          // count and surfaces only as the quiet hero "may be waiting" tally — never a fabricated amber alarm.
+          { id:"b1b", name:"Plaid sandbox probe", status:"block",   // elicited omitted → soft-wait
+            dod:"sandbox reachable", dodSrc:"command",
+            live:"Ran the sandbox probe, left a free-text note, then stopped — no structured question.",
+            meta:"idle 24m ago",
+            crit:[{text:"sandbox endpoint reachable",met:true,src:"command",ev:"ping ok",at:"24m ago"}] }]},
       { id:"migrate", name:"Ledger migration", dod:"you approve the migration", dodSrc:"user sign-off", status:"block",
         sessions:[
           { id:"b2", name:"apply destructive migration", status:"block", blast:"hi", elicited:true,
@@ -1218,7 +1289,7 @@ const WORLD_MIXED = [
             crit:[]},
           { id:"m6", name:"sub: dedupe fixtures", status:"loop",
             dod:"orchestrator: fixtures deduped, suite green", dodSrc:"orchestrator-defined",
-            live:"Spawned by bug-sweep loop — deduping shared fixtures.", meta:"looping 6m · iter 3", loop:true, iter:3, iterspark:[3,4,5],
+            live:"Spawned by bug-sweep loop — deduping shared fixtures.", meta:"looping 6m · iter 3", loop:true, iter:3, elapsedMin:6, iterspark:[3,4,5],
             queue:["merge auth fixtures","drop dead snapshots"], queueTotal:2 },
         ]},
     ]},
@@ -1236,7 +1307,7 @@ function genScale(){
             crit:[{text:"OAuth scaffolded",met:true,src:"manual",ev:"ok"},{text:"scope decided",met:false,src:"manual",ev:"needs you"},{text:"integration test passes",met:false,src:"command",ev:"blocked",at:"never run"}]}]},
         { id:"sweep", name:"bug-sweep loop", dod:"0 failing tests", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 38m",
           sessions:[{id:"x2",name:"bug-sweep",status:"loop",dod:"0 failing tests (open-ended)",dodSrc:"orchestrator-defined",
-            live:"Triaging failing tests (4 of 11 fixed).",meta:"looping 38m · iter 12",loop:true,iter:12,iterspark:[3,5,4,6,5,7,6,8,7,9,8,10],queue:["fix flaky e2e","upgrade vitest"],queueTotal:6}]},
+            live:"Triaging failing tests (4 of 11 fixed).",meta:"looping 38m · iter 12",loop:true,iter:12,elapsedMin:38,iterspark:[3,5,4,6,5,7,6,8,7,9,8,10],queue:["fix flaky e2e","upgrade vitest"],queueTotal:6}]},
       ]},
     { id:"zippy", name:"zippy", path:"~/zippy", desc:"personal assistant",
       workstreams:[
@@ -1246,13 +1317,13 @@ function genScale(){
             crit:[{text:"OAuth token valid",met:false,src:"command",ev:"401",at:"21m ago"},{text:"npm test → exit 0",met:false,src:"command",ev:"blocked",at:"21m ago"}]}]},
         { id:"inbox", name:"Inbox triage loop", dod:"inbox at zero", dodSrc:"agent-defined", status:"loop", loop:true, loopTime:"looping",
           sessions:[{id:"x4",name:"inbox-triage",status:"loop",dod:"inbox at zero (open-ended)",dodSrc:"agent-defined",
-            live:"Summarizing 14 emails, drafting 3 replies.",meta:"looping 9m · iter 4",loop:true,iter:4,iterspark:[4,6,5,7],queue:["draft reply to Maya"],queueTotal:3}]},
+            live:"Summarizing 14 emails, drafting 3 replies.",meta:"looping 9m · iter 4",loop:true,iter:4,elapsedMin:9,iterspark:[4,6,5,7],queue:["draft reply to Maya"],queueTotal:3}]},
       ]},
     { id:"datapipe", name:"datapipe", path:"~/workspace/datapipe", desc:"ETL service",
       workstreams:[
         { id:"backfill", name:"Nightly backfill loop", dod:"0 dropped rows", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping 2h",
           sessions:[{id:"x6",name:"backfill",status:"loop",dod:"0 dropped rows (open-ended)",dodSrc:"orchestrator-defined",
-            live:"Reprocessing 2024-Q4 partitions.",meta:"looping 2h · iter 31",loop:true,iter:31,iterspark:[6,7,6,8,7,9,8,10,9,8],queue:["retry 3 failed shards"],queueTotal:1}]},
+            live:"Reprocessing 2024-Q4 partitions.",meta:"looping 2h · iter 31",loop:true,iter:31,elapsedMin:120,iterspark:[6,7,6,8,7,9,8,10,9,8],queue:["retry 3 failed shards"],queueTotal:1}]},
       ]},
     { id:"ai-education", name:"ai-education", path:"~/zippy/projects/ai-education", desc:"AI education platform", nest:"in zippy",
       workstreams:[
@@ -1289,7 +1360,7 @@ function genScale(){
   const activeLoops = loopNames.map((nm,i)=>({ id:nm, name:nm, path:"~/workspace/"+nm, desc:"",
     workstreams:[{ id:nm+"_loop", name:"Nightly "+nm+" loop", dod:"0 errors", dodSrc:"orchestrator-defined", status:"loop", loop:true, loopTime:"looping "+(10+i*7)+"m",
       sessions:[{ id:nm+"_s", name:nm, status:"loop", dod:"0 errors (open-ended)", dodSrc:"orchestrator-defined",
-        live:"Processing batch "+(i+2)+"/"+(i+8)+".", meta:"looping "+(10+i*7)+"m · iter "+(3+i), loop:true, iter:3+i,
+        live:"Processing batch "+(i+2)+"/"+(i+8)+".", meta:"looping "+(10+i*7)+"m · iter "+(3+i), loop:true, iter:3+i, elapsedMin:(10+i*7),
         iterspark:[3,4,5,6,5,7,6], queue:["next batch"], queueTotal:1 }]}]}));
   return active.concat(activeLoops, dormant);
 }
@@ -1617,19 +1688,18 @@ function deltaClause(needs){
   return `<span class="delta">${head}: ${frags.join('<span class="sep">·</span> ')}.</span>`;
 }
 
-/* longest grounded loop elapsed (#8): from the stored loopStartedAt (fixture: elapsedMin, else the
-   elapsed text in meta/loopTime with the un-groundable "· iter N" stripped). Lets the calm hero stay
-   honest — it never reassures "close this tab" while a loop has visibly been running a long time; it
-   states the neutral elapsed FACT instead, never an invented stall / over-budget alarm. */
+/* longest grounded loop elapsed (#8): from the stored loopStartedAt (fixtures carry the numeric
+   elapsedMin = now − loopStartedAt — every loop session sets it). Lets the calm hero stay honest — it
+   never reassures "close this tab" while a loop has visibly been running a long time; it states the
+   neutral elapsed FACT instead, never an invented stall / over-budget alarm. */
 function loopMinutes(s,w){
-  // (#it5-p7c) PRODUCTION: gate the "∞ looping {elapsed}" badge strictly on a registered loop
-  // (isLoop) + a stored loopStartedAt (spec §5.4); compute elapsed = now − loopStartedAt and DROP
-  // the meta/loopTime text-parse fallback below — it exists only so the mockup fixtures (which carry
-  // an elapsed string, not a start timestamp) can render. The text parse must never ship.
-  if(s.elapsedMin!=null) return s.elapsedMin;
-  const t=loopElapsed(s.meta||(w&&w.loopTime)||"");
-  let min=0; const h=t.match(/(\d+)\s*h/); const m=t.match(/(\d+)\s*m/);
-  if(h) min+=parseInt(h[1],10)*60; if(m) min+=parseInt(m[1],10); return min;
+  // (#it5-p7c / round-2 adv-fix) PRODUCTION: gate the "∞ looping {elapsed}" badge strictly on a
+  // registered loop (isLoop) + a stored loopStartedAt (spec §5.4); elapsed = now − loopStartedAt.
+  // The mockup encodes that grounded value as the numeric elapsedMin on every loop fixture. The old
+  // meta/loopTime text-parse fallback (which the comment said "must never ship") has been DELETED so
+  // the demo can never silently render the banned path — an un-grounded loop yields 0, not a parsed
+  // string. (w is retained for signature compatibility with callers.)
+  return s.elapsedMin!=null ? s.elapsedMin : 0;
 }
 function fmtMin(min){ if(min>=60){ const h=Math.floor(min/60), m=min%60; return m?`${h}h ${m}m`:`${h}h`; } return `${min}m`; }
 function longestLoop(){
@@ -1643,7 +1713,7 @@ const CLOSE_TAB_LOOP_MIN = 45;  // beyond this, an actively-running loop makes "
 function heroHtml(c){
   const day = "Sunday · 21 Jun";
   // non-elicited idle stops are a quiet tally, NEVER part of the obligation headline (spec §5.3, #5)
-  const maybe = c.softwait ? `<span class="maybe" title="non-elicited idle stops — pi can't PROVE these are blocked (a free-text stop is not a structured ask), so they're a quiet tally, never inside the 'things need you' count">${c.softwait} may be waiting</span>` : "";
+  const maybe = c.softwait ? `<span class="maybe" title="non-elicited idle stops — pi can't PROVE these are blocked (a free-text stop is not a structured ask), so they're a quiet tally, never inside the 'things need you' count. Until a structured ask_user primitive ships, this soft-wait state is the production-dominant case."><b>${c.softwait}</b> may be waiting</span>` : "";
   if(c.needs===0){
     const bits=[];
     if(c.loop) bits.push(`${c.loop} loop${c.loop>1?"s":""} running`);
@@ -1769,18 +1839,30 @@ function renderNeeds(){
     if(s.elicited && s.chips && s.chips.length){
       chips = `<div class="qreply"><span class="qlbl">quick reply →</span>`+s.chips.map(q=>`<button data-reply="${s.id}" data-text="${esc(q)}">${esc(q)}</button>`).join("")+`</div>`;
     }
-    const failBtn = s.status==="fail" ? `<button class="btn ghost sm" data-open="${s.id}">${esc(s.failAction||"Re-run")}</button>` : "";
     const askHtml = soft
       ? `<span style="color:var(--muted)">No structured question — pi went idle (${esc(s.meta||'a while ago')}), unread. It may be waiting on you, or may simply have finished. Open to read its last message.</span>`
       : esc(s.live);
+    // (round-2 adv-fix) the PRIMARY verb follows the card's situation:
+    //  · FAILED → the specific remedy (Re-authenticate / Re-run) is the primary action; "Open conversation"
+    //    demotes to a ghost secondary. "Continue the conversation" is the wrong verb on a dead job.
+    //  · BLOCK (elicited) → "Continue the conversation" stays primary — answering genuinely IS continuing,
+    //    and the chips above prefill the composer.
+    //  · soft idle stop → "Open conversation" (pi can't prove it's blocked, so no "continue" promise).
+    let actions;
+    if(s.status==="fail"){
+      const remedy = esc(s.failAction||"Re-run");
+      actions = `<button class="btn primary" data-open="${s.id}">${continueIcon()} ${remedy}</button>
+        <button class="btn ghost sm" data-open="${s.id}">Open conversation</button>`;
+    } else {
+      actions = `<button class="btn primary" data-open="${s.id}">${continueIcon()} ${soft?"Open conversation":"Continue the conversation"}</button>`;
+    }
     return `<article class="need ${cls}">
       <div class="crumb"><b>${esc(p.name)}</b> &nbsp;›&nbsp; ${esc(w.name)}</div>
-      <div class="sname">${esc(s.name)} ${headTag}</div>
+      <div class="sname"><span class="nm">${esc(s.name)}</span> ${headTag}</div>
       <div class="ask">${askHtml}</div>
       ${chips}
       <div class="actions">
-        <button class="btn primary" data-open="${s.id}">${continueIcon()} ${soft?"Open conversation":"Continue the conversation"}</button>
-        ${failBtn}
+        ${actions}
       </div>
     </article>`;
   }).join("");
@@ -1789,13 +1871,24 @@ function renderNeeds(){
       const blast=blastRadius(s);
       const blastTag = (blast==="hi"||blast==="md")?`<span class="blast ${s.status==='fail'?'fail':'block'}" title="Blast radius is a HEURISTIC triage hint (manual override / destructive-keyword scan / dirty-file-count bucket). It only orders Needs-you; it gates nothing.">${blast==="hi"?"high":"elevated"}</span>`:"";
       const wait=waitLabel(s); const waitTag = wait?`<span class="waitage">waiting ${wait}</span>`:"";
+      // (round-2 adv-fix) carry the quick-reply CHIPS into the overflow row so "answer IS continue"
+      // (invariant #4) holds for the tail too — every elicited blocked item stays ONE click from an
+      // inline answer, not just the top 2. Without this, items 3+ degraded to a bare Continue.
+      const rowChips = (s.elicited && s.chips && s.chips.length)
+        ? `<div class="qreply rowqreply"><span class="qlbl">quick reply →</span>`+s.chips.map(q=>`<button data-reply="${s.id}" data-text="${esc(q)}">${esc(q)}</button>`).join("")+`</div>`
+        : "";
+      // a FAILED tail item gets its specific remedy as the row action; a block item keeps "Continue".
+      const rowBtn = s.status==="fail"
+        ? `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} ${esc(s.failAction||"Re-run")}</button>`
+        : `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} Continue</button>`;
       return `<div class="needrow">
         <span class="sess-dot ${(ST[s.status]||{}).cls||'idle'}" style="background:${(ST[s.status]||{}).color}"></span>
         <div class="nleft">
           <div class="ncrumb"><b>${esc(p.name)}</b> › ${esc(w.name)} ${blastTag}${waitTag}</div>
           <div class="nq">${esc(s.live)}</div>
+          ${rowChips}
         </div>
-        <button class="btn primary sm" data-open="${s.id}">${continueIcon()} Continue</button>
+        ${rowBtn}
       </div>`;
     };
     const RCAP=6, rShown=rest.slice(0,RCAP), rExtra=rest.slice(RCAP);   // cap the reveal too (#9)
@@ -1841,7 +1934,7 @@ function renderSignoff(){
     const act = gone
       ? `<span style="color:var(--st-merge);font-weight:650">✓ Signed off</span>${mergeAffordance(s)}`
       : pending
-        ? `<button class="btn ghost sm" data-recheckcard="${s.id}">${recheckIcon()} Re-check</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`
+        ? `<button class="btn primary sm" data-recheckcard="${s.id}" title="command DoD evidence is older than ~1h (stale) — re-run it on demand so the ring can promote instead of resting on stale evidence (#C7)">${recheckIcon()} Re-check</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`
         : `<button class="btn sign" data-signoff="${s.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`;
     return `<article class="soff ${gone?'gone':''}">
       <div class="sleft">
@@ -2064,7 +2157,7 @@ function renderCard(p){
   return `<article class="pcard" id="card-${p.id}" data-p="${p.id}">
     <div class="pcard-head" data-toggle="card">
       <div class="pcard-id">
-        <div class="pname">${esc(p.name)} ${p.nest?`<span class="nest" title="own project root nested inside its parent — its work is NOT counted toward the parent">⤷ ${esc(p.nest)}</span>`:""}</div>
+        <div class="pname"><span class="nm">${esc(p.name)}</span> ${p.nest?`<span class="nest" title="own project root nested inside its parent — its work is NOT counted toward the parent">⤷ ${esc(p.nest)}</span>`:""}</div>
         <div class="ppath mono">${esc(p.path)}${p.desc?` · ${esc(p.desc)}`:""}</div>
       </div>
       <div class="pcard-counts">
@@ -2385,12 +2478,17 @@ function critListHtml(s){
   return `<div class="critlist">`+s.crit.map(c=>{
     const fam = evalFamily[c.src]||"manual";
     const stale=critStale(c), unrun=critUnrun(c);
+    const root=rootScoped(c);  // git_clean → repo-root working tree, shared across co-located sessions
     const atTxt = unrun ? ` <span class="stale">· not yet run — excluded from %</span>`
       : (c.at ? ` <span class="${stale?'stale':''}">· evaluated ${esc(c.at)}${stale?' (stale)':''}</span>` : "");
     const ev = (c.ev||unrun||c.src==="command") ? `<div class="cev">${esc(c.ev||"")}${atTxt}${c.src==="command"?` <button class="recheck" data-recheck>${recheckIcon()} re-check</button>`:""}</div>` : "";
+    // (round-2 adv-fix) render git_clean as a repo-root fact, NOT a per-session criterion: it is excluded
+    // from this session's % and labelled as the shared working tree, so a clean tree is never credited to
+    // one of several co-located sessions as if that session alone earned it.
+    const scopePill = root ? `<span class="gatepill" title="working tree clean is a property of the shared repo root (gitStatus on the cwd), not this one session — co-located sessions share it. Shown once, at repo-root scope, and excluded from this session's %.">repo-root scope · excluded from %</span>` : "";
     return `<div class="crit ${c.met?'met':''} ${c.gate?'gate':''}">
       <span class="box">${c.met?'✓':(c.gate?'…':'')}</span>
-      <div><div class="ctext">${esc(c.text)} <span class="srcTag" style="margin-left:4px" title="evaluator: ${esc(fam)}">${esc(fam)}</span>${c.gate?`<span class="gatepill">sign-off gate · excluded from %</span>`:""}</div>
+      <div><div class="ctext">${esc(c.text)} <span class="srcTag" style="margin-left:4px" title="evaluator: ${esc(fam)}">${esc(fam)}</span>${c.gate?`<span class="gatepill">sign-off gate · excluded from %</span>`:""}${scopePill}</div>
       ${ev}</div>
     </div>`;
   }).join("")+`</div>`;
