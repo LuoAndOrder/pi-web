@@ -195,6 +195,25 @@ export interface DashboardRenderer {
 export const STATUS_RANK: Record<string, number> = { block: 0, fail: 0, unset: 1, run: 2, loop: 2, sign: 3, queued: 4, planned: 4, merge: 5 };
 export function statusRank(st: string) { return STATUS_RANK[st] != null ? STATUS_RANK[st] : 9; }
 
+// ── loop elapsed (S11), the SINGLE grounded source ────────────────────────────
+// A live loop's "∞ looping {elapsed}" badge derives its elapsed STRICTLY from the
+// stored `loopStartedAt` (registry field, spec §5.4), surfaced on the view model as
+// `elapsedMin = now − loopStartedAt` (computed once in rollupAdapter.toSession). It
+// is NEVER taken from `runtimeForPath` — the 60s idle dispose resets runtime
+// timestamps, so a 38-minute loop would read as a fresh "running just now" the
+// moment its live session is disposed. An un-grounded loop (no `loopStartedAt`)
+// yields 0, never an inferred/parsed elapsed — so the badge can never fabricate a
+// duration. Exported (module-level, pure) so it is directly unit-testable and so the
+// renderer + any future caller share ONE formula that cannot drift.
+export function loopMinutes(s: { elapsedMin?: number }): number {
+  return s.elapsedMin != null ? s.elapsedMin : 0;
+}
+export function fmtMin(min: number): string {
+  if (min >= 1440) { const d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60); return h ? `${d}d ${h}h` : `${d}d`; }
+  if (min >= 60) { const h = Math.floor(min / 60), m = min % 60; return m ? `${h}h ${m}m` : `${h}h`; }
+  return `${min}m`;
+}
+
 export function createRenderer(options: { wrap: HTMLElement; state: RenderState; onboard?: OnboardHandlers }): DashboardRenderer {
   const { wrap, state, onboard } = options;
 
@@ -518,12 +537,10 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     return `<span class="delta">${head}: ${frags.join('<span class="sep">·</span> ')}.</span>`;
   }
 
-  function loopMinutes(s: VSession, _w?: VWorkstream) { return s.elapsedMin != null ? s.elapsedMin : 0; }
-  function fmtMin(min: number) { if (min >= 1440) { const d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60); return h ? `${d}d ${h}h` : `${d}d`; } if (min >= 60) { const h = Math.floor(min / 60), m = min % 60; return m ? `${h}h ${m}m` : `${h}h`; } return `${min}m`; }
-  function wsLoopMinutes(w: VWorkstream) { let best = 0; (w.sessions || []).forEach((s) => { if (s.loop) { const m = loopMinutes(s, w); if (m > best) best = m; } }); return best; }
+  function wsLoopMinutes(w: VWorkstream) { let best = 0; (w.sessions || []).forEach((s) => { if (s.loop) { const m = loopMinutes(s); if (m > best) best = m; } }); return best; }
   function longestLoop(): { min: number; label: string } | null {
     let best: { min: number; label: string } | null = null;
-    Object.values(state.SESS).forEach(({ s, w }) => { if (s.loop) { const min = loopMinutes(s, w); if (!best || min > best.min) best = { min, label: fmtMin(min) }; } });
+    Object.values(state.SESS).forEach(({ s }) => { if (s.loop) { const min = loopMinutes(s); if (!best || min > best.min) best = { min, label: fmtMin(min) }; } });
     return best;
   }
   const CLOSE_TAB_LOOP_MIN = 45;
@@ -1058,7 +1075,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const dodTxt = s.status === "unset" ? `<span style="color:var(--st-sign)">no criterion set — define what done means</span> ${srcTag(s.dodSrc)}`
       : dodInline(s.dod, s.dodSrc);
     const dodHoisted = w && w.status !== "unset" && s.status !== "unset" && s.dod === w.dod && s.dodSrc === w.dodSrc;
-    const loopTag = s.loop ? `<span class="loopBadge"><span class="inf">∞</span> looping ${esc(fmtMin(loopMinutes(s, w)))}</span>` : "";
+    const loopTag = s.loop ? `<span class="loopBadge"><span class="inf">∞</span> looping ${esc(fmtMin(loopMinutes(s)))}</span>` : "";
     const softTag = (s.status === "block" && !s.elicited) ? ` ${badge("block", true)}` : "";
 
     return `<div class="sess" data-open="${s.id}">

@@ -155,12 +155,48 @@ function workstreamStatus(wr: WorkstreamRollup, sessions: VSession[]): string {
   }
 }
 
-function toSession(sr: SessionRollup): VSession {
-  const status = sessionStatus(sr);
+/** Elapsed minutes of a running loop, derived STRICTLY from the stored `loopStartedAt`
+ *  ISO timestamp (registry field, spec §5.4) — NEVER from `runtime.startedAt`, which
+ *  resets on the 60s idle dispose. A missing/garbage timestamp yields `undefined` so the
+ *  badge renders no fabricated duration. This is the single place real data crosses from
+ *  `loopStartedAt` to the `elapsedMin` the renderer's `loopMinutes`/`fmtMin` consume. */
+export function elapsedMinFromLoopStart(startedAt?: string, now: number = Date.now()): number | undefined {
+  if (!startedAt) return undefined;
+  const t = Date.parse(startedAt);
+  if (Number.isNaN(t)) return undefined;
+  return Math.max(0, Math.round((now - t) / 60000));
+}
+
+/** A session's loop telemetry. A loop is a WORKSTREAM-level concept in the registry
+ *  (`Workstream.isLoop`/`loopStartedAt`/`budget`), so a session's loop info is INHERITED
+ *  from its workstream (`wsLoop`); the per-session `sr.loop` (reserved for a future
+ *  per-iteration log) wins if the server ever populates it. Returns `null` for a
+ *  non-loop session so the renderer draws no loop badge / proposed band. */
+function toSession(sr: SessionRollup, wsLoop?: WorkstreamRollup["loop"]): VSession {
   const crit = (sr.dod?.criteria ?? []).map(toCrit);
   const gate = crit.find((c) => c.gate && !c.met) ?? null;
   const elicited = !!sr.elicitation;
-  const loopMin = sr.loop?.startedAt ? Math.max(0, Math.round((Date.now() - Date.parse(sr.loop.startedAt)) / 60000)) : undefined;
+  // Loop info is the workstream's (the registry's source of truth), with the
+  // per-session `sr.loop` taking precedence if present. `elapsedMin` flows from
+  // `loopStartedAt` only — never from `sr.runtime.startedAt`.
+  const loop = sr.loop ?? wsLoop;
+  const isLoop = !!loop;
+  // A session inside an autonomous-loop workstream renders as "loop" (it IS part of a
+  // running loop), UNLESS it surfaces a higher-attention state of its own — a real
+  // block/fail must still float up, and a terminal sign/merge must not be masked. This
+  // is honest: the open-ended loop has no terminal DoD, so without this a loop session
+  // with no DoD would read "unset / needs-setup" instead of the cyan "looping" it is.
+  const baseStatus = sessionStatus(sr);
+  const status = isLoop && (baseStatus === "unset" || baseStatus === "run" || baseStatus === "queued" || baseStatus === "planned")
+    ? "loop"
+    : baseStatus;
+  const loopMin = isLoop ? elapsedMinFromLoopStart(loop?.startedAt) : undefined;
+  // iter/sparks are the durable per-iteration log pi does NOT expose today (spec §5.4):
+  // the server emits placeholder `iter:0`/`sparks:[]`. Surface a count ONLY when it is a
+  // real positive iteration / a populated rhythm — otherwise leave it undefined so the
+  // muted "proposed" band reads "…not live yet" and never asserts a fabricated "iter 0".
+  const iter = loop && typeof loop.iter === "number" && loop.iter > 0 ? loop.iter : undefined;
+  const iterspark = loop && loop.sparks && loop.sparks.length ? loop.sparks : undefined;
   return {
     id: sr.id,
     name: sr.name || "Untitled session",
@@ -178,11 +214,14 @@ function toSession(sr: SessionRollup): VSession {
     chips: sr.elicitation?.options ?? [],
     blast: sr.blast,
     failAction: sr.failAction,
-    loop: !!sr.loop,
-    iter: sr.loop?.iter,
-    iterspark: sr.loop?.sparks,
+    loop: isLoop,
+    // iter/sparks are the durable per-iteration log that pi does NOT expose today
+    // (spec §5.4) — surfaced ONLY in the muted "proposed" band, never as a live badge.
+    // Inherited from the workstream loop only if a future server populates them.
+    iter,
+    iterspark,
     elapsedMin: loopMin,
-    budget: sr.loop?.budget,
+    budget: loop?.budget,
     queue: sr.plannedQueue?.items,
     queueTotal: sr.plannedQueue?.total,
     artifact: toArtifact(sr),
@@ -193,7 +232,10 @@ function toSession(sr: SessionRollup): VSession {
 }
 
 function toWorkstream(wr: WorkstreamRollup): VWorkstream {
-  const sessions = wr.sessions.map(toSession);
+  // A loop is a workstream-level concept (Workstream.isLoop/loopStartedAt) — push it
+  // down to each session so the per-row "∞ looping {elapsed}" badge + proposed band
+  // render with elapsed grounded in the workstream's stored loopStartedAt.
+  const sessions = wr.sessions.map((sr) => toSession(sr, wr.loop));
   const status = workstreamStatus(wr, sessions);
   const dodInfo = deriveWorkstreamDod(wr.workstream.dod);
   return {
