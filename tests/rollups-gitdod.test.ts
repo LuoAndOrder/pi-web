@@ -3,7 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createRepoStatusCache, gitIsAncestor } from "../server/rollups/gitDod.js";
+import {
+  createRepoStatusCache,
+  evalGitCriterion,
+  gitConflicted,
+  gitIsAncestor,
+  sessionGitInfo,
+} from "../server/rollups/gitDod.js";
+import type { DoDCriterion, DoDSource } from "../server/rollups/types.js";
 import {
   checkout,
   checkoutNew,
@@ -17,6 +24,11 @@ import {
 
 // `runGit` matches the injected GitRunner signature (args, cwd) -> {stdout, stderr}.
 const inject = runGit;
+
+function crit(source: DoDSource): DoDCriterion {
+  return { id: "x", text: "criterion", source };
+}
+const noAncestor = async () => false;
 
 describe("gitIsAncestor (git_merged semantics)", () => {
   let repo: string;
@@ -55,6 +67,94 @@ describe("gitIsAncestor (git_merged semantics)", () => {
 
   it("rethrows on a real git error (non-1 exit), e.g. an unknown ref", async () => {
     await expect(gitIsAncestor(inject, "no-such-ref", "main", repo)).rejects.toBeTruthy();
+  });
+});
+
+describe("evalGitCriterion (git-derived DoD)", () => {
+  it("off-repo → not met, never throws", async () => {
+    const e = await evalGitCriterion(crit({ kind: "git_clean" }), { isRepo: false }, noAncestor);
+    expect(e.met).toBe(false);
+    expect(e.sourceKind).toBe("git_clean");
+    expect(await evalGitCriterion(crit({ kind: "git_clean" }), undefined, noAncestor)).toMatchObject({ met: false });
+  });
+
+  it("git_clean: met on a clean tree, unmet with uncommitted files", async () => {
+    const clean = await evalGitCriterion(crit({ kind: "git_clean" }), { isRepo: true, files: [] }, noAncestor);
+    expect(clean.met).toBe(true);
+    const dirty = await evalGitCriterion(
+      crit({ kind: "git_clean" }),
+      { isRepo: true, files: [{ label: "modified" }, { label: "untracked" }] },
+      noAncestor,
+    );
+    expect(dirty.met).toBe(false);
+    expect(dirty.evidence).toContain("2");
+  });
+
+  it("git_ahead_zero: met iff ahead 0 AND an upstream exists", async () => {
+    const synced = await evalGitCriterion(
+      crit({ kind: "git_ahead_zero" }),
+      { isRepo: true, ahead: 0, upstream: "origin/main", files: [] },
+      noAncestor,
+    );
+    expect(synced.met).toBe(true);
+    const noUpstream = await evalGitCriterion(
+      crit({ kind: "git_ahead_zero" }),
+      { isRepo: true, ahead: 0, upstream: "", files: [] },
+      noAncestor,
+    );
+    expect(noUpstream.met).toBe(false);
+    const ahead = await evalGitCriterion(
+      crit({ kind: "git_ahead_zero" }),
+      { isRepo: true, ahead: 2, upstream: "origin/main", files: [] },
+      noAncestor,
+    );
+    expect(ahead.met).toBe(false);
+  });
+
+  it("git_merged: false before merge, true after (real merge-base on a temp repo)", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "rollups-evalgit-"));
+    try {
+      await initRepo(repo);
+      await commitFile(repo, "README.md", "base\n", "base");
+      await renameBranch(repo, "main");
+      await checkoutNew(repo, "feat/y");
+      await commitFile(repo, "feature.txt", "feature\n", "feature work");
+      // The repo sits on feat/y; the criterion asks "feat/y merged into main".
+      const c = crit({ kind: "git_merged", into: "main" });
+      const isAncestor = (ancestor: string, into: string) => gitIsAncestor(inject, ancestor, into, repo);
+
+      const before = await evalGitCriterion(c, { isRepo: true, branch: "feat/y", files: [] }, isAncestor);
+      expect(before.met).toBe(false);
+
+      await checkout(repo, "main");
+      await mergeNoFf(repo, "feat/y");
+
+      const after = await evalGitCriterion(c, { isRepo: true, branch: "feat/y", files: [] }, isAncestor);
+      expect(after.met).toBe(true);
+      expect(after.evidence).toContain("main");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  }, 20_000);
+});
+
+describe("sessionGitInfo / gitConflicted", () => {
+  it("off-repo → undefined", () => {
+    expect(sessionGitInfo(undefined)).toBeUndefined();
+    expect(sessionGitInfo({ isRepo: false })).toBeUndefined();
+  });
+
+  it("a clean repo → dirtyCount 0, not blocked", () => {
+    const g = sessionGitInfo({ isRepo: true, branch: "main", ahead: 1, behind: 2, files: [] })!;
+    expect(g).toEqual({ branch: "main", ahead: 1, behind: 2, dirtyCount: 0, blocked: false });
+  });
+
+  it("a conflicted file → blocked, dirtyCount counts every file", () => {
+    expect(gitConflicted({ isRepo: true, files: [{ label: "conflicted" }] })).toBe(true);
+    expect(gitConflicted({ isRepo: true, files: [{ label: "modified" }] })).toBe(false);
+    const g = sessionGitInfo({ isRepo: true, branch: "main", files: [{ label: "conflicted" }, { label: "modified" }] })!;
+    expect(g.dirtyCount).toBe(2);
+    expect(g.blocked).toBe(true);
   });
 });
 

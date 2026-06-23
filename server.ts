@@ -26,6 +26,7 @@ import { createSessionUiStateStore, defaultSessionUiState } from "./server/sessi
 import { createSettingsStore } from "./server/settings.js";
 import { createRepoStatusCache, gitIsAncestor as gitIsAncestorImpl } from "./server/rollups/gitDod.js";
 import { createProjectRegistryStore, RegistryError } from "./server/rollups/registry.js";
+import { assembleRollups } from "./server/rollups/rollup.js";
 import type { PiWebFooter, PiWebHeaderAction, PiWebUi } from "./src/extensions.js";
 import type { PiWebSession } from "./server/types.js";
 // Pull the rollups types into the typecheck graph now; the registry store +
@@ -2599,6 +2600,34 @@ const server = createServer(async (req, res) => {
           }
           throw error;
         }
+      }
+
+      // ---- Project Rollups: the dashboard feed (S3) ----------------------
+      // Joins the registry with live sessions, evaluates DoD (git inline, command
+      // EXCLUDED — never spawned here), and computes ProgressSnapshot + counts.
+      // Each distinct repo root is loaded once through cachedGitStatus's TTL cache.
+      // Never throws on a messy session — the join defaults every optional field.
+      if (
+        method === "GET" &&
+        (url.pathname === "/api/rollups" ||
+          (seg[0] === "api" && seg[1] === "rollups" && seg.length === 3))
+      ) {
+        const [registry, sessionUiState] = await Promise.all([
+          projectRegistryStore.read(),
+          sessionUiStateStore.read(),
+        ]);
+        const sessionInfos = applySessionUnreadState(await listSessionInfos(), sessionUiState);
+        const rollups = await assembleRollups(registry, sessionInfos as any, {
+          gitStatusFor: (cwd) => cachedGitStatus(cwd).catch(() => undefined),
+          isAncestor: (ancestor, into, cwd) => gitIsAncestor(ancestor, into, cwd),
+        });
+        if (seg.length === 3) {
+          const projectId = decodeURIComponent(seg[2]);
+          const one = rollups.find((rollup) => rollup.project.id === projectId);
+          if (!one) return sendJson(res, 404, { ok: false, error: "Project not found" });
+          return sendJson(res, 200, { ok: true, rollup: one });
+        }
+        return sendJson(res, 200, { ok: true, rollups });
       }
 
       if (method === "POST" && url.pathname === "/api/sessions/delete") {

@@ -6,7 +6,9 @@
 // file with the /api/rollups join cases.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { isAbsolute } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { isAbsolute, join } from "node:path";
 
 import {
   openRealtime,
@@ -14,6 +16,15 @@ import {
   type RealtimeCollector,
   type RollupServer,
 } from "./helpers/rollupHarness.js";
+import {
+  checkout,
+  checkoutNew,
+  commitFile,
+  initRepo,
+  makeDirty,
+  mergeNoFf,
+  renameBranch,
+} from "./helpers/gitRepo.js";
 
 describe("rollups registry CRUD routes", () => {
   let server: RollupServer;
@@ -162,6 +173,133 @@ describe("rollups registry CRUD routes", () => {
 
     const wsDod = await server.api("PUT", "/api/workstreams/missing/dod", { criteria: [] });
     expect(wsDod.status).toBe(404);
+  });
+});
+
+describe("GET /api/rollups (the dashboard feed, S3)", () => {
+  let server: RollupServer;
+  let repo: string;
+  let projectId: string;
+  let gitWsId: string;
+  let cmdWsId: string;
+
+  // helpers to dig into the rollup feed
+  const getRollups = async () => {
+    const res = await server.api("GET", "/api/rollups");
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    return res.body.rollups as any[];
+  };
+  const findProject = (rollups: any[]) => rollups.find((r) => r.project.id === projectId);
+  const findWs = (project: any, id: string) =>
+    project.workstreams.find((w: any) => w.workstream.id === id);
+  const critOf = (progress: any, kind: string) =>
+    (progress?.criteria || []).find((c: any) => c.sourceKind === kind);
+
+  beforeAll(async () => {
+    // A temp repo sitting on feat/x with main present (clean working tree).
+    repo = await mkdtemp(join(tmpdir(), "rollups-feed-repo-"));
+    await initRepo(repo);
+    await commitFile(repo, "README.md", "base\n", "base");
+    await renameBranch(repo, "main");
+    await checkoutNew(repo, "feat/x");
+    await commitFile(repo, "feature.txt", "feature\n", "feature work");
+
+    // A 1ms TTL so each GET reads fresh git state (we mutate the repo between
+    // GETs). "0" can't be used — the server's `Number(env) || 3000` treats it as
+    // falsy and falls back to the 3s default.
+    server = await startServer({ extraEnv: { PI_WEB_GIT_CACHE_TTL_MS: "1" } });
+
+    const project = await server.api("POST", "/api/projects", { name: "Feed", roots: [repo] });
+    expect(project.status).toBe(201);
+    projectId = project.body.project.id;
+
+    const gitWs = await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "ship" });
+    gitWsId = gitWs.body.workstream.id;
+    // Homogeneous git DoD (+ a manual sign-off gate, which is excluded from the
+    // family check so the ring stays a single proportional git ring).
+    await server.api("PUT", `/api/workstreams/${gitWsId}/dod`, {
+      criteria: [
+        { text: "Working tree clean", source: { kind: "git_clean" } },
+        { text: "feat/x merged into main", source: { kind: "git_merged", into: "main" } },
+        { text: "Reviewer signs off", source: { kind: "manual" }, gate: true },
+      ],
+    });
+
+    const cmdWs = await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "verify" });
+    cmdWsId = cmdWs.body.workstream.id;
+    await server.api("PUT", `/api/workstreams/${cmdWsId}/dod`, {
+      criteria: [{ text: "tests pass", source: { kind: "command", cwd: repo, cmd: "exit 0" } }],
+    });
+  }, 30_000);
+
+  afterAll(async () => {
+    await server?.stop();
+    if (repo) await rm(repo, { recursive: true, force: true });
+  });
+
+  it("evaluates git criteria inline; clean tree met, unmerged branch unmet → percent 0", async () => {
+    const project = findProject(await getRollups());
+    expect(project).toBeTruthy();
+    const ws = findWs(project, gitWsId);
+
+    // git_clean is met (clean tree) but root-scoped OUT of the percent; the only
+    // evaluable run criterion is git_merged, which is not yet an ancestor of main.
+    expect(critOf(ws.progress, "git_clean").met).toBe(true);
+    expect(critOf(ws.progress, "git_merged").met).toBe(false);
+    expect(ws.progress.percent).toBe(0);
+    expect(ws.progress.allMet).toBe(false);
+  });
+
+  it("never spawns a command on the render path — command criteria are unrun + excluded", async () => {
+    const project = findProject(await getRollups());
+    const ws = findWs(project, cmdWsId);
+    const cmd = critOf(ws.progress, "command");
+    expect(cmd.unrun).toBe(true);
+    expect(cmd.met).toBe(false);
+    expect(cmd.evidence).toMatch(/not yet run/i);
+    expect(ws.progress.percent).toBe(0);
+    expect(ws.progress.unrun).toBe(1);
+  });
+
+  it("git_merged flips true once feat/x is an ancestor of main → percent climbs to 100", async () => {
+    await checkout(repo, "main");
+    await mergeNoFf(repo, "feat/x");
+    await checkout(repo, "feat/x"); // back on the feature branch; it is now merged
+
+    const project = findProject(await getRollups());
+    const ws = findWs(project, gitWsId);
+    expect(critOf(ws.progress, "git_merged").met).toBe(true);
+    expect(ws.progress.percent).toBe(100);
+    expect(ws.progress.allMet).toBe(true); // gate excluded; no unrun/stale
+  });
+
+  it("git_clean flips false when the working tree is dirtied (fresh, uncached)", async () => {
+    await makeDirty(repo, "scratch.txt");
+    const project = findProject(await getRollups());
+    const ws = findWs(project, gitWsId);
+    expect(critOf(ws.progress, "git_clean").met).toBe(false);
+    // git_merged is a permanent fact and stays met after the tree goes dirty.
+    expect(critOf(ws.progress, "git_merged").met).toBe(true);
+  });
+
+  it("GET /api/rollups/:projectId returns a single rollup; unknown → 404", async () => {
+    const one = await server.api("GET", `/api/rollups/${projectId}`);
+    expect(one.status).toBe(200);
+    expect(one.body.rollup.project.id).toBe(projectId);
+
+    const missing = await server.api("GET", "/api/rollups/does-not-exist");
+    expect(missing.status).toBe(404);
+    expect(missing.body.ok).toBe(false);
+  });
+
+  it("rolls up an explicitly-attached real session under its workstream", async () => {
+    // The mock feed (mock-current) lives at piCwd, not the temp repo — explicit
+    // membership maps it regardless of cwd.
+    await server.api("PUT", `/api/workstreams/${gitWsId}/sessions`, { sessionIds: ["mock-current"] });
+    const project = findProject(await getRollups());
+    const ws = findWs(project, gitWsId);
+    expect(ws.sessions.map((s: any) => s.id)).toContain("mock-current");
   });
 });
 

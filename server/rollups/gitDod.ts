@@ -7,8 +7,10 @@
 //
 // S0 lands `gitIsAncestor` (the `git merge-base --is-ancestor` semantics the
 // `git_merged` criterion needs) plus the per-repo-root TTL cache that keeps
-// `/api/rollups` from re-spawning git per session. `evalGitCriterion` and the
-// rest of the criterion evaluation land in S3.
+// `/api/rollups` from re-spawning git per session. S3 adds `evalGitCriterion`
+// (inline, cheap, on the render path) + `sessionGitInfo` / `gitConflicted`.
+
+import type { CriterionEval, DoDCriterion, SessionGitInfo } from "./types.js";
 
 export type GitRunner = (
   args: string[],
@@ -117,4 +119,117 @@ export function createRepoStatusCache<T extends { root?: string }>(
     size: () => store.size,
     peek: (cwd: string) => store.get(resolveKey(cwd))?.value,
   };
+}
+
+// ---- Git-derived criterion evaluation (S3, inline on the render path) --------
+
+/** The subset of `gitStatus(cwd)` that the git evaluators read. */
+export interface GitStatusLite {
+  ok?: boolean;
+  isRepo?: boolean;
+  root?: string;
+  branch?: string;
+  upstream?: string;
+  ahead?: number;
+  behind?: number;
+  files?: Array<{ label?: string }>;
+}
+
+/** A merge-base check bound to one repo root (the `git_merged` evaluator). */
+export type IsAncestorFn = (ancestor: string, into: string) => Promise<boolean>;
+
+/** True when the working tree carries a conflicted file → the session is blocked. */
+export function gitConflicted(status: GitStatusLite | undefined): boolean {
+  return Boolean(status?.isRepo) && (status?.files || []).some((f) => f?.label === "conflicted");
+}
+
+/** The per-session git facts that ride on a SessionRollup. Undefined off-repo. */
+export function sessionGitInfo(status: GitStatusLite | undefined): SessionGitInfo | undefined {
+  if (!status?.isRepo) return undefined;
+  return {
+    branch: status.branch || "",
+    ahead: Number(status.ahead || 0),
+    behind: Number(status.behind || 0),
+    dirtyCount: (status.files || []).length,
+    blocked: gitConflicted(status),
+  };
+}
+
+function evalBase(
+  criterion: DoDCriterion,
+  met: boolean,
+  evidence: string,
+  evaluatedAt: string,
+): CriterionEval {
+  const out: CriterionEval = {
+    id: criterion.id,
+    met,
+    evidence,
+    evaluatedAt,
+    sourceKind: criterion.source.kind,
+  };
+  if (criterion.gate === true) out.gate = true;
+  if (typeof criterion.weight === "number") out.weight = criterion.weight;
+  if (criterion.text) out.text = criterion.text;
+  return out;
+}
+
+/**
+ * Evaluate a single git-family criterion against a pre-loaded (cached) gitStatus
+ * for its repo root. Cheap and inline — git criteria are always FRESH on read
+ * (never `unrun`/`stale` from here; the render-path TTL is what can age them, and
+ * a MET git_merged is permanent regardless). `command` criteria are NOT handled
+ * here — they are excluded inline and evaluated on-demand via /api/dod/evaluate.
+ */
+export async function evalGitCriterion(
+  criterion: DoDCriterion,
+  status: GitStatusLite | undefined,
+  isAncestor: IsAncestorFn,
+  now: Date = new Date(),
+): Promise<CriterionEval> {
+  const at = now.toISOString();
+  const source = criterion.source;
+
+  if (!status?.isRepo) {
+    return evalBase(criterion, false, "repo unavailable (not a git repo)", at);
+  }
+
+  switch (source.kind) {
+    case "git_clean": {
+      const dirty = (status.files || []).length;
+      return evalBase(
+        criterion,
+        dirty === 0,
+        dirty === 0 ? "working tree clean" : `${dirty} uncommitted change(s)`,
+        at,
+      );
+    }
+    case "git_ahead_zero": {
+      const ahead = Number(status.ahead || 0);
+      const tracked = Boolean(status.upstream && status.upstream.trim());
+      const met = ahead === 0 && tracked;
+      const evidence = !tracked
+        ? "no upstream branch to compare against"
+        : ahead === 0
+          ? "in sync with upstream (ahead 0)"
+          : `${ahead} commit(s) ahead of upstream`;
+      return evalBase(criterion, met, evidence, at);
+    }
+    case "git_merged": {
+      const branch = status.branch || "";
+      if (!branch) return evalBase(criterion, false, "no current branch", at);
+      const merged = await isAncestor(branch, source.into);
+      return evalBase(
+        criterion,
+        merged,
+        merged
+          ? `${branch} merged into ${source.into}`
+          : `${branch} is not an ancestor of ${source.into}`,
+        at,
+      );
+    }
+    default:
+      // Not a git criterion — caller should not route it here.
+      return evalBase(criterion, false, "not a git criterion", at);
+  }
 }
