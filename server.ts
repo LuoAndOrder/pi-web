@@ -543,8 +543,11 @@ async function gitRepoRoot(cwd = piCwd): Promise<string> {
 }
 
 // Sync read of an already-resolved root for the sync invalidate path. Falls back
-// to the resolved cwd when unseen — which is exactly the key gitStatus would have
-// used, so invalidation still matches the not-yet-loaded / off-repo case.
+// to the resolved cwd when unseen. When the cwd is a not-yet-resolved SUB-directory
+// of a repo whose status was cached under its toplevel, this returns the sub-dir
+// path (not the toplevel) — but repoStatusCache.invalidate also drops any entry
+// whose stored root is an ANCESTOR of the passed key, so the stale toplevel entry
+// is still evicted (it no longer survives to the TTL on the realtime dirty path).
 function knownRepoRoot(cwd = piCwd): string {
   const key = resolve(cwd);
   return repoRootByCwd.get(key) ?? key;

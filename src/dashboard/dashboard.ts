@@ -558,6 +558,20 @@ export function createDashboard(options: {
     }
   }
 
+  // Whether a draft criterion is one the RING can score — i.e. it lands in the
+  // server's `evaluable` set (server/rollups/progress.ts: !gate && !rootScoped &&
+  // !livenessOnly). A sign-off gate, a repo-root `git_clean`, and a liveness-only
+  // `session_idle` are all excluded from the percent, so a DoD made of ONLY those
+  // produces `emptyProgress` (allMet hardcoded false) and the workstream strands at
+  // "planned" forever with no reachable sign-off. This predicate lets saveDoD refuse
+  // such a dead-end draft. Mirror the server's exclusion set exactly.
+  function isScorableCriterion(c: DraftCrit): boolean {
+    if (c.gate) return false;
+    if (c.source.kind === "git_clean") return false; // rootScoped — surfaced once at repo scope
+    if (c.source.kind === "session_idle") return false; // livenessOnly — never a completion %
+    return true;
+  }
+
   function drawerEl(): HTMLDivElement {
     let el = elements.dashboardView.querySelector<HTMLDivElement>("#dashboardDodDrawer");
     if (!el) {
@@ -710,6 +724,19 @@ export function createDashboard(options: {
     // mockup fixtures (index.html L1019) by appending a manual "you review & sign off" gate so
     // the workstream lands at "done · awaiting sign-off" and the S7 sign-off path is reachable.
     const draft = [...drawer.draft];
+    // Refuse a dead-end DoD: one made of ONLY excluded-from-percent criteria (sign-off
+    // gates, repo-root git_clean, liveness-only session_idle) computes to emptyProgress
+    // (allMet hardcoded false) server-side, so deriveUiStatus falls through to "planned"
+    // forever and the one-click sign-off path is never reachable. The auto-pair below
+    // only guarantees a GATE exists — it does NOT guarantee a criterion the ring can
+    // score — so guard before it. (A `command` IS scorable, just unrun until /api/dod/
+    // evaluate runs it, so a gate+command DoD is allowed and lands at "queued".)
+    if (!draft.some(isScorableCriterion)) {
+      showToast(
+        `Add a criterion the ring can score (a command, a git check, or a plain boolean) before the sign-off gate — a gate-only Definition of Done can never reach "done · awaiting sign-off".`,
+      );
+      return;
+    }
     if (!draft.some((c) => c.gate)) {
       draft.push({ text: "You review & sign off", source: { kind: "manual" }, gate: true });
     }

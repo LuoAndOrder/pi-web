@@ -284,6 +284,39 @@ describe("createRepoStatusCache (repo-status TTL cache)", () => {
     expect(cache.size()).toBe(0);
   });
 
+  it("invalidates a toplevel-keyed entry from a never-resolved SUB-directory cwd (realtime dirty path)", async () => {
+    // The dirty realtime path invalidates with the raw event cwd. When that cwd is
+    // a sub-dir of a repo whose status was cached under its git TOPLEVEL — and the
+    // sub-dir itself was never a cache key (so there is no entry to read the shared
+    // root from) — invalidate must still drop the toplevel entry via the
+    // ancestor-prefix check, else the stale gitStatus survives to the TTL.
+    const cache = createRepoStatusCache<FakeStatus>(
+      async () => ({ root: "/repo-root", files: [], n: 0 }),
+      { defaultTtlMs: 10_000 },
+    );
+    await cache.get("/repo-root"); // cached under the toplevel only
+    expect(cache.size()).toBe(1);
+
+    cache.invalidate("/repo-root/pkg/server"); // a deeper, never-seen sub-dir
+    expect(cache.size()).toBe(0);
+  });
+
+  it("does NOT invalidate a sibling repo that merely shares a path prefix", async () => {
+    // Prefix matching must be path-segment aware: invalidating /repo must not drop a
+    // cached /repo-other entry just because the string "/repo" prefixes "/repo-other".
+    const cache = createRepoStatusCache<FakeStatus>(
+      async (cwd) => ({ root: cwd, files: [], n: 0 }),
+      { defaultTtlMs: 10_000 },
+    );
+    await cache.get("/repo");
+    await cache.get("/repo-other");
+    expect(cache.size()).toBe(2);
+
+    cache.invalidate("/repo-other/sub"); // under /repo-other, NOT under /repo
+    expect(cache.peek("/repo")).toBeDefined(); // sibling untouched
+    expect(cache.peek("/repo-other")).toBeUndefined();
+  });
+
   it("clears every entry when invalidate() is called with no argument", async () => {
     const cache = createRepoStatusCache<FakeStatus>(
       async (cwd) => ({ root: cwd, files: [], n: 0 }),

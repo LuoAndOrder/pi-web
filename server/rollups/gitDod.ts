@@ -40,7 +40,10 @@ export async function gitIsAncestor(
 export interface RepoStatusCache<T> {
   /** Returns a cached value when fresh within ttl, else loads and caches. */
   get(cwd: string, ttlMs?: number): Promise<T>;
-  /** Drop a single root (and any sibling key sharing its resolved root); no arg clears all. */
+  /** Drop a single root (and any sibling key sharing its resolved root, plus any
+   *  entry whose stored root is an ANCESTOR of the passed cwd — so invalidating a
+   *  not-yet-resolved SUB-directory still drops the entry cached under its git
+   *  toplevel); no arg clears all. */
   invalidate(cwd?: string): void;
   /** Number of cached entries (test/inspection). */
   size(): number;
@@ -101,6 +104,15 @@ export function createRepoStatusCache<T extends { root?: string }>(
     return promise;
   }
 
+  // True when `parent` is at or above `child` in the path tree (both already
+  // resolved absolute paths). Used so invalidating a sub-directory whose git
+  // toplevel was never resolved still drops the entry cached under that toplevel.
+  function isAtOrUnder(child: string, parent: string): boolean {
+    if (!child || !parent) return false;
+    if (child === parent) return true;
+    return child.startsWith(parent.endsWith("/") ? parent : `${parent}/`);
+  }
+
   function invalidate(cwd?: string): void {
     if (cwd == null) {
       store.clear();
@@ -110,7 +122,17 @@ export function createRepoStatusCache<T extends { root?: string }>(
     const targetRoot = store.get(key)?.value.root;
     for (const [entryKey, entry] of store) {
       const root = entry.value.root;
-      if (entryKey === key || root === key || (targetRoot != null && root === targetRoot)) {
+      // Drop when: the key matches the entry directly, the entry IS the root we
+      // asked for, it shares the resolved root of a hit, OR — the case the dirty
+      // realtime path hits — the entry's stored git root is an ANCESTOR of `key`
+      // (an event cwd that is a not-yet-resolved sub-dir of a repo cached under its
+      // toplevel; without this the stale tree survives until the TTL expires).
+      if (
+        entryKey === key ||
+        root === key ||
+        (targetRoot != null && root === targetRoot) ||
+        (typeof root === "string" && isAtOrUnder(key, root))
+      ) {
         store.delete(entryKey);
       }
     }
