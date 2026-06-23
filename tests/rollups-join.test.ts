@@ -117,6 +117,34 @@ describe("mapSessionsToProjects", () => {
     expect(assignments.get("s1")).toEqual({ projectId: "B" });
   });
 
+  it("a stale explicit membership in an ARCHIVED project falls through to an active root match", () => {
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [
+        project({ id: "P", roots: ["/p"], archived: true }),
+        project({ id: "Q", roots: ["/q"] }),
+      ],
+      // s1 still carries explicit membership in archived P's workstream, but its
+      // cwd lives under active Q. It must surface under Q, not vanish.
+      workstreams: [workstream({ id: "wsP", projectId: "P", sessionIds: ["s1"] })],
+    };
+    const { assignments } = mapSessionsToProjects(registry, [session({ id: "s1", cwd: "/q/work" })]);
+    expect(assignments.get("s1")).toEqual({ projectId: "Q" });
+  });
+
+  it("a stale matchCwd on an ARCHIVED project's workstream falls through to an active root match", () => {
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [
+        project({ id: "P", roots: ["/shared"], archived: true }),
+        project({ id: "Q", roots: ["/shared/sub"] }),
+      ],
+      workstreams: [workstream({ id: "wsP", projectId: "P", matchCwd: "/shared" })],
+    };
+    const { assignments } = mapSessionsToProjects(registry, [session({ id: "s1", cwd: "/shared/sub/x" })]);
+    expect(assignments.get("s1")).toEqual({ projectId: "Q" });
+  });
+
   it("an unmatched session lands in the unassigned bucket", () => {
     const registry: ProjectRegistry = {
       version: 1,

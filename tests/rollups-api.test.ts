@@ -174,6 +174,19 @@ describe("rollups registry CRUD routes", () => {
     const wsDod = await server.api("PUT", "/api/workstreams/missing/dod", { criteria: [] });
     expect(wsDod.status).toBe(404);
   });
+
+  it("a malformed percent-sequence in a routable :id decodes to 404, not a 500", async () => {
+    // safeDecode falls back to the raw segment instead of letting decodeURIComponent
+    // throw URIError (which the outer catch would surface as a bogus 500).
+    const project = await server.api("PATCH", "/api/projects/%E0%A4%A", { name: "x" });
+    expect(project.status).toBe(404);
+
+    const workstream = await server.api("PATCH", "/api/workstreams/%", { name: "x" });
+    expect(workstream.status).toBe(404);
+
+    const criterion = await server.api("PATCH", "/api/dod/criterion/%ZZ", { met: true });
+    expect(criterion.status).toBe(404);
+  });
 });
 
 describe("GET /api/rollups (the dashboard feed, S3)", () => {

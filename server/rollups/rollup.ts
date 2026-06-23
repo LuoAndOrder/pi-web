@@ -269,11 +269,22 @@ export function mapSessionsToProjects(
   const assignments = new Map<string, SessionAssignment>();
   const unassigned: RollupSessionInput[] = [];
 
+  // Steps 1/2 must mirror step 3's archived guard (L311-322): a workstream whose
+  // PROJECT is archived is skipped by the assembly loop (L559-560), so claiming a
+  // session for it here would silently drop that session instead of letting it fall
+  // through to the next-best active match (or to unassigned).
+  const archivedProjectIds = new Set(
+    registry.projects.filter((p) => p.archived).map((p) => p.id),
+  );
+
   const wsByExplicit = new Map<string, Workstream>();
   for (const ws of registry.workstreams) {
+    if (archivedProjectIds.has(ws.projectId)) continue;
     for (const id of ws.sessionIds) if (!wsByExplicit.has(id)) wsByExplicit.set(id, ws);
   }
-  const wsWithMatch = registry.workstreams.filter((ws) => ws.matchCwd);
+  const wsWithMatch = registry.workstreams.filter(
+    (ws) => ws.matchCwd && !archivedProjectIds.has(ws.projectId),
+  );
 
   for (const session of sessions) {
     const id = typeof session.id === "string" ? session.id : "";

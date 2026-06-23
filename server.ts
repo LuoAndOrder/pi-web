@@ -138,6 +138,17 @@ async function parseJsonBody(
   }
 }
 
+// Decode a routable path segment without letting a malformed percent-sequence
+// (e.g. `%`, `%E0%A4%A`, `%ZZ`) throw URIError and surface as a bogus HTTP 500.
+// Falls back to the raw segment so a bad id simply misses every lookup → 404.
+function safeDecode(seg: string): string {
+  try {
+    return decodeURIComponent(seg);
+  } catch {
+    return seg;
+  }
+}
+
 function safeArtifactName(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^\.+/, "").slice(0, 160);
 }
@@ -491,8 +502,8 @@ const repoStatusCache = createRepoStatusCache<Awaited<ReturnType<typeof gitStatu
   },
 );
 
-async function cachedGitStatus(cwd = piCwd, ttlMs?: number) {
-  return ttlMs == null ? repoStatusCache.get(cwd) : repoStatusCache.get(cwd, ttlMs);
+async function cachedGitStatus(cwd = piCwd) {
+  return repoStatusCache.get(cwd);
 }
 
 // Models confirmed broken with this Copilot integration — tracked at runtime.
@@ -2474,7 +2485,8 @@ const server = createServer(async (req, res) => {
       // Pure registry mutations only; no rollup compute, no DoD evaluation.
       // Every mutating route emits exactly one project_registry_changed so open
       // dashboards refetch /api/projects. `:id` segments are parsed by hand (the
-      // codebase has no path-param router); decodeURIComponent guards encoded ids.
+      // codebase has no path-param router); safeDecode handles encoded ids and
+      // never throws on a malformed percent-sequence (→ raw segment → 404).
       const seg = url.pathname.split("/").filter(Boolean); // ["api", "projects", "<id>", ...]
 
       if (method === "GET" && url.pathname === "/api/projects") {
@@ -2496,7 +2508,7 @@ const server = createServer(async (req, res) => {
 
       // /api/projects/:id  (PATCH update, DELETE)
       if (seg[0] === "api" && seg[1] === "projects" && seg.length === 3) {
-        const projectId = decodeURIComponent(seg[2]);
+        const projectId = safeDecode(seg[2]);
         if (method === "PATCH") {
           const parsed = await parseJsonBody(req, res);
           if (!parsed.ok) return;
@@ -2521,7 +2533,7 @@ const server = createServer(async (req, res) => {
         && seg.length === 4
         && seg[3] === "workstreams"
       ) {
-        const projectId = decodeURIComponent(seg[2]);
+        const projectId = safeDecode(seg[2]);
         const parsed = await parseJsonBody(req, res);
         if (!parsed.ok) return;
         const result = await projectRegistryStore.createWorkstream(projectId, parsed.body);
@@ -2537,7 +2549,7 @@ const server = createServer(async (req, res) => {
         && seg[1] === "workstreams"
         && seg.length === 3
       ) {
-        const workstreamId = decodeURIComponent(seg[2]);
+        const workstreamId = safeDecode(seg[2]);
         const parsed = await parseJsonBody(req, res);
         if (!parsed.ok) return;
         const result = await projectRegistryStore.updateWorkstream(workstreamId, parsed.body);
@@ -2554,7 +2566,7 @@ const server = createServer(async (req, res) => {
         && seg.length === 4
         && seg[3] === "sessions"
       ) {
-        const workstreamId = decodeURIComponent(seg[2]);
+        const workstreamId = safeDecode(seg[2]);
         const parsed = await parseJsonBody(req, res);
         if (!parsed.ok) return;
         const result = await projectRegistryStore.setWorkstreamSessions(workstreamId, parsed.body.sessionIds);
@@ -2571,7 +2583,7 @@ const server = createServer(async (req, res) => {
         && seg.length === 4
         && seg[3] === "dod"
       ) {
-        const workstreamId = decodeURIComponent(seg[2]);
+        const workstreamId = safeDecode(seg[2]);
         const parsed = await parseJsonBody(req, res);
         if (!parsed.ok) return;
         const result = await projectRegistryStore.setWorkstreamDoD(workstreamId, parsed.body.criteria);
@@ -2588,7 +2600,7 @@ const server = createServer(async (req, res) => {
         && seg[2] === "criterion"
         && seg.length === 4
       ) {
-        const criterionId = decodeURIComponent(seg[3]);
+        const criterionId = safeDecode(seg[3]);
         const parsed = await parseJsonBody(req, res);
         if (!parsed.ok) return;
         try {
@@ -2627,7 +2639,7 @@ const server = createServer(async (req, res) => {
           isAncestor: (ancestor, into, cwd) => gitIsAncestor(ancestor, into, cwd).catch(() => false),
         });
         if (seg.length === 3) {
-          const projectId = decodeURIComponent(seg[2]);
+          const projectId = safeDecode(seg[2]);
           const one = rollups.find((rollup) => rollup.project.id === projectId);
           if (!one) return sendJson(res, 404, { ok: false, error: "Project not found" });
           return sendJson(res, 200, { ok: true, rollup: one });
