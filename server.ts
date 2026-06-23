@@ -25,6 +25,7 @@ import { resolveBundledExtensionPaths, resolvePiWebExtensionPaths } from "./serv
 import { createSessionUiStateStore, defaultSessionUiState } from "./server/sessionUiState.js";
 import { createSettingsStore } from "./server/settings.js";
 import { createRepoStatusCache, gitIsAncestor as gitIsAncestorImpl } from "./server/rollups/gitDod.js";
+import { createProjectRegistryStore } from "./server/rollups/registry.js";
 import type { PiWebFooter, PiWebHeaderAction, PiWebUi } from "./src/extensions.js";
 import type { PiWebSession } from "./server/types.js";
 // Pull the rollups types into the typecheck graph now; the registry store +
@@ -1263,6 +1264,9 @@ const authStorage = AuthStorage.create();
 const modelRegistry = ModelRegistry.create(authStorage);
 const settingsStore = createSettingsStore(process.env.PI_WEB_SETTINGS_FILE || join(getAgentDir(), "pi-web-settings.json"));
 const sessionUiStateStore = createSessionUiStateStore(process.env.PI_WEB_SESSION_UI_STATE_FILE || join(getAgentDir(), "pi-web-session-ui-state.json"));
+// PI_WEB_PROJECTS_FILE mirrors PI_WEB_SESSION_UI_STATE_FILE so tests/dev never
+// clobber the real ~/.pi/agent/pi-web-projects.json. Routes land in S2-S3.
+const projectRegistryStore = createProjectRegistryStore(process.env.PI_WEB_PROJECTS_FILE || join(getAgentDir(), "pi-web-projects.json"));
 type LiveSessionEntry = {
   session: any;
   unsubscribe?: () => void;

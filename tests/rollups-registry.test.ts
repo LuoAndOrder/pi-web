@@ -1,0 +1,303 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import {
+  applyProjectRegistryPatch,
+  createProjectRegistryStore,
+  defaultProjectRegistry,
+  normalizeProjectRegistry,
+  RegistryError,
+} from "../server/rollups/registry.js";
+
+let dir: string;
+let file: string;
+
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), "rollups-registry-"));
+  file = join(dir, "pi-web-projects.json");
+});
+
+afterEach(async () => {
+  if (dir) await rm(dir, { recursive: true, force: true });
+});
+
+describe("read fallback", () => {
+  it("returns the default registry when the file is missing", async () => {
+    const store = createProjectRegistryStore(file);
+    const registry = await store.read();
+    expect(registry).toEqual({ version: 1, projects: [], workstreams: [] });
+    expect(registry).toEqual(defaultProjectRegistry);
+  });
+
+  it("falls back to default without throwing on malformed disk JSON", async () => {
+    await writeFile(file, "{ this is not json", "utf-8");
+    const store = createProjectRegistryStore(file);
+    const registry = await store.read();
+    expect(registry).toEqual(defaultProjectRegistry);
+  });
+});
+
+describe("normalization", () => {
+  it("dedupes projects/workstreams by id and drops garbage entries", () => {
+    const registry = normalizeProjectRegistry({
+      version: 99,
+      projects: [
+        { id: "p1", name: "First", roots: ["/tmp/a", "/tmp/a"] },
+        { id: "p1", name: "Duplicate (dropped)", roots: [] },
+        "garbage",
+        null,
+        42,
+      ],
+      workstreams: [
+        { id: "w1", projectId: "p1", name: "ws", order: 0 },
+        { id: "w1", projectId: "p1", name: "dup", order: 1 },
+        { id: "w-orphan", projectId: "nope", name: "orphan" },
+      ],
+    });
+    expect(registry.version).toBe(1);
+    expect(registry.projects).toHaveLength(1);
+    expect(registry.projects[0].name).toBe("First");
+    // resolve() + de-dup leaves a single absolute root
+    expect(registry.projects[0].roots).toEqual([join("/tmp/a")]);
+    expect(registry.workstreams.map((w) => w.id)).toEqual(["w1"]);
+  });
+
+  it("prunes workstreams whose projectId has no matching project and re-derives workstreamIds", () => {
+    const registry = normalizeProjectRegistry({
+      projects: [{ id: "p1", name: "P", roots: [] }],
+      workstreams: [
+        { id: "w2", projectId: "p1", name: "second", order: 2 },
+        { id: "w1", projectId: "p1", name: "first", order: 1 },
+        { id: "w-orphan", projectId: "ghost", name: "orphan" },
+      ],
+    });
+    expect(registry.workstreams.map((w) => w.id).sort()).toEqual(["w1", "w2"]);
+    // re-derived order honors the stored `order` field
+    expect(registry.projects[0].workstreamIds).toEqual(["w1", "w2"]);
+  });
+
+  it("keeps a manual `met` boolean but never persists a computed met for git/command sources", () => {
+    const registry = normalizeProjectRegistry({
+      projects: [
+        {
+          id: "p1",
+          name: "P",
+          roots: [],
+          dod: {
+            criteria: [
+              { id: "m1", text: "approved", source: { kind: "manual" }, met: true },
+              { id: "g1", text: "clean", source: { kind: "git_clean" }, met: true },
+              { id: "c1", text: "tests", source: { kind: "command", cwd: "/tmp", cmd: "true" }, met: true },
+            ],
+          },
+        },
+      ],
+      workstreams: [],
+    });
+    const criteria = registry.projects[0].dod!.criteria;
+    expect(criteria.find((c) => c.id === "m1")!.met).toBe(true);
+    expect(criteria.find((c) => c.id === "g1")!.met).toBeUndefined();
+    expect(criteria.find((c) => c.id === "c1")!.met).toBeUndefined();
+  });
+
+  it("drops criteria with an invalid/incomplete source", () => {
+    const registry = normalizeProjectRegistry({
+      projects: [
+        {
+          id: "p1",
+          name: "P",
+          roots: [],
+          dod: {
+            criteria: [
+              { id: "ok", text: "ok", source: { kind: "manual" } },
+              { id: "bad-kind", text: "x", source: { kind: "made_up" } },
+              { id: "merged-no-into", text: "x", source: { kind: "git_merged" } },
+              { id: "cmd-no-cmd", text: "x", source: { kind: "command", cwd: "/tmp" } },
+              { id: "no-source", text: "x" },
+            ],
+          },
+        },
+      ],
+      workstreams: [],
+    });
+    expect(registry.projects[0].dod!.criteria.map((c) => c.id)).toEqual(["ok"]);
+  });
+
+  it("clamps a negative weight to 0 and defaults a missing weight to 1", () => {
+    const registry = normalizeProjectRegistry({
+      projects: [
+        {
+          id: "p1",
+          name: "P",
+          roots: [],
+          dod: {
+            criteria: [
+              { id: "a", text: "a", source: { kind: "manual" }, weight: -5 },
+              { id: "b", text: "b", source: { kind: "manual" } },
+              { id: "c", text: "c", source: { kind: "manual" }, weight: 3 },
+            ],
+          },
+        },
+      ],
+      workstreams: [],
+    });
+    const byId = Object.fromEntries(registry.projects[0].dod!.criteria.map((c) => [c.id, c.weight]));
+    expect(byId).toEqual({ a: 0, b: 1, c: 3 });
+  });
+});
+
+describe("patch", () => {
+  it("normalizes and dedupes through a patch round-trip", async () => {
+    const store = createProjectRegistryStore(file);
+    const registry = await store.patch({
+      projects: [
+        { id: "p1", name: "One", roots: ["/tmp/x"] },
+        { id: "p1", name: "dup", roots: [] },
+        "junk",
+      ],
+      workstreams: [{ id: "w1", projectId: "missing", name: "orphan" }],
+    });
+    expect(registry.projects.map((p) => p.id)).toEqual(["p1"]);
+    expect(registry.workstreams).toHaveLength(0); // orphan pruned
+  });
+
+  it("applyProjectRegistryPatch leaves current untouched when patch is not a record", () => {
+    const current = normalizeProjectRegistry({ projects: [{ id: "p1", name: "P", roots: [] }] });
+    expect(applyProjectRegistryPatch(current, null)).toEqual(current);
+    expect(applyProjectRegistryPatch(current, "nope")).toEqual(current);
+  });
+});
+
+describe("atomic + serialized writes", () => {
+  it("leaves no .tmp file behind after a write", async () => {
+    const store = createProjectRegistryStore(file);
+    await store.createProject({ name: "P", roots: [dir] });
+    const entries = await readdir(dir);
+    expect(entries).toEqual(["pi-web-projects.json"]);
+    expect(entries.some((name) => name.endsWith(".tmp"))).toBe(false);
+  });
+
+  it("survives 50 concurrent patches with valid JSON and a coherent final read", async () => {
+    const store = createProjectRegistryStore(file);
+    await Promise.all(
+      Array.from({ length: 50 }, (_, i) =>
+        store.patch({ projects: [{ id: `p${i}`, name: `P${i}`, roots: [] }] }),
+      ),
+    );
+    // Each patch replaced the projects array, so the last write wins; the file
+    // must still parse and the in-memory read must match.
+    const raw = await readFile(file, "utf-8");
+    expect(() => JSON.parse(raw)).not.toThrow();
+    const onDisk = JSON.parse(raw);
+    expect(onDisk.version).toBe(1);
+    expect(Array.isArray(onDisk.projects)).toBe(true);
+    const registry = await store.read();
+    expect(registry).toEqual(normalizeProjectRegistry(onDisk));
+    // no torn temp files
+    expect((await readdir(dir)).some((name) => name.endsWith(".tmp"))).toBe(false);
+  });
+});
+
+describe("domain mutators", () => {
+  it("creates a project with resolved roots and a generated id", async () => {
+    const store = createProjectRegistryStore(file);
+    const { project } = await store.createProject({ name: "Alpha", roots: ["./rel", dir] });
+    expect(project.id).toBeTruthy();
+    expect(project.name).toBe("Alpha");
+    expect(project.roots).toContain(join(process.cwd(), "rel"));
+    expect(project.roots).toContain(dir);
+    expect(project.createdAt).toBe(project.updatedAt);
+  });
+
+  it("updates a project and returns undefined for an unknown id", async () => {
+    const store = createProjectRegistryStore(file);
+    const { project } = await store.createProject({ name: "Alpha", roots: [dir] });
+    const updated = await store.updateProject(project.id, { name: "Renamed", archived: true });
+    expect(updated?.project.name).toBe("Renamed");
+    expect(updated?.project.archived).toBe(true);
+    expect(updated?.project.updatedAt >= project.updatedAt).toBe(true);
+    expect(await store.updateProject("ghost", { name: "x" })).toBeUndefined();
+  });
+
+  it("deletes a project and drops its workstreams", async () => {
+    const store = createProjectRegistryStore(file);
+    const { project } = await store.createProject({ name: "Alpha", roots: [dir] });
+    await store.createWorkstream(project.id, { name: "auth" });
+    let registry = await store.read();
+    expect(registry.workstreams).toHaveLength(1);
+
+    const result = await store.deleteProject(project.id);
+    expect(result).toBeDefined();
+    registry = result!.registry;
+    expect(registry.projects).toHaveLength(0);
+    expect(registry.workstreams).toHaveLength(0);
+    expect(await store.deleteProject("ghost")).toBeUndefined();
+  });
+
+  it("creates workstreams, links them to the project, and assigns sequential order", async () => {
+    const store = createProjectRegistryStore(file);
+    const { project } = await store.createProject({ name: "Alpha", roots: [dir] });
+    const a = await store.createWorkstream(project.id, { name: "auth" });
+    const b = await store.createWorkstream(project.id, { name: "billing" });
+    expect(a?.workstream.order).toBe(0);
+    expect(b?.workstream.order).toBe(1);
+    const registry = await store.read();
+    expect(registry.projects[0].workstreamIds).toEqual([a!.workstream.id, b!.workstream.id]);
+    expect(await store.createWorkstream("ghost", { name: "x" })).toBeUndefined();
+  });
+
+  it("attaches sessions and sets a workstream DoD (stripping non-manual met)", async () => {
+    const store = createProjectRegistryStore(file);
+    const { project } = await store.createProject({ name: "Alpha", roots: [dir] });
+    const ws = (await store.createWorkstream(project.id, { name: "auth" }))!.workstream;
+
+    const attached = await store.setWorkstreamSessions(ws.id, ["s1", "s2", "s2", " "]);
+    expect(attached?.workstream.sessionIds).toEqual(["s1", "s2"]);
+
+    const withDod = await store.setWorkstreamDoD(ws.id, [
+      { id: "m1", text: "approved", source: { kind: "manual" }, gate: true },
+      { id: "g1", text: "merged", source: { kind: "git_merged", into: "main" }, met: true },
+    ]);
+    const criteria = withDod!.workstream.dod!.criteria;
+    expect(criteria.find((c) => c.id === "m1")!.met).toBe(false);
+    expect(criteria.find((c) => c.id === "g1")!.met).toBeUndefined();
+    expect(await store.setWorkstreamSessions("ghost", [])).toBeUndefined();
+  });
+
+  it("toggles a manual criterion and persists across a fresh store instance", async () => {
+    const store = createProjectRegistryStore(file);
+    const { project } = await store.createProject({ name: "Alpha", roots: [dir] });
+    const ws = (await store.createWorkstream(project.id, { name: "auth" }))!.workstream;
+    await store.setWorkstreamDoD(ws.id, [
+      { id: "m1", text: "approved", source: { kind: "manual" } },
+    ]);
+
+    const toggled = await store.toggleManualCriterion("m1", true);
+    expect(toggled.criterion.met).toBe(true);
+
+    // Re-open from disk: the manual boolean survives the round-trip.
+    const reopened = createProjectRegistryStore(file);
+    const registry = await reopened.read();
+    const persisted = registry.workstreams[0].dod!.criteria.find((c) => c.id === "m1");
+    expect(persisted!.met).toBe(true);
+  });
+
+  it("rejects toggling a non-manual criterion and leaves the registry unchanged", async () => {
+    const store = createProjectRegistryStore(file);
+    const { project } = await store.createProject({ name: "Alpha", roots: [dir] });
+    const ws = (await store.createWorkstream(project.id, { name: "auth" }))!.workstream;
+    await store.setWorkstreamDoD(ws.id, [
+      { id: "g1", text: "merged", source: { kind: "git_merged", into: "main" } },
+    ]);
+    const before = await store.read();
+
+    await expect(store.toggleManualCriterion("g1", true)).rejects.toBeInstanceOf(RegistryError);
+    await expect(store.toggleManualCriterion("g1", true)).rejects.toMatchObject({ code: "not_manual" });
+    await expect(store.toggleManualCriterion("missing", true)).rejects.toMatchObject({ code: "not_found" });
+
+    const after = await store.read();
+    expect(after).toEqual(before);
+  });
+});
