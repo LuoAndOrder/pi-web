@@ -75,6 +75,17 @@ button{font:inherit;cursor:pointer;color:inherit;}
    it must be legible. STILL grey, STILL a help-tooltip hedge — NEVER escalated to an amber alarm hue. */
 .subline .maybe{color:var(--muted);cursor:help;border-bottom:1px dotted color-mix(in srgb,var(--muted) 45%,transparent);}
 .subline .maybe b{color:var(--text);font-weight:650;}
+/* (round-4 adv-fix · soft-wait first-class) soft-wait is the PRODUCTION-DOMINANT stop state until a
+   structured ask_user primitive ships — so the "N may be waiting" tally gets its OWN secondary hero line
+   (a dedicated row under the subline) rather than being buried in the inline "·"-joined subBits, so
+   genuinely-stuck-but-unstructured work is visible. STILL muted grey, STILL a help hedge, with a quiet
+   "review →" jump to the idle work — NEVER escalated to the amber obligation hue or the bold "needs you" count. */
+.softline{margin-top:9px;display:flex;align-items:center;gap:9px;color:var(--muted);font-size:12px;}
+.softline .dot{width:7px;height:7px;border-radius:999px;background:var(--st-idle);flex-shrink:0;}
+.softline .maybe{color:var(--muted);cursor:help;border-bottom:1px dotted color-mix(in srgb,var(--muted) 45%,transparent);}
+.softline .maybe b{color:var(--text);font-weight:650;}
+.softline .swjump{margin-left:2px;color:var(--muted);border:1px dashed color-mix(in srgb,var(--border) 90%,transparent);border-radius:999px;padding:2px 9px;background:transparent;font-size:11px;font-weight:650;cursor:pointer;}
+.softline .swjump:hover{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--border));}
 /* since-last-visit delta (#1,#11) — demoted from a bordered band to one muted clause on the subline */
 .subline .delta{color:color-mix(in srgb,var(--muted) 90%,transparent);}
 .subline .delta::before{content:"·";margin:0 7px;color:color-mix(in srgb,var(--muted) 50%,transparent);}
@@ -253,6 +264,8 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .dotstrip .d.idle{background:transparent;box-shadow:inset 0 0 0 1.6px currentColor;color:var(--st-idle);} /* hollow ring */
 .dotstrip .d.fail{color:var(--st-fail);background:transparent;}                   /* × glyph */
 .dotstrip .d.fail::after{content:"\00d7";position:absolute;inset:-3px 0 0;font-size:12px;line-height:1;font-weight:800;text-align:center;color:var(--st-fail);}
+/* (round-4 adv-fix · #6) "+N" overflow tail for the capped dot-strip — a muted COUNT, never a status hue */
+.dotstrip .dot-more{margin-left:2px;font-size:11px;font-weight:650;color:var(--muted);letter-spacing:.01em;}
 
 /* ───────────── project grid ───────────── */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px;align-items:start;}
@@ -592,6 +605,36 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .gatepill{display:inline-flex;align-items:center;height:16px;padding:0 6px;border-radius:4px;font-size:11px;font-weight:650;color:var(--st-sign);
   border:1px solid color-mix(in srgb,var(--st-sign) 40%,transparent);margin-left:4px;}
 
+/* (round-4 adv-fix · criterion-authoring) the DoD-per-workstream primitive is load-bearing, so an unset
+   session gets a real authoring flow: add/edit/remove criteria + pick an evaluator. AUTO-computing
+   evaluators (git_merged / git_clean / git_ahead_zero / session_idle) are offered FIRST as one-tap picks
+   so most rings are grounded with ZERO human upkeep (truth-on-read, no asterisk drift); a command rule and
+   a manual boolean follow. No status hue here — authoring is neutral (#2). */
+.dodauthor{border:1px dashed color-mix(in srgb,var(--st-sign) 38%,var(--border));border-radius:12px;background:color-mix(in srgb,var(--st-sign) 6%,transparent);padding:13px 14px;margin:10px 0;}
+.dodauthor .dah{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:9px;}
+.dodauthor .grp{margin:10px 0 4px;font-size:11px;color:color-mix(in srgb,var(--muted) 85%,transparent);}
+.dodauthor .grp b{color:var(--text);font-weight:650;}
+.dodpick{display:flex;flex-wrap:wrap;gap:7px;}
+.dodpick button{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border-radius:999px;font-size:12px;font-weight:650;
+  border:1px dashed color-mix(in srgb,var(--border) 92%,transparent);background:transparent;color:var(--muted);}
+.dodpick button:hover{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--border));border-style:solid;}
+.dodpick button .ev{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:color-mix(in srgb,var(--muted) 70%,transparent);}
+/* (#2) the "auto · zero upkeep" distinction is carried by the TEXT label, not a status hue — keep it
+   neutral (a soft accent-tinted muted), so merge-green stays reserved for the MERGED status only. */
+.dodpick button.auto .ev{color:color-mix(in srgb,var(--accent) 55%,var(--muted));}
+.dodauthor .addrow{display:flex;gap:7px;margin-top:9px;}
+.dodauthor .addrow input{flex:1;min-width:0;height:30px;border:1px solid var(--border);border-radius:8px;background:var(--panel-2);color:var(--text);font:inherit;font-size:12px;padding:0 10px;outline:none;}
+.dodauthor .addrow input:focus{border-color:color-mix(in srgb,var(--accent) 45%,var(--border));}
+.dodauthor .addrow button{height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--border);background:var(--panel-2);color:var(--text);font-weight:650;font-size:12px;}
+.dodauthor .draft{list-style:none;margin:11px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;}
+.dodauthor .draft li{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--text);border:1px solid color-mix(in srgb,var(--border) 80%,transparent);border-radius:8px;padding:7px 10px;background:color-mix(in srgb,var(--panel-2) 60%,transparent);}
+.dodauthor .draft li .fam{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);border:1px solid color-mix(in srgb,var(--border) 90%,transparent);border-radius:4px;padding:1px 5px;}
+.dodauthor .draft li .grow{flex:1;}
+.dodauthor .draft li button{border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:13px;line-height:1;padding:2px 4px;}
+.dodauthor .draft li button:hover{color:var(--danger);}
+.dodauthor .saverow{display:flex;align-items:center;gap:10px;margin-top:12px;}
+.dodauthor .saverow .note{flex:1;font-size:11px;color:var(--muted);}
+
 .conv-msgs{flex:1;min-height:0;overflow:auto;padding:18px 18px 26px;display:flex;flex-direction:column;gap:0;
   -webkit-mask-image:linear-gradient(to bottom,transparent 0,black 22px,black calc(100% - 16px),transparent 100%);
   mask-image:linear-gradient(to bottom,transparent 0,black 22px,black calc(100% - 16px),transparent 100%);}
@@ -822,11 +865,28 @@ function byAttention(a,b){ return statusRank(a.status)-statusRank(b.status); }
    A never-run command criterion isn't evaluable yet; a stale one (ran, but not recently) can't back a
    100% / a sign-off promotion. isRecent() is intentionally generous; critStale() is the stricter gate. */
 function critUnrun(c){ return c.src==="command" && (!c.at || /never/i.test(c.at)); }
+/* (round-4 adv-fix) the git evaluator family (git_clean / git_ahead_zero / git_merged) is evaluated from a
+   per-repo-root gitStatus poll cached behind a TTL (DATA-MODEL §6.2, /api/rollups) — NOT re-run on every
+   render. So a git criterion can sit solid-green after the working tree goes dirty (or a branch advances)
+   within the TTL window, exactly like a stale command result. Treat a git criterion with a clock-bound
+   cached `at` older than the TTL as stale too, so git segments carry the SAME "* / (stale)" marker that
+   command criteria already do (the old asymmetry: only command crits got a stale flag). EXCEPTION: a MET
+   git_merged is a permanent fact (merge-base --is-ancestor stays true once an ancestor), so it never goes
+   stale; the mutable working-tree / branch-ahead criteria do. */
+function critGit(c){ return c.src==="git_clean" || c.src==="git_ahead_zero" || c.src==="git_merged"; }
 function critStale(c){
-  if(c.src!=="command" || c.gate || critUnrun(c)) return false;
+  if(c.gate || critUnrun(c)) return false;
   const a=(c.at||"").toLowerCase();
-  if(a==="snapshot" || a.includes("manual review") || a.includes("folder")) return false; // not a clock-bound eval
-  return /(h ago|d ago|yesterday|day|week)/.test(a);  // ran, but the cached result is old → stale
+  if(c.src==="command"){
+    if(a==="snapshot" || a.includes("manual review") || a.includes("folder")) return false; // not a clock-bound eval
+    return /(h ago|d ago|yesterday|day|week)/.test(a);  // ran, but the cached result is old → stale
+  }
+  if(critGit(c)){
+    if(c.src==="git_merged" && c.met) return false;     // a merge is permanent — never stale
+    if(!a) return false;                                // no cached timestamp → not a clock-bound eval
+    return /(h ago|d ago|yesterday|day|week)/.test(a);  // cached gitStatus older than the TTL → stale
+  }
+  return false;  // manual / agent / session_idle booleans are truth-on-read, never clock-stale
 }
 
 /* ── progress derivation (#1,#4,#5): percent over EVALUATED non-gate criteria.
@@ -1274,7 +1334,7 @@ const WORLD_MIXED = [
             dod:"branch merged into main", dodSrc:"git_merged into main",
             live:"Feature branch ready; auto-source DoD stays running until the merge lands.",
             artifact:{kind:"diff", branch:"feat/plaid", add:214, del:31, ahead:3, check:{cmd:"npm test", exit:0, at:"5m ago"}},
-            crit:[{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"5m ago"},{text:"working tree clean",met:true,src:"git_clean",ev:"dirtyCount 0"},{text:"branch merged into main",met:false,src:"git_merged",ev:"feat/plaid not ancestor of main"}]},
+            crit:[{text:"npm test → exit 0",met:true,src:"command",ev:"exit 0",at:"5m ago"},{text:"working tree clean",met:true,src:"git_clean",ev:"dirtyCount 0 (cached)",at:"2h ago"},{text:"branch merged into main",met:false,src:"git_merged",ev:"feat/plaid not ancestor of main"}]},
           { id:"m2", name:"Token refresh job", status:"run",
             dod:"npm test → exit 0 + merged", dodSrc:"rule-based",
             live:"Writing refresh cron (step 3/5).", meta:"running 6m",
@@ -1532,10 +1592,17 @@ function dodInline(dod, src){ return `${esc(dod)} ${srcTag(src)}`; }
 
 /* dot-strip: one shape-coded dot per workstream (compact rows + onboarding only, per #15) */
 function dotStrip(p){
-  return `<span class="dotstrip">`+p.workstreams.map(w=>{
+  // (round-4 adv-fix · invariant #6) CAP the strip like every sibling list (workstream/session CAP=6,
+  // grid ATTN/ACTIVE_CAP=4): the data model places NO bound on workstreams (free creation via
+  // POST /api/projects/:id/workstreams), so an un-capped strip would tile a 40-60 dot instrument-panel
+  // wall on the CALM collapsed card face — the exact wall invariant #6 forbids "at ANY scale".
+  const DCAP=12, ws=p.workstreams, shown=ws.slice(0,DCAP), extra=ws.length-shown.length;
+  const dots = shown.map(w=>{
     const cls = ST[w.status]?ST[w.status].cls:"idle";
     return `<span class="d ${cls}" title="${esc(w.name)} · ${esc((ST[w.status]||{}).label||w.status)}"></span>`;
-  }).join("")+`</span>`;
+  }).join("");
+  const tail = extra>0 ? `<span class="dot-more" title="${extra} more workstream${extra>1?"s":""} — full list below">+${extra}</span>` : "";
+  return `<span class="dotstrip">${dots}${tail}</span>`;
 }
 
 /* per-project counts */
@@ -1583,10 +1650,25 @@ function wsDone(w){ return w.status==="merge" || w.status==="sign" || (w._prog &
 /* an open-ended autonomous loop has NO terminal DoD to be "k of n" against — excluded from the project
    gauge denominator and the long pole so a perpetual loop never reads as "0 of N met DoD" (#9a). */
 function wsOpenEnded(w){ return w.status==="loop" || !!w.loop; }
-function projGauge(p){ const counted=p.workstreams.filter(w=>!wsOpenEnded(w)); const total=counted.length, done=counted.filter(wsDone).length; return {done,total,percent:total?Math.round(done/total*100):0}; }
+/* (round-4 adv-fix · C4-chaos) a workstream with ZERO Definition-of-Done criteria is structurally
+   un-completable: computeProgress returns null → a permanent "?" ring, wsDone is never true, so it would
+   pin forever as the long pole and sit in the gauge denominator as "X of N" stuck below N. First-run
+   auto-imported workstreams have no DoD and there is no authoring UI yet, so this is reachable. Treat it
+   like a loop: an HONEST "not set" surface that does NOT poison the rollup. An un-mixed workstream whose
+   aggregated criteria are empty has _prog===null AND no session-gauge; a not-yet-merged/signed one of those
+   is un-scorable. (A merged/signed ws stays scorable so a completed-without-DoD ws still counts as done.) */
+function wsEmptyDod(w){
+  if(w.status==="merge" || w.status==="sign") return false;   // terminal status is its own honest "done"
+  if(w._mixed) return false;                                  // mixed ws use the session-gauge, not crit %
+  return !w._prog;                                            // no evaluable DoD criteria → un-scorable
+}
+/* un-scorable = nothing to be "k of n" against: open-ended loops OR empty-DoD workstreams. Excluded from
+   BOTH the project gauge denominator and the long pole, so neither poisons "X of N met DoD". */
+function wsUnscorable(w){ return wsOpenEnded(w) || wsEmptyDod(w); }
+function projGauge(p){ const counted=p.workstreams.filter(w=>!wsUnscorable(w)); const total=counted.length, done=counted.filter(wsDone).length; return {done,total,percent:total?Math.round(done/total*100):0}; }
 /* the "long pole": the workstream furthest from done (most attention-urgent, then lowest progress) */
 function longPole(p){
-  const closed=p.workstreams.filter(w=>!wsOpenEnded(w));   // open-ended loops can't be a "long pole" — they never finish (#9a)
+  const closed=p.workstreams.filter(w=>!wsUnscorable(w));   // loops never finish & empty-DoD ws can't be scored (#9a, C4)
   const order=closed.slice().sort((a,b)=> byAttention(a,b) || ((a._prog?a._prog.percent:0)-(b._prog?b._prog.percent:0)));
   return order.find(w=>!wsDone(w)) || order[order.length-1] || null;
 }
@@ -1656,6 +1738,30 @@ function fleetCounts(){
   c.needs = c.block + c.fail;
   c.healthy = dorm.size;
   return c;
+}
+
+/* (round-4 adv-fix · calm-hero overflow) the obligation count is NEVER capped — if N things genuinely need
+   you, N is the truthful number. But the calm-tone hero was authored for a single-digit N; at a pathological
+   three-digit N (a correlated fleet-wide block — e.g. one expired token failing every sync) a bare "180
+   things need you." reads as the loudest alarm on the page, undercutting "calm by default". So above a
+   threshold we keep the true N but switch to a CALM frame and, when a dominant shared remedy is detectable
+   from the grounded failAction signal, name it ("…, most from <shared cause>") so a correlated surge reads
+   as ONE root cause, not 180 separate fires. No fabricated ceiling, no invented grouping — failAction is a
+   real per-session field; the cause is only named when it actually dominates the need set. */
+const NEEDS_LOUD = 12;   // below this the plain "N things need you" headline stays — it is already calm
+function needsOverflow(c){
+  if(c.needs < NEEDS_LOUD) return null;
+  // tally the dominant remedy across the live need set (failAction is the grounded remedy verb)
+  const tally={}; let withCause=0;
+  Object.values(state.SESS).forEach(({s})=>{
+    if(!isNeed(s)) return;
+    const cause=(s.failAction||"").trim();
+    if(cause){ tally[cause]=(tally[cause]||0)+1; withCause++; }
+  });
+  let top=null, topN=0; Object.keys(tally).forEach(k=>{ if(tally[k]>topN){ topN=tally[k]; top=k; } });
+  // only assert a shared cause when it actually dominates (covers a clear majority of the obligations)
+  const dominant = (top && topN >= Math.ceil(c.needs*0.55)) ? {cause:top, n:topN} : null;
+  return {n:c.needs, dominant};
 }
 
 /* since-last-visit DIGEST (#7) — a real status-transition diff against a STORED lastDashboardVisitAt,
@@ -1736,6 +1842,10 @@ function heroHtml(c){
   const day = "Sunday · 21 Jun";
   // non-elicited idle stops are a quiet tally, NEVER part of the obligation headline (spec §5.3, #5)
   const maybe = c.softwait ? `<span class="maybe" title="non-elicited idle stops — pi can't PROVE these are blocked (a free-text stop is not a structured ask), so they're a quiet tally, never inside the 'things need you' count. Until a structured ask_user primitive ships, this soft-wait state is the production-dominant case."><b>${c.softwait}</b> may be waiting</span>` : "";
+  // (round-4 adv-fix · soft-wait first-class) soft-wait is the production-dominant stop state until ask_user
+  // ships, so it gets its OWN secondary hero line with a jump to the idle work — visible, but still a muted
+  // hedge, never the amber obligation count. Rendered below the subline in BOTH hero branches.
+  const softLine = c.softwait ? `<div class="softline"><span class="dot"></span>${maybe} — pi can't prove these are blocked (free-text stops, not structured asks)<button class="swjump" data-jump="sec-proj">review idle work →</button></div>` : "";
   if(c.needs===0){
     const bits=[];
     if(c.loop) bits.push(`${c.loop} loop${c.loop>1?"s":""} running`);
@@ -1755,12 +1865,14 @@ function heroHtml(c){
       headline = `<em class="calm">Nothing needs you.</em> ${esc(runTxt)}, everything else can wait.`;
     }
     if(c.plan) subBits.push(`<b>${c.plan} planned</b>`);
-    if(maybe) subBits.push(maybe);
+    // soft-wait is NOT inlined here — it owns its dedicated secondary line (softLine) below (round-4 adv-fix)
     // "close this tab" ONLY when truly nothing is pending — no needs, no sign-offs. But never reassure
     // "close this tab" while a grounded loop has visibly run a long time (#8): state the neutral elapsed
     // fact (from the stored loopStartedAt) instead — a non-amber fact, never an invented stall/budget alarm.
     let closeTab="";
-    if(c.sign===0 && c.needs===0){
+    // (round-4 adv-fix · soft-wait) never tell the user to "close this tab" while idle work may be waiting —
+    // an unstructured stop can't be proven done either, so the soft-wait line stands instead of reassurance.
+    if(c.sign===0 && c.needs===0 && !c.softwait){
       const ll=longestLoop();
       closeTab = (ll && ll.min>=CLOSE_TAB_LOOP_MIN) ? ` Longest loop running <b>${esc(ll.label)}</b>.` : " You can close this tab.";
     }
@@ -1770,7 +1882,7 @@ function heroHtml(c){
     // otherwise the single most-read line renders an awkward "may be waiting. · Since you last looked".
     return `<div class="eyebrow">${day} · everything in one quiet view</div>
       <h1 class="headline">${headline}</h1>
-      <p class="subline">${subBits.join(" · ")}${subBits.length&&!(dc&&!closeTab)?".":""}${closeTab}${dc}</p>`;
+      <p class="subline">${subBits.join(" · ")}${subBits.length&&!(dc&&!closeTab)?".":""}${closeTab}${dc}</p>${softLine}`;
   }
   const subBits=[];
   // (#it5-p4) frame the running spread against projects that ACTUALLY have running/looping work
@@ -1789,14 +1901,28 @@ function heroHtml(c){
   // restated here, so the same obligation number is not asserted three times above the fold.
   // (#it6-p5) the planned count is likewise single-sourced: the rail Planned pill + the Planned section
   // header own it, so it is NOT restated in the needs>0 subline (mirrors how sign-off is already kept out).
-  if(maybe) subBits.push(maybe);
+  // soft-wait is NOT inlined here — it owns its dedicated secondary line (softLine) below (round-4 adv-fix).
   const dc = deltaClause(c.needs);
+  // (round-4 adv-fix · calm-hero overflow) at a pathological three-digit N (a correlated fleet-wide block)
+  // a bare "180 things need you." is the loudest alarm on the page. Keep the TRUE count N but reframe it
+  // calmly, and when a dominant shared remedy is detectable, point at the ONE root cause so the surge reads
+  // as a single thing to fix, not 180 separate fires. N is never capped or faked.
+  const ov = needsOverflow(c);
+  let needHeadline;
+  if(ov){
+    const causeClause = ov.dominant
+      ? ` — most (<b>${ov.dominant.n}</b>) clear with one fix: <b>${esc(ov.dominant.cause)}</b>.`
+      : `, but they can wait their turn.`;
+    needHeadline = `<em>A lot needs you</em> — <b>${ov.n}</b> items${causeClause}`;
+  } else {
+    needHeadline = `<em>${c.needs} ${c.needs===1?"thing needs":"things need"} you.</em> Everything else can wait.`;
+  }
   // (#it7-p6) suppress the trailing period when the delta clause follows — its own "·" separator
   // (CSS .delta::before) already divides it from the running bits, so "1 may be waiting. · Since…"
   // does not render a period jammed against the separator on the single most-read line.
   return `<div class="eyebrow">${day} · everything in one quiet view</div>
-    <h1 class="headline"><em>${c.needs} ${c.needs===1?"thing needs":"things need"} you.</em> Everything else can wait.</h1>
-    <p class="subline">${subBits.join(" · ")}${subBits.length&&!dc?".":""}${dc}</p>`;
+    <h1 class="headline">${needHeadline}</h1>
+    <p class="subline">${subBits.join(" · ")}${subBits.length&&!dc?".":""}${dc}</p>${softLine}`;
 }
 
 /* ─────────────────────────── tally rail (jump-links) ─────────────────────────── */
@@ -2319,6 +2445,13 @@ function artChip(s){
     // #13: the file count is derived from the session's own write/edit tool_result entries (no git, no PR)
     return `<span class="artchip doc" title="No repo — file count derived from this session's write/edit tool_result entries; verification is your review of the rendered notes, not a merge.">📄 ${esc(a.note)} · ${a.files} file${a.files>1?"s":""} · ${tag}</span>`;
   }
+  if(a.kind==="spark"){
+    // (round-4 adv-fix) a 'spark' is a rendered VISUAL snapshot (e.g. a chart PNG) verified by manual review,
+    // NOT a git diff — so the collapsed face chip must NOT fall through to the diff renderer and draw a
+    // fabricated git numstat (+add/−del has no source for a non-diff artifact, violates the grounding rule).
+    // Render a neutral "visual · reviewed" chip carrying ONLY the receipt identity (the rendered note), no numstat.
+    return `<span class="artchip doc" title="Visual snapshot (rendered output) — verification is your review of the rendered chart, not a git diff. No numstat: a non-diff artifact has no add/del to ground.">🖼 ${esc(a.note||'visual')} · <span class="ok">✓ visual · reviewed</span></span>`;
+  }
   const merged = a.merged;
   const diff = `<span class="add">+${a.add}</span>/<span class="del">−${a.del}</span>`;
   const head = merged ? `✓ merged · ${esc(a.sha)}` : esc(a.branch);
@@ -2513,9 +2646,9 @@ function onboardHtml(candidates){
     <div class="disc">
       pi found <b>${candidates} recent session folder${candidates>1?"s":""}</b> that look like projects. Add them with one tap:
       <div class="cands">
-        <div class="cand"><span class="candglyph" title="unregistered folder — no rollup, status or DoD computed yet" style="color:var(--muted);display:inline-flex;align-items:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="15" height="15"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></svg></span><span class="cpath mono">~/workspace/oss/pi-web</span><span class="cmeta">git · 12 sessions</span><button class="btn ghost sm">Add</button></div>
-        <div class="cand"><span class="candglyph" title="unregistered folder — no rollup, status or DoD computed yet" style="color:var(--muted);display:inline-flex;align-items:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="15" height="15"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></svg></span><span class="cpath mono">~/workspace/wealthlens</span><span class="cmeta">git · 8 sessions</span><button class="btn ghost sm">Add</button></div>
-        <div class="cand"><span class="candglyph" title="unregistered folder — no rollup, status or DoD computed yet" style="color:var(--muted);display:inline-flex;align-items:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="15" height="15"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></svg></span><span class="cpath mono">~/zippy</span><span class="cmeta">git · 5 sessions</span><button class="btn ghost sm">Add</button></div>
+        <div class="cand"><span class="candglyph" title="unregistered folder — no rollup, status or DoD computed yet" style="color:var(--muted);display:inline-flex;align-items:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="15" height="15"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></svg></span><span class="cpath mono">~/workspace/oss/pi-web</span><span class="cmeta">git · 12 sessions</span><button class="btn ghost sm" data-cand="pi-web" data-candpath="~/workspace/oss/pi-web">Add</button></div>
+        <div class="cand"><span class="candglyph" title="unregistered folder — no rollup, status or DoD computed yet" style="color:var(--muted);display:inline-flex;align-items:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="15" height="15"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></svg></span><span class="cpath mono">~/workspace/wealthlens</span><span class="cmeta">git · 8 sessions</span><button class="btn ghost sm" data-cand="wealthlens" data-candpath="~/workspace/wealthlens">Add</button></div>
+        <div class="cand"><span class="candglyph" title="unregistered folder — no rollup, status or DoD computed yet" style="color:var(--muted);display:inline-flex;align-items:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="15" height="15"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></svg></span><span class="cpath mono">~/zippy</span><span class="cmeta">git · 5 sessions</span><button class="btn ghost sm" data-cand="zippy" data-candpath="~/zippy">Add</button></div>
       </div>
     </div>` : `
     <div class="disc">No sessions yet — once you start one, pi will offer to roll its folder up into a project automatically.</div>`;
@@ -2542,9 +2675,44 @@ function onboardHtml(candidates){
     ${disc}
   </div>`;
 }
+/* (round-4 adv-fix · onboarding) the conversion flow gates ALL of the dashboard's value, so its handlers
+   must be EXERCISED, not no-ops. In the mockup these run the real intent locally: register-project adds a
+   project to the sidecar state (POST /api/projects {root}) and re-renders the live rollup; a registered
+   project's sessions roll up by cwd-prefix auto-match (matchCwd, DATA-MODEL line 185) so setup is one tap,
+   not three manual layers. A freshly registered project starts with an UNSET Definition of Done — which the
+   C4-chaos fix now keeps OUT of the gauge denominator, so an un-authored workstream shows an honest "not
+   set" state instead of poisoning the rollup. The toast names the real API the production handler calls. */
+let _obSeq=0;
+function registerProject(name, path){
+  const slug = (name||"project").toLowerCase().replace(/[^a-z0-9]+/g,"-")+"-"+(++_obSeq);
+  // a newly-registered project: one auto-inferred workstream, one session with NO DoD set yet (honest
+  // "not set" — the user authors criteria next via the unset-session "Define done" flow). cwd-prefix
+  // auto-match means existing sessions under this root would roll up here automatically in production.
+  const proj = { id:slug, name:name||"New project", path:path||"~/new-project", desc:"just registered · sessions roll up by cwd-prefix",
+    workstreams:[ { id:slug+"-w1", name:"main", dod:"", dodSrc:"unset", status:"unset",
+      sessions:[ { id:slug+"-s1", name:"first session", status:"unset", dod:"", dodSrc:"unset",
+        live:"Registered — set a Definition of Done to start tracking honest k-of-n progress.", crit:[] } ] } ] };
+  state.data.push(proj);
+  // leave the empty/first-run scenario: we now have real data, so render the full dashboard, not onboarding.
+  const sc = { label:state.scn, data:state.data };
+  enrich(state.data);
+  state.SESS={}; state.data.forEach(p=>p.workstreams.forEach(w=>w.sessions.forEach(s=>{ state.SESS[s.id]={s,w,p}; })));
+  renderAll(sc);
+  showToast(`Registered <b>${esc(name||"project")}</b> — <span class="mono">POST /api/projects {root:"${esc(path||"~/new-project")}"}</span>. Its sessions roll up by cwd-prefix; set a Definition of Done to track progress.`);
+}
+function startFirstSession(){
+  // start-session intent: in production POST /api/sessions {cwd} opens a live session that the next
+  // rollup folds into a project by cwd-prefix. Mockup surfaces the real call + drops into the canonical world.
+  showToast(`Starting a session — <span class="mono">POST /api/sessions {cwd}</span>. Once it streams its first event, pi-web offers to roll its folder up into a project automatically.`);
+  loadScenario("default");
+}
 function bindOnboard(){
-  const add=document.getElementById("obAdd"); if(add) add.onclick=()=>{};
-  const st=document.getElementById("obStart"); if(st) st.onclick=()=>{};
+  const add=document.getElementById("obAdd");
+  if(add) add.onclick=()=>registerProject("New project","~/new-project");
+  const st=document.getElementById("obStart");
+  if(st) st.onclick=startFirstSession;
+  // each discovered candidate folder registers THAT specific root on tap (one-tap cwd-prefix conversion)
+  document.querySelectorAll("[data-cand]").forEach(b=> b.onclick=()=>registerProject(b.getAttribute("data-cand"), b.getAttribute("data-candpath")));
 }
 
 /* ─────────────────────────── conversation overlay ─────────────────────────── */
@@ -2555,11 +2723,18 @@ function critListHtml(s){
   const evalFamily = {manual:"manual",command:"command",git_merged:"git",git_clean:"git",git_ahead_zero:"git",agent:"manual",session_idle:"runtime"};
   return `<div class="critlist">`+s.crit.map(c=>{
     const fam = evalFamily[c.src]||"manual";
-    const stale=critStale(c), unrun=critUnrun(c);
+    const stale=critStale(c), unrun=critUnrun(c), isGit=critGit(c);
     const root=rootScoped(c);  // git_clean → repo-root working tree, shared across co-located sessions
+    // (round-4 adv-fix) git criteria carry the SAME staleness marker command criteria do — their gitStatus
+    // is read from a per-repo-root TTL cache, so a cached `at` past the TTL is "evaluated Xm ago (stale)".
+    // The "evaluated" verb is qualified to "polled" for git so it reads as a cached-poll fact, not an exec.
+    const evalVerb = isGit ? "polled" : "evaluated";
     const atTxt = unrun ? ` <span class="stale">· not yet run — excluded from %</span>`
-      : (c.at ? ` <span class="${stale?'stale':''}">· evaluated ${esc(c.at)}${stale?' (stale)':''}</span>` : "");
-    const ev = (c.ev||unrun||c.src==="command") ? `<div class="cev">${esc(c.ev||"")}${atTxt}${c.src==="command"?` <button class="recheck" data-recheck>${recheckIcon()} re-check</button>`:""}</div>` : "";
+      : (c.at ? ` <span class="${stale?'stale':''}">· ${evalVerb} ${esc(c.at)}${stale?` (stale${isGit?' · gitStatus cache past TTL':''})`:''}</span>`
+              : (stale ? ` <span class="stale">· cached gitStatus stale — re-check</span>` : ""));
+    // git criteria (like commands) get a one-click re-check so a stale ring can be refreshed on demand (#5)
+    const recheckBtn = (c.src==="command" || (isGit && (stale || c.at))) ? ` <button class="recheck" data-recheck>${recheckIcon()} re-check</button>` : "";
+    const ev = (c.ev||unrun||c.src==="command"||(isGit&&(c.at||stale))) ? `<div class="cev">${esc(c.ev||"")}${atTxt}${recheckBtn}</div>` : "";
     // (round-2 adv-fix) render git_clean as a repo-root fact, NOT a per-session criterion: it is excluded
     // from this session's % and labelled as the shared working tree, so a clean tree is never credited to
     // one of several co-located sessions as if that session alone earned it.
@@ -2570,6 +2745,68 @@ function critListHtml(s){
       ${ev}</div>
     </div>`;
   }).join("")+`</div>`;
+}
+
+/* (round-4 adv-fix · criterion-authoring) the evaluator catalog the authoring flow picks from. AUTO-computing
+   evaluators re-evaluate on every read with ZERO human upkeep (git/session) and are offered FIRST so a new
+   workstream is grounded by default; command + manual follow. Each maps to a REAL evaluator family. */
+const DOD_EVALUATORS = [
+  {src:"git_merged",     fam:"git",     label:"Branch merged into main", auto:true,  ev:"pending — git merge-base --is-ancestor"},
+  {src:"git_clean",      fam:"git",     label:"Working tree clean",       auto:true,  ev:"pending — gitStatus(cwd)"},
+  {src:"git_ahead_zero", fam:"git",     label:"Branch fully pushed",      auto:true,  ev:"pending — git rev-list ahead count"},
+  {src:"session_idle",   fam:"runtime", label:"Session idle (loop settled)", auto:true, ev:"pending — no events for the idle window"},
+  {src:"command",        fam:"command", label:"A test/lint command exits 0", auto:false, ev:"not yet run", at:"never run"},
+  {src:"manual",         fam:"manual",  label:"A manual boolean I check",  auto:false, ev:""},
+];
+function dodAuthor(s){
+  const draft=(s.crit||[]).map((c,i)=>{
+    const fam={git_merged:"git",git_clean:"git",git_ahead_zero:"git",command:"command",session_idle:"runtime"}[c.src]||"manual";
+    return `<li><span class="fam">${fam}</span><span>${esc(c.text)}</span><span class="grow"></span><button data-critrm="${i}" title="remove criterion">✕</button></li>`;
+  }).join("");
+  const auto=DOD_EVALUATORS.filter(e=>e.auto), other=DOD_EVALUATORS.filter(e=>!e.auto);
+  const pick=arr=>arr.map(e=>`<button class="dodpick-b${e.auto?' auto':''}" data-critadd="${e.src}"><span>+ ${esc(e.label)}</span><span class="ev">${esc(e.fam)}${e.auto?' · auto':''}</span></button>`).join("");
+  return `<div class="dodauthor" data-author>
+    <div class="dah">Set the Definition of Done — add / remove criteria, pick an evaluator</div>
+    <div class="grp"><b>Auto-computing</b> · re-checked on every read, zero upkeep — these keep the ring honest with no maintenance</div>
+    <div class="dodpick">${pick(auto)}</div>
+    <div class="grp"><b>On-demand / manual</b> · a command (re-run to refresh) or a boolean you toggle</div>
+    <div class="dodpick">${pick(other)}</div>
+    <div class="addrow"><input type="text" id="critText" placeholder="…or describe a criterion in your own words"><button data-critaddtext>Add</button></div>
+    <ul class="draft">${draft||`<li style="border-style:dashed;color:var(--muted)">No criteria yet — the ring honestly shows "?" (not set), and this workstream is excluded from the project gauge until you add one.</li>`}</ul>
+    <div class="saverow"><span class="note">${(s.crit&&s.crit.length)?`${s.crit.length} criterion${s.crit.length>1?'a':''} drafted — saving starts honest k-of-n tracking.`:'Pick at least one criterion to start tracking progress.'}</span>
+      <button class="btn primary sm" data-critsave ${(s.crit&&s.crit.length)?'':'disabled style="opacity:.5;cursor:default"'}>Save Definition of Done</button></div>
+  </div>`;
+}
+/* mutate the session's criteria in place, recompute its honest progress, and re-open the conversation so
+   the ring + draft list reflect the edit immediately. No fabricated percent — _prog is derived from crit. */
+function addCriterion(s, src){
+  const e=DOD_EVALUATORS.find(x=>x.src===src); if(!e) return;
+  s.crit=(s.crit||[]).concat([{text:e.label, met:false, src:e.src, ev:e.ev||"", ...(e.at?{at:e.at}:{})}]);
+  s._prog=computeProgress(s.crit); openSession(s.id);
+}
+function addManualCriterion(s, text){
+  const t=(text||"").trim(); if(!t) return;
+  s.crit=(s.crit||[]).concat([{text:t, met:false, src:"manual", ev:""}]);
+  s._prog=computeProgress(s.crit); openSession(s.id);
+}
+function removeCriterion(s, i){
+  if(!s.crit) return; s.crit.splice(i,1); s._prog=computeProgress(s.crit); openSession(s.id);
+}
+function saveDoD(s){
+  if(!s.crit || !s.crit.length) return;
+  // promote the session out of "unset": pick a representative DoD label + evaluator family for the header,
+  // recompute progress, re-enrich the parent workstream, and re-render so the new grounded ring is live.
+  const fams=new Set(s.crit.map(c=>({git_merged:"git",git_clean:"git",git_ahead_zero:"git",command:"command",session_idle:"runtime"}[c.src]||"manual")));
+  s.dod = s.crit.length===1 ? s.crit[0].text : `${s.crit.length} criteria (k-of-n)`;
+  s.dodSrc = fams.size===1 ? [...fams][0] : "mixed";
+  s.status = "run";  // newly-authored DoD → the session is now tracking toward it
+  s.live = s.live || "Definition of Done set — tracking honest k-of-n progress.";
+  s._prog = computeProgress(s.crit);
+  enrich(state.data);
+  state.SESS={}; state.data.forEach(p=>p.workstreams.forEach(w=>w.sessions.forEach(x=>{ state.SESS[x.id]={s:x,w,p}; })));
+  renderGrid(); renderNeeds(); renderSignoff();
+  showToast(`Definition of Done saved for <b>${esc(s.name)}</b> — <span class="mono">PATCH /api/workstreams/:id/dod</span>. Auto-evaluators re-check with zero upkeep.`);
+  closeConv();
 }
 
 function transcript(s,w,p){
@@ -2606,8 +2843,8 @@ function transcript(s,w,p){
       + `<p>${esc(s.live)} I will leave results for your review and never finalize without sign-off.</p>`);
   } else if(s.status==="unset"){
     body += `<div class="m sys">No Definition of Done set for this session.</div>`;
-    body += ai(`<p>I do not have a Definition of Done for <b>${esc(s.name)}</b> yet, so I will not show a fabricated percent. Tell me what "done" means here and I will track progress against it.</p>`
-      + `<div class="q" style="border-color:color-mix(in srgb,var(--st-sign) 42%,var(--border));background:color-mix(in srgb,var(--st-sign) 9%,transparent);color:#eaddff"><b>What is the Definition of Done?</b><br>e.g. "a decision doc comparing 3 options, reviewed by me" — or pick a git / test rule.</div>`);
+    body += ai(`<p>I do not have a Definition of Done for <b>${esc(s.name)}</b> yet, so I will not show a fabricated percent. Pick what "done" means below — the auto-computing evaluators keep the ring honest with zero upkeep — or describe it in your own words.</p>`
+      + dodAuthor(s));
   } else if(s.status==="sign" || s.status==="merge"){
     const merged = s.status==="merge";
     body += userMsg(`Build ${esc(s.name)}.`);
@@ -2752,6 +2989,15 @@ function openSession(id, prefill){
   if(dodTop) dodTop.onclick=()=>document.getElementById("dodbar").classList.toggle("open");
   conv.querySelectorAll("[data-cfill]").forEach(b=> b.onclick=()=>{ ta.value=b.getAttribute("data-cfill"); ta.focus(); });
   conv.querySelectorAll("[data-recheck]").forEach(b=> b.onclick=(e)=>{ e.stopPropagation(); b.innerHTML=`${recheckIcon()} re-running…`; });
+  // (round-4 adv-fix) criterion-authoring handlers — add (auto/command/manual), free-text add, remove, save
+  conv.querySelectorAll("[data-critadd]").forEach(b=> b.onclick=()=> addCriterion(s, b.getAttribute("data-critadd")));
+  const critAddText=conv.querySelector("[data-critaddtext]");
+  if(critAddText) critAddText.onclick=()=>{ const inp=document.getElementById("critText"); if(inp){ addManualCriterion(s, inp.value); } };
+  const critTextInp=conv.querySelector("#critText");
+  if(critTextInp) critTextInp.onkeydown=(e)=>{ if(e.key==="Enter"){ e.preventDefault(); addManualCriterion(s, critTextInp.value); } };
+  conv.querySelectorAll("[data-critrm]").forEach(b=> b.onclick=()=> removeCriterion(s, parseInt(b.getAttribute("data-critrm"),10)));
+  const critSave=conv.querySelector("[data-critsave]");
+  if(critSave) critSave.onclick=()=>saveDoD(s);
   const fn=document.getElementById("focusNext"); if(fn) fn.onclick=()=>{ state.focus.i++; openSession(state.focus.ids[state.focus.i]); };
   const fd=document.getElementById("focusDone"); if(fd) fd.onclick=()=>{ state.focus=null; closeConv(); };
 
