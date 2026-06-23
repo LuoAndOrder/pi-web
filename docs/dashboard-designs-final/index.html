@@ -67,8 +67,19 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .headline em{font-style:normal;color:var(--st-block);}
 .headline em.calm{color:var(--st-run);}
 .headline em.sign{color:var(--st-sign);}  /* sign-off hero emphasis is PURPLE, never amber — status hue is honest (#2) */
+/* (round-3 vis-fix · coldstart) setup is a genuine first-run OBLIGATION (a registered project with no DoD
+   can't be tracked) — so the hero OWNS it in the INDIGO ACCENT voice (not the calm cyan "nothing needs you"
+   reassurance, and not a status alarm hue). Indigo = "this is an action for you", distinct from every status. */
+.headline em.setup{color:var(--accent);}
 .subline{color:var(--muted);font-size:13px;max-width:760px;}
 .subline b{color:var(--text);font-weight:650;}
+/* (round-3 vis-fix · coldstart) the hero's "Set a Definition of Done" affordance is the ONE real CTA on a
+   first run whose single registered project genuinely needs the user — so it must NOT be muted. It is a
+   filled indigo-accent pill (action voice), clearly louder than the old grey dashed .swjump hedge, while
+   still NOT borrowing a status hue (cyan/amber/purple/red stay reserved for status). */
+.subline .hero-setup-cta{margin-left:4px;display:inline-flex;align-items:center;gap:5px;color:#0b0f14;
+  background:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:3px 11px;font-size:12px;font-weight:800;cursor:pointer;}
+.subline .hero-setup-cta:hover{background:color-mix(in srgb,var(--accent) 88%,#fff);border-color:color-mix(in srgb,var(--accent) 88%,#fff);}
 /* "N may be waiting" — non-elicited idle stops: a quiet hedge, never the bold obligation count (#5).
    (round-2 adv-fix #C5) given a touch MORE prominence (full-muted text + a dotted help underline) than
    the old near-invisible 80%-muted italic — it is the production-dominant state until ask_user ships, so
@@ -132,9 +143,13 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .shead h2{margin:0;font-size:13px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);}
 .shead .cnt{font-size:12px;color:color-mix(in srgb,var(--muted) 75%,transparent);}
 .shead .hint{margin-left:auto;font-size:12px;color:color-mix(in srgb,var(--muted) 65%,transparent);}
+/* (round-3 vis-fix · color ration) bulk-action header buttons render in the INDIGO ACCENT, never amber.
+   Amber is reserved STRICTLY for Blocked STATUS, so an amber glance always means "blocked", never "click me"
+   (charge: "Triage all in focus" was amber, visually identical to the Blocked status pills below it). The
+   Sign-off bulk button (.hbtn.sgn) keeps purple — action != status — proving the same right pattern. */
 .shead .hbtn{margin-left:auto;display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 11px;border-radius:999px;
-  border:1px solid color-mix(in srgb,var(--st-block) 40%,var(--border));background:color-mix(in srgb,var(--st-block) 9%,transparent);color:var(--st-block);font-size:12px;font-weight:650;}
-.shead .hbtn:hover{background:color-mix(in srgb,var(--st-block) 16%,transparent);}
+  border:1px solid color-mix(in srgb,var(--accent) 40%,var(--border));background:color-mix(in srgb,var(--accent) 9%,transparent);color:var(--accent);font-size:12px;font-weight:650;}
+.shead .hbtn:hover{background:color-mix(in srgb,var(--accent) 16%,transparent);border-color:color-mix(in srgb,var(--accent) 55%,var(--border));}
 .shead .hbtn svg{width:13px;height:13px;}
 /* purple batch action for the sign-off section header (#1) */
 .shead .hbtn.sgn{border-color:color-mix(in srgb,var(--st-sign) 42%,var(--border));background:color-mix(in srgb,var(--st-sign) 10%,transparent);color:var(--st-sign);}
@@ -1917,6 +1932,13 @@ function heroHtml(c){
       headline = `<em class="sign">${c.sign} done</em> — your sign-off is all that's pending.`;
       if(c.loop) subBits.push(`<b>${c.loop} loop${c.loop>1?"s":""}</b> running`);
       if(c.run) subBits.push(`<b>${c.run} running</b>`);
+    } else if(c.setup){
+      // (round-3 vis-fix · coldstart) a registered project with no DoD is a genuine OBLIGATION, not "nothing".
+      // The hero OWNS it in the indigo-accent action voice instead of asserting "Nothing needs you" while the
+      // body shows a NEEDS SETUP group — headline and body now agree (charge: cold-start hero/body contradiction).
+      headline = `<em class="setup">${c.setup} project${c.setup>1?"s":""} need${c.setup>1?"":"s"} setup</em> — author a Definition of Done to start tracking.`;
+      if(c.loop) subBits.push(`<b>${c.loop} loop${c.loop>1?"s":""}</b> running`);
+      if(c.run) subBits.push(`<b>${c.run} running</b>`);
     } else {
       headline = `<em class="calm">Nothing needs you.</em> ${esc(runTxt)}, everything else can wait.`;
     }
@@ -1934,7 +1956,8 @@ function heroHtml(c){
       const ll=longestLoop();
       closeTab = (ll && ll.min>=CLOSE_TAB_LOOP_MIN) ? ` Longest loop running <b>${esc(ll.label)}</b>.` : " You can close this tab.";
     } else if(c.setup && c.sign===0 && c.needs===0 && !c.softwait){
-      closeTab = ` <button class="swjump" data-jump="sec-setup">set a Definition of Done →</button>`;
+      // (round-3 vis-fix · coldstart) the ONE real CTA on this first run is NOT muted — prominent indigo pill.
+      closeTab = ` <button class="hero-setup-cta" data-jump="sec-setup">Set a Definition of Done →</button>`;
     }
     const dc = deltaClause(c.needs);
     // (#it7-p6) the delta clause carries its own leading "·" separator (CSS .delta::before), so the
@@ -2059,19 +2082,23 @@ function renderNeeds(){
     const askHtml = soft
       ? `<span style="color:var(--muted)">No structured question — pi went idle (${esc(s.meta||'a while ago')}), unread. It may be waiting on you, or may simply have finished. Open to read its last message.</span>`
       : esc(s.live);
-    // (round-2 vis-fix · primary uniqueness) the FILLED cyan primary is reserved EXCLUSIVELY for "Continue the
-    // conversation" — the design's single central answer. So within NEEDS YOU only ONE button shape is the
-    // filled primary, and the eye scans straight to it:
-    //  · BLOCK (elicited) → "Continue the conversation" is the filled cyan primary; chips above prefill the composer.
-    //  · FAILED → the remedy (Re-authenticate / Re-run) is a SECONDARY outlined "remedy" button, NOT filled cyan
-    //    (continue is the wrong verb on a dead job, and a 2nd filled cyan would break the scan-to-one-answer rule);
-    //    "Open conversation" stays a ghost.
-    //  · soft idle stop → "Open conversation" ghost-equivalent (pi can't prove it's blocked, so no "continue" promise).
+    // (round-3 vis-fix · consistent primary) "Continue the conversation" is the SINGLE filled-primary answer on
+    // EVERY NEEDS YOU card — block AND failed — so the user's scan-to-one-answer reflex never breaks across the
+    // two top-tier cards they triage first (charge: the Failed card used to teach a different primary verb).
+    //  · BLOCK (elicited) → "Continue the conversation" filled primary; chips above prefill the composer.
+    //  · FAILED → "Continue the conversation" is ALSO the filled primary (answering a dead job IS the way forward:
+    //    your reply goes straight to the agent to retry/redirect). The remedy (Re-authenticate / Re-run) is DEMOTED
+    //    to a quick-reply chip that prefills the composer, so it lives inside the conversation, not as a rival primary.
+    //  · soft idle stop → "Open conversation" (pi can't prove it's blocked, so no "continue" promise).
     let actions;
     if(s.status==="fail"){
+      // demote the failed-job remedy to a quick-reply chip (prefills composer → answering IS continuing), so it
+      // is one tap inside the conversation rather than a competing outlined primary on the card face.
       const remedy = esc(s.failAction||"Re-run");
-      actions = `<button class="btn remedy" data-open="${s.id}">${recheckIcon()} ${remedy}</button>
-        <button class="btn ghost sm" data-open="${s.id}">Open conversation</button>`;
+      if(!chips){
+        chips = `<div class="qreply"><span class="qlbl">quick reply →</span><button data-reply="${s.id}" data-text="${remedy}">${remedy}</button></div>`;
+      }
+      actions = `<button class="btn primary" data-open="${s.id}">${continueIcon()} Continue the conversation</button>`;
     } else {
       actions = `<button class="btn primary" data-open="${s.id}">${continueIcon()} ${soft?"Open conversation":"Continue the conversation"}</button>`;
     }
@@ -2093,14 +2120,18 @@ function renderNeeds(){
       // (round-2 adv-fix) carry the quick-reply CHIPS into the overflow row so "answer IS continue"
       // (invariant #4) holds for the tail too — every elicited blocked item stays ONE click from an
       // inline answer, not just the top 2. Without this, items 3+ degraded to a bare Continue.
-      const rowChips = (s.elicited && s.chips && s.chips.length)
+      // (round-3 vis-fix · consistent primary) a FAILED tail item also offers its remedy as a quick-reply CHIP
+      // (prefills composer → answering IS continuing), never as a rival primary — Continue stays the one primary.
+      let rowChips = (s.elicited && s.chips && s.chips.length)
         ? `<div class="qreply rowqreply"><span class="qlbl">quick reply →</span>`+s.chips.map(q=>`<button data-reply="${s.id}" data-text="${esc(q)}">${esc(q)}</button>`).join("")+`</div>`
         : "";
-      // (round-2 vis-fix · primary uniqueness) a FAILED tail item's remedy is the SECONDARY outlined "remedy"
-      // style, not filled cyan — the filled cyan primary stays reserved for "Continue" (block items keep it).
-      const rowBtn = s.status==="fail"
-        ? `<button class="btn remedy sm" data-open="${s.id}">${recheckIcon()} ${esc(s.failAction||"Re-run")}</button>`
-        : `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} Continue</button>`;
+      if(s.status==="fail" && !rowChips){
+        const rRemedy = esc(s.failAction||"Re-run");
+        rowChips = `<div class="qreply rowqreply"><span class="qlbl">quick reply →</span><button data-reply="${s.id}" data-text="${rRemedy}">${rRemedy}</button></div>`;
+      }
+      // (round-3 vis-fix · consistent primary) EVERY overflow row's primary is the filled "Continue" — failed
+      // rows no longer teach a divergent outlined "remedy" verb (charge: divergence at the triage scan moment).
+      const rowBtn = `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} Continue</button>`;
       // (round-3 adv-fix C4) each overflow row carries a stable id + a lowercase searchable haystack
       // (project · workstream · item · live) so the "jump to item" filter can reach blocked item #100 in a
       // large backlog without scrolling 198 rows.
