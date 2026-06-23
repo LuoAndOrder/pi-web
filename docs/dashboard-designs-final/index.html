@@ -111,6 +111,12 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .pill.sign .sw{background:var(--st-sign);}
 .pill.sign .n{color:var(--st-sign);}
 .pill.sign:hover{border-color:color-mix(in srgb,var(--st-sign) 60%,var(--border));}
+/* (round-2 vis-fix · coldstart) "Needs setup" pill — actionable but NOT an alarm. Reuses the purple "?" unset
+   primitive (hollow ring swatch), distinct from the cyan reserved for running/continue. Idle-grey-but-actionable. */
+.pill.setup{color:var(--st-sign);border-color:color-mix(in srgb,var(--st-sign) 34%,var(--border));}
+.pill.setup .sw{background:transparent;box-shadow:inset 0 0 0 1.4px var(--st-sign);}
+.pill.setup .n{color:var(--st-sign);}
+.pill.setup:hover{border-color:color-mix(in srgb,var(--st-sign) 60%,var(--border));}
 /* (#9c) .pill.warn removed — there is no live stalled-loop warning pill (stall/over-budget needs an
    iteration log pi can't ground); deleting the dead rule prevents a live amber meter from silently returning. */
 /* delta digest fragments are jump-links (#7) */
@@ -135,7 +141,10 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .shead .hbtn.sgn:hover{background:color-mix(in srgb,var(--st-sign) 18%,transparent);}
 
 /* ───────────── needs you ───────────── */
-.needs{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+/* (round-2 vis-fix · hero baseline) stretch both NEEDS-YOU cards to a shared height and bottom-anchor the
+   action row (.need is a column flex; .actions gets margin-top:auto below) so the two side-by-side hero
+   cards hold ONE clean bottom baseline even when only one card carries a reply box + quick-reply chips. */
+.needs{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;align-items:stretch;}
 .needs.single{grid-template-columns:minmax(360px,620px);}  /* one need → natural width, no empty sibling (#19) */
 .need{
   position:relative;border:1px solid var(--border);border-radius:14px;
@@ -183,7 +192,9 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .qreply .qlbl{font-size:11px;color:color-mix(in srgb,var(--muted) 75%,transparent);margin-right:1px;font-weight:650;}
 .qreply button{border:1px solid var(--border);border-radius:999px;padding:5px 11px;font-size:12px;color:var(--text);background:var(--panel-2);font-weight:650;}
 .qreply button:hover{border-color:var(--accent);color:var(--accent);}
-.need .actions{display:flex;gap:8px;align-items:center;margin-top:2px;flex-wrap:wrap;}
+/* (round-2 vis-fix · hero baseline) margin-top:auto bottom-anchors the action row so the shorter card's
+   button aligns with the taller card's, giving the two stretched hero cards one shared bottom edge. */
+.need .actions{display:flex;gap:8px;align-items:center;margin-top:auto;padding-top:4px;flex-wrap:wrap;}
 .degraded{font-size:11px;color:color-mix(in srgb,var(--muted) 80%,transparent);font-style:italic;}
 
 /* compact overflow need rows (the "+N more" stepper) */
@@ -249,6 +260,11 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .btn.primary:hover{border-color:var(--accent);background:#125b8c;}
 .btn.ghost{background:transparent;color:var(--muted);}
 .btn.ghost:hover{color:var(--text);border-color:color-mix(in srgb,var(--border) 90%,transparent);}
+/* (round-2 vis-fix · primary uniqueness + color ration) "remedy" = the SECONDARY action style for Re-authenticate
+   / Re-run / Re-check. Deliberately NOT filled cyan (reserved for Continue) and NOT purple (reserved for Sign off)
+   and NOT an alarm hue — a neutral, slightly-raised outline so the one filled primary on each surface stays unique. */
+.btn.remedy{background:color-mix(in srgb,var(--panel-2) 92%,transparent);border-color:color-mix(in srgb,var(--border) 96%,var(--text));color:var(--text);font-weight:800;}
+.btn.remedy:hover{border-color:var(--accent);color:var(--text);}
 .btn.sm{height:29px;padding:0 10px;font-size:12px;}
 /* (#it1-rel) .btn.pause DELETED — its only consumer was a durable Pause control, which is a FORBIDDEN
    live element (Pause needs an orchestrator pi can't ground, carry-fwd #D). Deleting the dead rule keeps
@@ -285,7 +301,12 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .nest{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 7px;border-radius:5px;font-size:11px;font-weight:650;
   letter-spacing:0;color:var(--muted);border:1px solid color-mix(in srgb,var(--border) 92%,transparent);background:transparent;}
 /* (round-2 adv-fix #C8) the path/desc line is a single text run — clamp it like its .pp/.txt siblings. */
-.ppath{font-size:12px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* (round-2 vis-fix · truncation) the subtitle clips at a TOKEN boundary, not mid-word: the path is a
+   non-shrinking token that always renders in full; only the least-important segment (the descriptor) clips,
+   and it ellipsizes at its END so the cut never lands inside the path tail. Full string lives in title=. */
+.ppath{font-size:12px;color:var(--muted);margin-top:3px;display:flex;min-width:0;white-space:nowrap;}
+.ppath .pp-path{flex:0 0 auto;}
+.ppath .pp-desc{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;}
 .pcard-counts{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;}
 .chev{color:var(--muted);transition:transform .18s ease;display:inline-grid;place-items:center;width:20px;height:20px;}
 .pcard.open .chev{transform:rotate(90deg);}
@@ -431,7 +452,13 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .grp-h:hover{background:color-mix(in srgb,var(--text) 3%,transparent);}
 .grp-h .gt{letter-spacing:.05em;text-transform:uppercase;font-size:11px;font-weight:800;}
 .grp-h .gt.sgn{color:var(--st-sign);}
+/* (round-2 vis-fix · coldstart) "Needs setup" group heading — purple "?" family, NOT an alarm hue. */
+.grp-h .gt.sup{color:var(--st-sign);}
 .grp-h .gc{color:color-mix(in srgb,var(--muted) 75%,transparent);font-weight:450;}
+/* (round-2 vis-fix · coldstart) the inline "Set a Definition of Done" row CTA — purple-tinted ghost, sits
+   before the chevron; idle-grey-but-actionable, never cyan (cyan stays reserved for running/continue). */
+.prow .setup-cta{flex:0 0 auto;border-color:color-mix(in srgb,var(--st-sign) 38%,var(--border));color:var(--st-sign);}
+.prow .setup-cta:hover{border-color:color-mix(in srgb,var(--st-sign) 60%,var(--border));background:color-mix(in srgb,var(--st-sign) 8%,transparent);}
 .grp-h .chev{margin-left:auto;}
 .grpcard.open .grp-h .chev{transform:rotate(90deg);}
 .grp-b{display:none;border-top:1px solid color-mix(in srgb,var(--border) 60%,transparent);}
@@ -443,6 +470,11 @@ button{font:inherit;cursor:pointer;color:inherit;}
 .prow .pp{font-size:11px;color:color-mix(in srgb,var(--muted) 72%,transparent);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .prow .psum{font-size:12px;color:var(--muted);flex:0 0 auto;}
 .prow .psum b{color:color-mix(in srgb,var(--text) 85%,transparent);font-weight:650;}
+/* (round-2 vis-fix · coldstart) "needs setup" row summary — purple "?" cue (the unset primitive), idle-grey
+   text. Actionable-but-not-alarm: it reads distinctly from "healthy" without borrowing a red/amber alarm hue. */
+.prow .setup-sum{display:inline-flex;align-items:center;gap:6px;color:var(--st-sign);font-weight:650;}
+.prow .setup-sum .qmk{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:999px;
+  font-size:10px;font-weight:800;color:var(--st-sign);box-shadow:inset 0 0 0 1.4px var(--st-sign);}
 .prow.open{background:color-mix(in srgb,var(--panel-2) 60%,transparent);}
 .prow-body{display:none;background:color-mix(in srgb,var(--bg) 25%,transparent);border-top:1px solid color-mix(in srgb,var(--border) 45%,transparent);}
 .prow-body.open{display:block;}
@@ -1617,7 +1649,15 @@ function dotStrip(p){
 /* per-project counts */
 function projNeeds(p){ let you=0,fail=0,sign=0,run=0; p.workstreams.forEach(w=>w.sessions.forEach(s=>{
   if(s.status==="block" && s.elicited) you++; if(s.status==="fail") fail++; if(s.status==="sign") sign++; if(s.status==="run"||s.status==="loop") run++; })); return {you,fail,sign,run}; }
-function pClass(p){ const c=projNeeds(p); if(c.you||c.fail) return "attn"; if(c.run) return "active"; if(c.sign) return "signoff"; return "calm"; }
+/* (round-2 vis-fix · coldstart honesty) a project whose EVERY session is still `unset` has never authored a
+   Definition of Done — it has nothing to be "healthy" about. We detect it once here, reusing the same `unset`
+   status the session grain already ranks attention-worthy (STATUS_RANK gives unset rank 1, above run), so the
+   project grain stops disagreeing with the session grain. An empty project (no sessions) is NOT setup-needing. */
+function allUnset(p){ let any=false; for(const w of p.workstreams) for(const s of w.sessions){ any=true; if(s.status!=="unset") return false; } return any; }
+/* needsSetup ranks ABOVE calm but never inherits an alarm hue (it stays idle-grey / purple "?" — never red/amber).
+   It is intentionally below attn/active/signoff: a genuine obligation (block/fail) on a project still outranks
+   "go author a DoD", so a setup-needing project that ALSO has a live block still routes to attn. */
+function pClass(p){ const c=projNeeds(p); if(c.you||c.fail) return "attn"; if(c.run) return "active"; if(c.sign) return "signoff"; if(allUnset(p)) return "needsSetup"; return "calm"; }
 /* (round-3 adv-fix C3) project-level blast = the STRONGEST blast radius among its need (block/fail)
    sessions, so the attn-card cap keeps the highest-blast projects as full cards and folds the rest. Reuses
    the same heuristic blastRadius() Needs-you triages on — no new signal, just a project rollup. */
@@ -1723,6 +1763,9 @@ function renderAll(sc){
 /* projects whose only state is merged/queued — collapsed into the "Healthy & dormant" group.
    ONE canonical definition, reused by the grid, Done, Planned, rail and hero (#12). */
 function dormantIds(){ return new Set(state.data.filter(p=>pClass(p)==="calm").map(p=>p.id)); }
+/* (round-2 vis-fix · coldstart) projects that are setup-needing (every session unset, no DoD authored). Its OWN
+   group in the grid + its OWN hero pill — it must never fold into "Healthy & dormant" or count as healthy (#1). */
+function setupIds(){ return new Set(state.data.filter(p=>pClass(p)==="needsSetup").map(p=>p.id)); }
 
 function fleetCounts(){
   const c={run:0,loop:0,block:0,softwait:0,sign:0,plan:0,merge:0,fail:0,unset:0,total:0,projects:state.data.length};
@@ -1745,7 +1788,11 @@ function fleetCounts(){
   });
   c.active = c.run + c.loop;
   c.needs = c.block + c.fail;
+  // (round-2 vis-fix · coldstart) healthy = genuinely-quiet-AND-configured projects. dormantIds() already
+  // excludes needsSetup projects, so dorm.size never counts an unconfigured project as healthy. The setup
+  // tally is a PROJECT count (its own group + hero pill), distinct from the dead per-session c.unset tally.
   c.healthy = dorm.size;
+  c.setup = setupIds().size;
   return c;
 }
 
@@ -1881,9 +1928,13 @@ function heroHtml(c){
     let closeTab="";
     // (round-4 adv-fix · soft-wait) never tell the user to "close this tab" while idle work may be waiting —
     // an unstructured stop can't be proven done either, so the soft-wait line stands instead of reassurance.
-    if(c.sign===0 && c.needs===0 && !c.softwait){
+    // (round-2 vis-fix · coldstart) likewise never say "close this tab" while a project still needs setup —
+    // a no-DoD project is an open task, so we point at the setup affordance instead of reassuring done-ness.
+    if(c.sign===0 && c.needs===0 && !c.softwait && !c.setup){
       const ll=longestLoop();
       closeTab = (ll && ll.min>=CLOSE_TAB_LOOP_MIN) ? ` Longest loop running <b>${esc(ll.label)}</b>.` : " You can close this tab.";
+    } else if(c.setup && c.sign===0 && c.needs===0 && !c.softwait){
+      closeTab = ` <button class="swjump" data-jump="sec-setup">set a Definition of Done →</button>`;
     }
     const dc = deltaClause(c.needs);
     // (#it7-p6) the delta clause carries its own leading "·" separator (CSS .delta::before), so the
@@ -1952,11 +2003,15 @@ function renderRail(c){
   if(c.active)pills.push(["","Running", calm?"":c.active, "sec-proj", false]);
   if(c.plan)  pills.push(["","Planned", c.plan, "sec-planned", false]);
   if(c.merge) pills.push(["","Merged", calm?"":c.merge, "sec-done", false]);
+  // (round-2 vis-fix · coldstart) a setup-needing project gets its OWN actionable "Needs setup" pill that jumps
+  // to its group — never folded into "Healthy". It carries the purple "?" swatch (the same unset primitive the
+  // session grain uses), NOT an alarm hue and NOT cyan. It sits before Healthy so setup reads as the live item.
+  if(c.setup) pills.push(["setup","Needs setup", c.setup, "sec-setup", true]);
   if(c.healthy) pills.push(["",`Healthy · ${c.healthy} project${c.healthy>1?"s":""}`, "", "sec-healthy", false]);
-  // (#it5-p3) only assert "Everything healthy — nothing needs you" when nothing actually needs you;
-  // when needs>0 with no other pills the hero already owns the obligation, so leave the rail empty
-  // rather than contradict the "N things need you" hero directly beneath it.
-  if(!pills.length && c.needs===0) pills.push(["","Everything healthy — nothing needs you", "", "sec-proj", false]);
+  // (#it5-p3) only assert "Everything healthy — nothing needs you" when nothing actually needs you AND nothing
+  // needs setup; when needs>0 or a project is unconfigured the hero/setup-pill already own the truth, so leave
+  // the rail empty rather than contradict the "N things need you" hero or claim health for an unset project.
+  if(!pills.length && c.needs===0 && !c.setup) pills.push(["","Everything healthy — nothing needs you", "", "sec-proj", false]);
   document.getElementById("rail").innerHTML = pills.map(([cl,l,n,j,sw])=>
     `<button class="pill ${cl}" data-jump="${j}">${sw?'<span class="sw"></span>':""}${l}${n!==""?` <span class="n">${n}</span>`:""}</button>`).join("");
 }
@@ -2004,16 +2059,18 @@ function renderNeeds(){
     const askHtml = soft
       ? `<span style="color:var(--muted)">No structured question — pi went idle (${esc(s.meta||'a while ago')}), unread. It may be waiting on you, or may simply have finished. Open to read its last message.</span>`
       : esc(s.live);
-    // (round-2 adv-fix) the PRIMARY verb follows the card's situation:
-    //  · FAILED → the specific remedy (Re-authenticate / Re-run) is the primary action; "Open conversation"
-    //    demotes to a ghost secondary. "Continue the conversation" is the wrong verb on a dead job.
-    //  · BLOCK (elicited) → "Continue the conversation" stays primary — answering genuinely IS continuing,
-    //    and the chips above prefill the composer.
-    //  · soft idle stop → "Open conversation" (pi can't prove it's blocked, so no "continue" promise).
+    // (round-2 vis-fix · primary uniqueness) the FILLED cyan primary is reserved EXCLUSIVELY for "Continue the
+    // conversation" — the design's single central answer. So within NEEDS YOU only ONE button shape is the
+    // filled primary, and the eye scans straight to it:
+    //  · BLOCK (elicited) → "Continue the conversation" is the filled cyan primary; chips above prefill the composer.
+    //  · FAILED → the remedy (Re-authenticate / Re-run) is a SECONDARY outlined "remedy" button, NOT filled cyan
+    //    (continue is the wrong verb on a dead job, and a 2nd filled cyan would break the scan-to-one-answer rule);
+    //    "Open conversation" stays a ghost.
+    //  · soft idle stop → "Open conversation" ghost-equivalent (pi can't prove it's blocked, so no "continue" promise).
     let actions;
     if(s.status==="fail"){
       const remedy = esc(s.failAction||"Re-run");
-      actions = `<button class="btn primary" data-open="${s.id}">${continueIcon()} ${remedy}</button>
+      actions = `<button class="btn remedy" data-open="${s.id}">${recheckIcon()} ${remedy}</button>
         <button class="btn ghost sm" data-open="${s.id}">Open conversation</button>`;
     } else {
       actions = `<button class="btn primary" data-open="${s.id}">${continueIcon()} ${soft?"Open conversation":"Continue the conversation"}</button>`;
@@ -2039,9 +2096,10 @@ function renderNeeds(){
       const rowChips = (s.elicited && s.chips && s.chips.length)
         ? `<div class="qreply rowqreply"><span class="qlbl">quick reply →</span>`+s.chips.map(q=>`<button data-reply="${s.id}" data-text="${esc(q)}">${esc(q)}</button>`).join("")+`</div>`
         : "";
-      // a FAILED tail item gets its specific remedy as the row action; a block item keeps "Continue".
+      // (round-2 vis-fix · primary uniqueness) a FAILED tail item's remedy is the SECONDARY outlined "remedy"
+      // style, not filled cyan — the filled cyan primary stays reserved for "Continue" (block items keep it).
       const rowBtn = s.status==="fail"
-        ? `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} ${esc(s.failAction||"Re-run")}</button>`
+        ? `<button class="btn remedy sm" data-open="${s.id}">${recheckIcon()} ${esc(s.failAction||"Re-run")}</button>`
         : `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} Continue</button>`;
       // (round-3 adv-fix C4) each overflow row carries a stable id + a lowercase searchable haystack
       // (project · workstream · item · live) so the "jump to item" filter can reach blocked item #100 in a
@@ -2123,10 +2181,13 @@ function renderSignoff(){
     const crit = pending
       ? `<span class="pend">Done — pending recheck</span> · ${esc((gate&&gate.text)||s.dod)} ${srcTag(s.dodSrc)}`
       : `Done per its DoD — <span class="gk">${esc((gate&&gate.text)||s.dod)}</span> ${srcTag(s.dodSrc)}`;
+    // (round-2 vis-fix · sign-off color ration) "Re-check" is the SECONDARY outlined "remedy" style — NOT filled
+    // cyan. The cyan hue is reserved for running/continue elsewhere, so a cyan button mid-strip would jump as a
+    // different class of thing; the purple "Sign off" stays the one consistent filled primary down the column.
     const act = gone
       ? `<span style="color:var(--st-merge);font-weight:650">✓ Signed off</span>${mergeAffordance(s)}`
       : pending
-        ? `<button class="btn primary sm" data-recheckcard="${s.id}" title="command DoD evidence is older than ~1h (stale) — re-run it on demand so the ring can promote instead of resting on stale evidence (#C7)">${recheckIcon()} Re-check</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`
+        ? `<button class="btn remedy sm" data-recheckcard="${s.id}" title="command DoD evidence is older than ~1h (stale) — re-run it on demand so the ring can promote instead of resting on stale evidence (#C7)">${recheckIcon()} Re-check</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`
         : `<button class="btn sign" data-signoff="${s.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`;
     return `<article class="soff ${gone?'gone':''}">
       <div class="sleft">
@@ -2208,6 +2269,7 @@ function renderGrid(){
   const attn = state.data.filter(p=>pClass(p)==="attn");
   const active = state.data.filter(p=>pClass(p)==="active"); // no "stalled loops first" — a loop never alarms on the live view (#D)
   const dormant = state.data.filter(p=>pClass(p)==="calm");
+  const setup = state.data.filter(p=>pClass(p)==="needsSetup"); // (round-2 vis-fix) its OWN group, not "Healthy & dormant"
   let signoff = state.data.filter(p=>pClass(p)==="signoff");
 
   // never an empty grid: promote sign-off projects to full cards when nothing is attn/active
@@ -2272,6 +2334,14 @@ function renderGrid(){
   // (signoffHost / #sec-signoff) is the ONE canonical sign-off action surface — its rows carry the
   // Sign-off button. The grid group above is NAVIGATE-ONLY (rows expand / Review), so the project still
   // has a home in the grid and the count reconciles, without duplicating the sign-off action.
+  // (round-2 vis-fix · coldstart) needs-setup group — a registered project with NO Definition of Done on any
+  // workstream. Its OWN group (id=sec-setup for the rail jump), purple "?" framed and idle-grey-but-actionable;
+  // it must NEVER fold into "Healthy & dormant" or read "healthy". Each row carries a "Set a Definition of Done"
+  // affordance that opens to the existing per-session "Define done" surface.
+  if(setup.length){
+    out += `<div class="grpcard open" id="sec-setup"><div class="grp-h" data-toggle="grp"><span class="gt sup">Needs setup</span> <span class="gc">${setup.length} project${setup.length>1?"s":""} · no Definition of Done authored yet · set one to start tracking</span><span class="chev">${chevIcon()}</span></div>
+      <div class="grp-b">`+setup.map(p=>renderRow(p,{setup:true})).join("")+`</div></div>`;
+  }
   // dormant group — recency-sorted + capped with show-all (#9); id=sec-healthy for the rail jump (#10)
   if(dormant.length){
     const sorted = dormant.slice().sort((a,b)=> mergeRecency(a)-mergeRecency(b));
@@ -2381,7 +2451,7 @@ function renderCard(p){
     <div class="pcard-head" data-toggle="card">
       <div class="pcard-id">
         <div class="pname"><span class="nm">${esc(p.name)}</span> ${p.nest?`<span class="nest" title="own project root nested inside its parent — its work is NOT counted toward the parent">⤷ ${esc(p.nest)}</span>`:""}</div>
-        <div class="ppath mono">${esc(p.path)}${p.desc?` · ${esc(p.desc)}`:""}</div>
+        <div class="ppath mono" title="${esc(p.path)}${p.desc?` · ${esc(p.desc)}`:""}"><span class="pp-path">${esc(p.path)}</span>${p.desc?`<span class="pp-desc"> · ${esc(p.desc)}</span>`:""}</div>
       </div>
       <div class="pcard-counts">
         <span class="chev">${chevIcon()}</span>
@@ -2405,20 +2475,33 @@ function renderRow(p, opts){
   const o=opts||{};
   const c=projNeeds(p);
   const lv = o.live ? cardLive(p) : null;
+  const unset = !o.live && allUnset(p);   // (round-2 vis-fix · coldstart) never let an unconfigured project read "healthy"
   let sum;
   if(o.live) sum = `<span style="color:var(--st-run)">${lv.loop?'∞ ':''}live</span>`;
   else if(c.you||c.fail) sum=`<b>${c.you+c.fail}</b> need you`;   // #11: a surfaced row reads "needs you", never "healthy"
   else if(c.sign) sum=`<b>${c.sign}</b> to sign off`;
+  // (round-2 vis-fix · coldstart) a no-DoD project gets its own honest summary BEFORE the merged/queued/healthy
+  // fallthrough — purple "?" cue, never the word "healthy". One click opens to the existing "Define done" surface.
+  else if(unset) sum=`<span class="setup-sum" title="No Definition of Done authored on any workstream yet — there is nothing to be 'healthy' against. Open to set one."><span class="qmk">?</span> needs setup</span>`;
   else { const merged=p.workstreams.filter(w=>w.status==="merge").length; const q=p.workstreams.filter(w=>w.status==="queued"||w.status==="planned").length;
     sum = merged?`<b>${merged}</b> merged`+(q?` · ${q} queued`:""):(q?`<b>${q}</b> queued`:"healthy"); }
+  // (round-2 vis-fix · truncation) the path · descriptor subtitle clips via CSS ellipsis; carry the FULL string
+  // in a title so the cut text is recoverable on hover, and (in CSS) break only at the middot/word boundary.
   const ppTxt = o.live ? esc(lv.txt) : esc(p.path);
   const ppCls = o.live ? "pp" : "pp mono";
+  const ppTitle = o.live ? esc(lv.txt) : esc(p.path);
   const ws = renderWsList(p, {navOnly:o.navOnly});
+  // (round-2 vis-fix · coldstart) a setup row carries a one-click "Set a Definition of Done" action that opens to
+  // the existing per-session "Define done" surface — the affordance the judge asked for, reusing the unset session.
+  const setupAct = (o.setup && unset)
+    ? `<button class="btn ghost sm setup-cta" data-open="${firstSessId(p,["unset"])||''}">${continueIcon()} Set a Definition of Done</button>`
+    : "";
   return `<div class="prow" id="card-${p.id}" data-toggle="prow" data-rowp="${p.id}">
       ${dotStrip(p)}
       <span class="pn">${esc(p.name)}${p.nest?` <span class="nest" title="nested under its parent — counted only here, not toward the parent">⤷ ${esc(p.nest)}</span>`:""}</span>
-      <span class="${ppCls}">${ppTxt}</span>
+      <span class="${ppCls}" title="${ppTitle}">${ppTxt}</span>
       <span class="psum">${sum}</span>
+      ${setupAct}
       <span class="chev">${chevIcon()}</span>
     </div>
     <div class="prow-body" data-rowbody="${p.id}"><div class="pbody" style="display:block;border-top:0">${ws}</div></div>`;
