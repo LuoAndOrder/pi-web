@@ -18,9 +18,8 @@ import { resolve } from "node:path";
 
 import {
   computeProgress,
-  emptyProgress,
+  GIT_KINDS,
   pendingGate,
-  rootScoped,
 } from "./progress.js";
 import { deriveUiStatus, toWorkItemStatus } from "./status.js";
 import {
@@ -112,7 +111,7 @@ export function isCwdUnder(child: string, parent: string): boolean {
 
 function critFamily(kind: DoDSourceKind | undefined): "git" | "cmd" | "user" | "other" {
   if (!kind) return "other";
-  if (kind.startsWith("git")) return "git";
+  if (GIT_KINDS.has(kind)) return "git";
   if (kind === "command") return "cmd";
   if (kind === "manual" || kind === "session_idle") return "user";
   return "other";
@@ -390,13 +389,27 @@ export async function buildSessionRollup(
   return rollup;
 }
 
+/** Aggregate the criteria a workstream ring is scored against: the concatenation
+ *  of its sessions' already-evaluated criteria (DATA-MODEL §5.1 "Workstream
+ *  progress = weighted aggregate of its sessions' criteria"; mockup enrich L1525
+ *  `w._crit = w.sessions.reduce((a,s)=>a.concat(s.crit))`). This — NOT a re-eval
+ *  of the DoD at the workstream root — drives the ring, so: (a) a zero-session
+ *  workstream aggregates to `[]` → `computeProgress([])` → null → an un-scorable
+ *  "?" ring (mockup wsUnscorable) instead of a fabricated root percent, and
+ *  (b) git_merged stays honest because each session evaluated it against its OWN
+ *  cwd/branch (in buildSessionRollup), so a workstream root that merely sits on
+ *  the integration branch can't trivially satisfy "merged into main". */
+function aggregateSessionCriteria(sessions: SessionRollup[]): CriterionEval[] {
+  return sessions.flatMap((s) => s.progress?.criteria ?? s.dod?.criteria ?? []);
+}
+
 export function buildWorkstreamRollup(
   workstream: Workstream,
   sessions: SessionRollup[],
-  effectiveDoDEvals: CriterionEval[],
 ): WorkstreamRollup {
   const counts = countStatuses(sessions);
-  const mixed = isMixed(effectiveDoDEvals);
+  const aggregate = aggregateSessionCriteria(sessions);
+  const mixed = isMixed(aggregate);
 
   let progress: ProgressSnapshot | null;
   let sessionGauge: WorkstreamRollup["sessionGauge"];
@@ -406,7 +419,8 @@ export function buildWorkstreamRollup(
     const done = sessions.filter(sessionDone).length;
     sessionGauge = { done, total, percent: total ? Math.round((done / total) * 100) : 0 };
   } else {
-    progress = effectiveDoDEvals.length ? computeProgress(effectiveDoDEvals) : null;
+    // `computeProgress` returns null on an empty aggregate → un-scorable ring.
+    progress = computeProgress(aggregate);
   }
 
   const out: WorkstreamRollup = { workstream, sessions, progress, counts };
@@ -440,6 +454,59 @@ function unfiledWorkstream(project: Project): Workstream {
     order: Number.MAX_SAFE_INTEGER,
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
+  };
+}
+
+// ---- Project ring: k-of-n WORKSTREAMS done (mockup projGauge L1748) ----------
+// The project ring is NOT a blend of every workstream's criteria evaluated at the
+// project root (that double-counts inheritance and lets a trunk-checked-out root
+// fabricate a "done"). It is the share of SCORABLE workstreams that have reached
+// their DoD — exactly the mockup's collapsed project face (index.html L1735-1748).
+
+/** An open-ended autonomous loop has no terminal DoD to be "k of n" against. */
+function wsOpenEnded(w: WorkstreamRollup): boolean {
+  return Boolean(w.workstream.isLoop) || Boolean(w.loop);
+}
+
+/** A workstream has reached its DoD (mockup wsDone L1725). */
+function workstreamDone(w: WorkstreamRollup): boolean {
+  if (w.workstream.status === "done") return true;
+  if (w.progress && w.progress.allMet) return true;
+  return Boolean(w.sessionGauge && w.sessionGauge.total > 0 && w.sessionGauge.done === w.sessionGauge.total);
+}
+
+/** Un-scorable = nothing to be "k of n" against: open-ended loops OR a
+ *  non-terminal, non-mixed workstream whose aggregated DoD is empty (null ring).
+ *  Excluded from BOTH the gauge numerator and denominator so neither a perpetual
+ *  loop nor an empty-DoD/zero-session workstream poisons "X of N met DoD"
+ *  (mockup wsUnscorable / wsEmptyDod L1735-1742). */
+function wsUnscorable(w: WorkstreamRollup): boolean {
+  if (wsOpenEnded(w)) return true;
+  if (w.workstream.status === "done") return false; // terminal status is its own "done"
+  if (w.mixed) return false; // mixed ws use the session-gauge, not crit %
+  return w.progress == null; // no evaluable DoD criteria → un-scorable
+}
+
+/** The project ring as a ProgressSnapshot, computed as k-of-n scorable
+ *  workstreams done (projGauge, mockup L1748). `criteria` stays empty — the ring
+ *  aggregates workstream completion, not heterogeneous root-evaluated criteria. */
+function projectProgress(workstreams: WorkstreamRollup[]): ProgressSnapshot {
+  const counted = workstreams.filter((w) => !wsUnscorable(w));
+  const total = counted.length;
+  const done = counted.filter(workstreamDone).length;
+  const percent = total ? Math.round((done / total) * 100) : 0;
+  const allMet = total > 0 && done === total;
+  return {
+    met: done,
+    total,
+    metWeight: done,
+    totalWeight: total,
+    percent,
+    allMet,
+    unrun: 0,
+    stale: 0,
+    derivedStatus: allMet ? "done" : done > 0 ? "in_progress" : "planned",
+    criteria: [],
   };
 }
 
@@ -570,7 +637,6 @@ export async function assembleRollups(
     if (project.archived) continue;
 
     const wsBuckets = byProject.get(project.id) ?? new Map<string, RollupSessionInput[]>();
-    const projectRoot = project.roots[0];
     const orderedWorkstreams = registry.workstreams
       .filter((ws) => ws.projectId === project.id)
       .sort((a, b) => {
@@ -581,24 +647,21 @@ export async function assembleRollups(
       });
 
     const workstreamRollups: WorkstreamRollup[] = [];
-    const ownDoDEvalGroups: CriterionEval[][] = [];
 
     for (const ws of orderedWorkstreams) {
+      // The DoD is INHERITED by each session and evaluated against that session's
+      // own cwd; the workstream ring is the aggregate of those per-session evals
+      // (see buildWorkstreamRollup) — never a single re-eval at the ws root.
       const inherited = ws.dod ?? project.dod;
-      const wsRoot = ws.matchCwd || projectRoot;
-      // Workstream-scoped DoD eval (drives the ring) — evaluated once at the
-      // workstream's repo-root context.
-      const wsEvals = await evalDoD(inherited, wsRoot, ctx, undefined);
-      if (ws.dod && ws.dod.criteria.length) ownDoDEvalGroups.push(wsEvals);
-
       const sessionInputs = wsBuckets.get(ws.id) ?? [];
       const sessionRollups = await Promise.all(
         sessionInputs.map((s) => buildSessionRollup(s, inherited, ctx)),
       );
-      workstreamRollups.push(buildWorkstreamRollup(ws, sessionRollups, wsEvals));
+      workstreamRollups.push(buildWorkstreamRollup(ws, sessionRollups));
     }
 
-    // Sessions matched to the project root but no workstream → an Unfiled bucket.
+    // Sessions matched to the project root but no workstream → an Unfiled bucket
+    // (they inherit the project DoD, evaluated per-session like any other).
     const unfiledInputs = wsBuckets.get("__unfiled__") ?? [];
     if (unfiledInputs.length) {
       const ws = unfiledWorkstream(project);
@@ -606,17 +669,14 @@ export async function assembleRollups(
       const sessionRollups = await Promise.all(
         unfiledInputs.map((s) => buildSessionRollup(s, inherited, ctx)),
       );
-      const wsEvals = await evalDoD(inherited, projectRoot, ctx, undefined);
-      workstreamRollups.push(buildWorkstreamRollup(ws, sessionRollups, wsEvals));
+      workstreamRollups.push(buildWorkstreamRollup(ws, sessionRollups));
     }
 
     const allSessions = workstreamRollups.flatMap((w) => w.sessions);
 
-    // Project-level progress: project DoD + each workstream's OWN DoD (inheritance
-    // is not double-counted). Evaluated at the project root context.
-    const projectDoDEvals = await evalDoD(project.dod, projectRoot, ctx, undefined);
-    const aggregateEvals = [...projectDoDEvals, ...ownDoDEvalGroups.flat()];
-    const progress = computeProgress(aggregateEvals) ?? emptyProgress();
+    // Project ring = k-of-n scorable WORKSTREAMS done (projGauge), not a blend of
+    // every workstream's root-evaluated criteria.
+    const progress = projectProgress(workstreamRollups);
 
     const counts = sumCounts(workstreamRollups.map((w) => w.counts));
     const activeSessionCount = allSessions.filter((s) => s.runtime.isRunning).length;

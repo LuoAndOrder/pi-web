@@ -228,6 +228,31 @@ describe("assembleRollups", () => {
   });
 
   it("a homogeneous git workstream DoD → an honest k-of-n ring (clean tree = 100%)", async () => {
+    // The ring aggregates the SESSIONS' criteria (§5.1), so the DoD is exercised by
+    // a session in the workstream — each session evaluated git_ahead_zero at /a.
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["w1"] })],
+      workstreams: [
+        workstream({
+          id: "w1",
+          projectId: "A",
+          sessionIds: ["s1"],
+          dod: { criteria: [{ id: "g", text: "in sync", source: { kind: "git_ahead_zero" } }] },
+        }),
+      ],
+    };
+    const rollups = await assembleRollups(registry, [session({ id: "s1", cwd: "/a" })], cleanStub);
+    const ws = rollups[0].workstreams.find((w) => w.workstream.id === "w1")!;
+    expect(ws.mixed).toBeFalsy();
+    expect(ws.progress?.percent).toBe(100); // ahead 0 + upstream tracked
+    expect(ws.progress?.allMet).toBe(true);
+  });
+
+  it("a workstream with a DoD but ZERO sessions is un-scorable (null ring) — never a fabricated root percent", async () => {
+    // The ring aggregates its sessions' criteria; with no sessions there is nothing
+    // to score, so the ring is null (mockup wsUnscorable), NOT a percent fabricated
+    // by re-evaluating the DoD against whatever branch the ws root sits on.
     const registry: ProjectRegistry = {
       version: 1,
       projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["w1"] })],
@@ -241,9 +266,37 @@ describe("assembleRollups", () => {
     };
     const rollups = await assembleRollups(registry, [], cleanStub);
     const ws = rollups[0].workstreams.find((w) => w.workstream.id === "w1")!;
+    expect(ws.progress).toBeNull();
     expect(ws.mixed).toBeFalsy();
-    expect(ws.progress?.percent).toBe(100); // ahead 0 + upstream tracked
-    expect(ws.progress?.allMet).toBe(true);
+  });
+
+  it("the project ring is k-of-n WORKSTREAMS done (projGauge), not a root-criteria blend", async () => {
+    // w1's session reaches its DoD (git_ahead_zero met); w2's session does not
+    // (unmet manual). projGauge → 1 of 2 scorable workstreams done → 50%.
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["w1", "w2"] })],
+      workstreams: [
+        workstream({
+          id: "w1",
+          projectId: "A",
+          sessionIds: ["s1"],
+          dod: { criteria: [{ id: "g", text: "in sync", source: { kind: "git_ahead_zero" } }] },
+        }),
+        workstream({
+          id: "w2",
+          projectId: "A",
+          sessionIds: ["s2"],
+          dod: { criteria: [manual("needs review")] },
+        }),
+      ],
+    };
+    const rollups = await assembleRollups(
+      registry,
+      [session({ id: "s1", cwd: "/a" }), session({ id: "s2", cwd: "/a" })],
+      cleanStub,
+    );
+    expect(rollups[0].progress).toMatchObject({ met: 1, total: 2, percent: 50, allMet: false });
   });
 
   it("unmatched sessions are omitted from the rollup feed", async () => {
@@ -283,11 +336,12 @@ describe("assembleRollups", () => {
         workstream({
           id: "w1",
           projectId: "A",
+          sessionIds: ["s1"],
           dod: { criteria: [{ id: "g", text: "merged", source: { kind: "git_merged", into: "main" } }] },
         }),
       ],
     };
-    const rollups = await assembleRollups(registry, [], throwingStub);
+    const rollups = await assembleRollups(registry, [session({ id: "s1", cwd: "/a" })], throwingStub);
     const ws = rollups[0].workstreams.find((w) => w.workstream.id === "w1")!;
     const merged = ws.progress?.criteria.find((c) => c.sourceKind === "git_merged")!;
     expect(merged.met).toBe(false);

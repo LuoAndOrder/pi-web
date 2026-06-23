@@ -378,19 +378,16 @@ export function createProjectRegistryStore(file: string) {
     return serializeWrite(async () => {
       const current = await read();
       const now = new Date().toISOString();
-      const project: Project = {
+      // Delegate field cleanup to the normalizer (writeState re-normalizes on write
+      // anyway); only override the fields a create must control.
+      const project = normalizeProject({
+        ...source,
         id: randomUUID(),
-        name: typeof source.name === "string" ? source.name.trim() : "",
-        roots: normalizeRoots(source.roots),
         workstreamIds: [],
         createdAt: now,
         updatedAt: now,
-      };
-      if (typeof source.description === "string" && source.description.trim()) {
-        project.description = source.description.trim();
-      }
-      const dod = normalizeDoD(source.dod);
-      if (dod) project.dod = dod;
+        archived: undefined,
+      })!;
       const registry = await writeState({ ...current, projects: [...current.projects, project] });
       return { registry, project: registry.projects.find((item) => item.id === project.id)! };
     });
@@ -455,34 +452,18 @@ export function createProjectRegistryStore(file: string) {
       const current = await read();
       if (!current.projects.some((item) => item.id === projectId)) return undefined;
       const now = new Date().toISOString();
-      const explicitOrder = finiteNumber(source.order);
-      const workstream: Workstream = {
+      // Delegate field cleanup to the normalizer; only override create-controlled
+      // fields and default `order` to the sequential append position.
+      const workstream = normalizeWorkstream({
+        ...source,
         id: randomUUID(),
         projectId,
-        name: typeof source.name === "string" ? source.name.trim() : "",
-        status: normalizeStatus(source.status),
-        sessionIds: normalizeStringArray(source.sessionIds),
-        order: explicitOrder != null
-          ? explicitOrder
-          : current.workstreams.filter((item) => item.projectId === projectId).length,
         createdAt: now,
         updatedAt: now,
-      };
-      if (typeof source.description === "string" && source.description.trim()) {
-        workstream.description = source.description.trim();
+      })!;
+      if (finiteNumber(source.order) == null) {
+        workstream.order = current.workstreams.filter((item) => item.projectId === projectId).length;
       }
-      if (typeof source.matchCwd === "string" && source.matchCwd.trim()) {
-        workstream.matchCwd = resolve(source.matchCwd.trim());
-      }
-      const dod = normalizeDoD(source.dod);
-      if (dod) workstream.dod = dod;
-      if (source.isLoop === true) workstream.isLoop = true;
-      if (typeof source.loopStartedAt === "string" && source.loopStartedAt.trim()) {
-        workstream.loopStartedAt = source.loopStartedAt.trim();
-      }
-      const budget = normalizeBudget(source.budget);
-      if (budget) workstream.budget = budget;
-      if (source.paused === true) workstream.paused = true;
       const registry = await writeState({
         ...current,
         workstreams: [...current.workstreams, workstream],

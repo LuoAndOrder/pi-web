@@ -2610,6 +2610,11 @@ const server = createServer(async (req, res) => {
         const workstreamId = safeDecode(seg[2]);
         const parsed = await parseJsonBody(req, res);
         if (!parsed.ok) return;
+        // Require an explicit array so a malformed/empty body can't silently
+        // REPLACE membership with [] and report 200 OK (data loss as success).
+        if (!Array.isArray(parsed.body.sessionIds)) {
+          return sendJson(res, 400, { ok: false, error: "sessionIds must be an array" });
+        }
         const result = await projectRegistryStore.setWorkstreamSessions(workstreamId, parsed.body.sessionIds);
         if (!result) return sendJson(res, 404, { ok: false, error: "Workstream not found" });
         broadcast({ type: "project_registry_changed" });
@@ -2627,6 +2632,11 @@ const server = createServer(async (req, res) => {
         const workstreamId = safeDecode(seg[2]);
         const parsed = await parseJsonBody(req, res);
         if (!parsed.ok) return;
+        // Require an explicit array so a malformed/empty body can't silently wipe
+        // the DoD to [] and report 200 OK (data loss as success).
+        if (!Array.isArray(parsed.body.criteria)) {
+          return sendJson(res, 400, { ok: false, error: "criteria must be an array" });
+        }
         const result = await projectRegistryStore.setWorkstreamDoD(workstreamId, parsed.body.criteria);
         if (!result) return sendJson(res, 404, { ok: false, error: "Workstream not found" });
         broadcast({ type: "project_registry_changed" });

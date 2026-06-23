@@ -17,7 +17,22 @@
 //   percent   = sum(weight of met run) / sum(weight of run) * 100
 //   allMet    = run.length > 0 && all run met && unrun === 0 && stale === 0
 
-import type { CriterionEval, ProgressSnapshot, WorkItemStatus } from "./types.js";
+import type {
+  CriterionEval,
+  DoDSourceKind,
+  ProgressSnapshot,
+  WorkItemStatus,
+} from "./types.js";
+
+/** The git evaluator family, enumerated explicitly off the STRUCTURED source kind.
+ *  Shared source of truth so neither this module nor rollup.ts has to fall back to
+ *  a `kind.startsWith("git")` substring match (the fixture-only anti-pattern the
+ *  spec forbids — DATA-MODEL §5.5). */
+export const GIT_KINDS: ReadonlySet<DoDSourceKind> = new Set<DoDSourceKind>([
+  "git_clean",
+  "git_ahead_zero",
+  "git_merged",
+]);
 
 /** git_clean is a property of the REPO ROOT, not any one session — scoped OUT of
  *  the per-session percent and rendered once at repo scope (mockup L944-950). */
@@ -35,11 +50,7 @@ export function livenessOnly(c: CriterionEval): boolean {
 
 /** The git evaluator family (git_clean / git_ahead_zero / git_merged). */
 export function critGit(c: CriterionEval): boolean {
-  return (
-    c.sourceKind === "git_clean" ||
-    c.sourceKind === "git_ahead_zero" ||
-    c.sourceKind === "git_merged"
-  );
+  return c.sourceKind != null && GIT_KINDS.has(c.sourceKind);
 }
 
 /** A never-run command criterion — excluded from the denominator, drawn faint. */

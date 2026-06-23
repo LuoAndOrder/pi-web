@@ -220,8 +220,19 @@ describe("GET /api/rollups (the dashboard feed, S3)", () => {
 
     // A 1ms TTL so each GET reads fresh git state (we mutate the repo between
     // GETs). "0" can't be used — the server's `Number(env) || 3000` treats it as
-    // falsy and falls back to the 3s default.
-    server = await startServer({ extraEnv: { PI_WEB_GIT_CACHE_TTL_MS: "1" } });
+    // falsy and falls back to the 3s default. Two extra mock sessions sit INSIDE
+    // the temp repo: the workstream ring aggregates its sessions' criteria
+    // (DATA-MODEL §5.1), so each workstream needs a session in the repo for its
+    // inherited git/command DoD to be evaluated against feat/x.
+    server = await startServer({
+      extraEnv: {
+        PI_WEB_GIT_CACHE_TTL_MS: "1",
+        PI_WEB_MOCK_EXTRA_SESSIONS: JSON.stringify([
+          { id: "repo-git", cwd: repo },
+          { id: "repo-cmd", cwd: repo },
+        ]),
+      },
+    });
 
     const project = await server.api("POST", "/api/projects", { name: "Feed", roots: [repo] });
     expect(project.status).toBe(201);
@@ -238,12 +249,15 @@ describe("GET /api/rollups (the dashboard feed, S3)", () => {
         { text: "Reviewer signs off", source: { kind: "manual" }, gate: true },
       ],
     });
+    // Attach the in-repo session so the ring aggregates its (feat/x) git criteria.
+    await server.api("PUT", `/api/workstreams/${gitWsId}/sessions`, { sessionIds: ["repo-git"] });
 
     const cmdWs = await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "verify" });
     cmdWsId = cmdWs.body.workstream.id;
     await server.api("PUT", `/api/workstreams/${cmdWsId}/dod`, {
       criteria: [{ text: "tests pass", source: { kind: "command", cwd: repo, cmd: "exit 0" } }],
     });
+    await server.api("PUT", `/api/workstreams/${cmdWsId}/sessions`, { sessionIds: ["repo-cmd"] });
   }, 30_000);
 
   afterAll(async () => {

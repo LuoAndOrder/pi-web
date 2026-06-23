@@ -12,6 +12,33 @@ export function createMockHarness(options: MockSessionOptions) {
   const { piCwd, broadcast, isCurrentSession, currentState } = options;
   const mockModel = { provider: "mock", id: "model", name: "Mock Model", reasoning: true, contextWindow: 128000, maxTokens: 4096 };
 
+  // Test-only: append extra mock sessions at arbitrary cwds so a suite can place a
+  // session inside a temp git repo it controls (the built-in mocks live at piCwd).
+  // Shape: JSON array of `{ id, cwd, name? }`. Ignored when unset/malformed.
+  function extraMockSessions(): PiWebSessionInfo[] {
+    const raw = process.env.PI_WEB_MOCK_EXTRA_SESSIONS;
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter((entry) => entry && typeof entry.id === "string" && typeof entry.cwd === "string")
+        .map((entry) => ({
+          id: entry.id,
+          path: join(entry.cwd, `.mock-sessions/${entry.id}.jsonl`),
+          name: typeof entry.name === "string" ? entry.name : entry.id,
+          firstMessage: "",
+          created: new Date("2026-05-01T10:00:00Z"),
+          modified: new Date("2026-05-07T10:00:00Z"),
+          messageCount: 1,
+          allMessagesText: "",
+          cwd: entry.cwd,
+        }));
+    } catch {
+      return [];
+    }
+  }
+
   function initialMockSessions(): PiWebSessionInfo[] {
     return [
       {
@@ -36,6 +63,7 @@ export function createMockHarness(options: MockSessionOptions) {
         allMessagesText: "Review the mobile composer layout",
         cwd: piCwd,
       },
+      ...extraMockSessions(),
     ];
   }
 
