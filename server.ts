@@ -32,7 +32,14 @@ import type { PiWebFooter, PiWebHeaderAction, PiWebUi } from "./src/extensions.j
 import type { PiWebSession } from "./server/types.js";
 // Pull the rollups types into the typecheck graph now; the registry store +
 // routes (S1-S3) consume them. Type-only, erased at emit.
-import type { ProjectRegistry, ProjectRollup } from "./server/rollups/types.js";
+import type {
+  CriterionEval,
+  DoD,
+  DoDCriterion,
+  ProjectRegistry,
+  ProjectRollup,
+} from "./server/rollups/types.js";
+import { evalGitCriterion } from "./server/rollups/gitDod.js";
 
 const appDir = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const distDir = join(appDir, "dist");
@@ -545,6 +552,202 @@ function knownRepoRoot(cwd = piCwd): string {
 
 async function cachedGitStatus(cwd = piCwd) {
   return repoStatusCache.get(await gitRepoRoot(cwd));
+}
+
+// ── Command DoD evaluation (S10) — sandboxed, opt-in, on-demand ONLY ──────────
+// `command` criteria run a user-supplied shell command and are met iff its exit
+// code matches `expectExit` (default 0). They are NEVER spawned on the /api/rollups
+// render path (rollup.ts marks them `unrun` unless a cached eval is supplied); they
+// run ONLY here, behind POST /api/dod/evaluate. HARD RULES enforced:
+//   - Opt-in:    behind PI_WEB_ALLOW_DOD_COMMANDS==="1"; default off → returns an
+//                `unrun` eval ("command DoD disabled"), runs NOTHING.
+//   - Allowlist: the criterion's cwd must be under a registered project root or a
+//                known session cwd; anything else is rejected by the route (400).
+//   - Bounded:   hard timeout (default 60s, capped at 300s) + a 4 MiB maxBuffer, so a
+//                `sleep 999` is KILLED at the timeout (no hung request) and a chatty
+//                command can't exhaust memory.
+const DOD_COMMANDS_ENABLED = () => process.env.PI_WEB_ALLOW_DOD_COMMANDS === "1";
+const DEFAULT_COMMAND_TIMEOUT_MS = 60_000;
+const MAX_COMMAND_TIMEOUT_MS = 300_000;
+const COMMAND_MAX_BUFFER = 4 * 1024 * 1024;
+// A cached command result older than this is treated as STALE on the rollup render
+// path: it still shows its last exit code but can no longer back a 100% / sign-off
+// (critStale in progress.ts). Re-running it via /api/dod/evaluate refreshes the stamp.
+const COMMAND_STALE_MS = 10 * 60_000;
+
+// In-memory cache of on-demand command evals, keyed by criterion id. /api/rollups
+// reads this (with a staleness pass) so a freshly-run command shows fresh; a never-
+// run command stays `unrun` and excluded from the denominator. Not persisted — a
+// command result is recomputed on demand and must never become stored "truth".
+const commandEvalCache = new Map<string, CriterionEval>();
+
+/**
+ * Run one `command` criterion in a sandboxed child process. Met iff the exit code
+ * equals `expectExit`. A non-zero exit surfaces on the rejected error's `.code`; a
+ * timeout kill surfaces as `.killed`/`.signal` (and a non-`expectExit` code) → not
+ * met, never a hang. Returns a CriterionEval (never throws).
+ */
+async function runCommandCriterion(
+  criterion: DoDCriterion,
+  now: Date = new Date(),
+): Promise<CriterionEval> {
+  const at = now.toISOString();
+  const source = criterion.source;
+  if (source.kind !== "command") {
+    return evalGitCriterion(criterion, undefined, async () => false, now);
+  }
+  if (!DOD_COMMANDS_ENABLED()) {
+    return {
+      id: criterion.id,
+      met: false,
+      evidence: "command DoD disabled (set PI_WEB_ALLOW_DOD_COMMANDS=1 to enable)",
+      evaluatedAt: at,
+      unrun: true,
+      sourceKind: "command",
+      ...(criterion.gate === true ? { gate: true } : {}),
+      ...(typeof criterion.weight === "number" ? { weight: criterion.weight } : {}),
+      ...(criterion.text ? { text: criterion.text } : {}),
+    };
+  }
+  const expectExit = typeof source.expectExit === "number" ? source.expectExit : 0;
+  const envTimeout = Number(process.env.PI_WEB_DOD_COMMAND_TIMEOUT_MS);
+  const requested = Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : DEFAULT_COMMAND_TIMEOUT_MS;
+  const timeoutMs = Math.min(MAX_COMMAND_TIMEOUT_MS, requested);
+  const cwd = resolve(source.cwd);
+
+  let exit = 0;
+  let timedOut = false;
+  try {
+    await execFileAsync("/bin/sh", ["-c", source.cmd], {
+      cwd,
+      timeout: timeoutMs,
+      maxBuffer: COMMAND_MAX_BUFFER,
+      killSignal: "SIGKILL",
+    });
+    exit = 0;
+  } catch (error) {
+    const err = error as { code?: unknown; killed?: boolean; signal?: string };
+    if (err?.killed || err?.signal === "SIGKILL" || err?.signal === "SIGTERM") {
+      timedOut = true;
+      // A killed process has no meaningful exit code; force a mismatch.
+      exit = expectExit === 0 ? 1 : 0;
+    } else if (typeof err?.code === "number") {
+      exit = err.code;
+    } else {
+      // Spawn failure (e.g. /bin/sh missing) — treat as not met with the message.
+      return makeCommandEval(criterion, false, `command failed to run: ${String((error as Error)?.message || error)}`, at);
+    }
+  }
+  const met = !timedOut && exit === expectExit;
+  const evidence = timedOut
+    ? `timed out after ${timeoutMs}ms (killed)`
+    : `exit ${exit}${exit === expectExit ? "" : ` (expected ${expectExit})`}`;
+  return makeCommandEval(criterion, met, evidence, at);
+}
+
+/** Build a command CriterionEval carrying the gate/weight/text copy + sourceKind. */
+function makeCommandEval(
+  criterion: DoDCriterion,
+  met: boolean,
+  evidence: string,
+  evaluatedAt: string,
+): CriterionEval {
+  const out: CriterionEval = {
+    id: criterion.id,
+    met,
+    evidence,
+    evaluatedAt,
+    sourceKind: "command",
+  };
+  if (criterion.gate === true) out.gate = true;
+  if (typeof criterion.weight === "number") out.weight = criterion.weight;
+  if (criterion.text) out.text = criterion.text;
+  return out;
+}
+
+/** The cached command evals as the rollup join consumes them, with a freshness pass
+ *  applied: an eval older than COMMAND_STALE_MS is marked `stale` so it can no longer
+ *  back a 100% / sign-off (critStale), and an `unrun` (disabled) eval stays unrun.
+ *  Never mutates the cache; returns a fresh Map for one render pass. */
+function commandEvalsForRender(now = Date.now()): Map<string, CriterionEval> {
+  const out = new Map<string, CriterionEval>();
+  for (const [id, eval_] of commandEvalCache) {
+    if (eval_.unrun) {
+      out.set(id, eval_);
+      continue;
+    }
+    const ranAt = Date.parse(eval_.evaluatedAt);
+    const stale = Number.isFinite(ranAt) && now - ranAt > COMMAND_STALE_MS;
+    out.set(id, stale ? { ...eval_, stale: true } : eval_);
+  }
+  return out;
+}
+
+/** Is `cwd` under a registered project root or a known session cwd? The command-DoD
+ *  allowlist: a `command` criterion may only run in a directory the operator has
+ *  already surfaced to pi-web (a project root or a live session cwd), never an
+ *  arbitrary path like /etc. Resolves both sides so `.`/`..`/symlink-free relatives
+ *  can't escape. */
+function isCommandCwdAllowed(cwd: string, registry: ProjectRegistry): boolean {
+  const target = resolve(cwd);
+  const isUnder = (parent: string): boolean => {
+    if (!parent) return false;
+    const p = resolve(parent);
+    if (target === p) return true;
+    return target.startsWith(p.endsWith("/") ? p : `${p}/`);
+  };
+  for (const root of knownCwds) if (isUnder(root)) return true;
+  for (const project of registry.projects) {
+    if (project.archived) continue;
+    for (const root of project.roots) if (isUnder(root)) return true;
+  }
+  for (const ws of registry.workstreams) {
+    if (ws.matchCwd && isUnder(ws.matchCwd)) return true;
+  }
+  return false;
+}
+
+/** The DoD criteria an /api/dod/evaluate request targets, plus the owning project
+ *  id (for the dirty mark) and a fallback cwd (for git/command criteria that don't
+ *  carry an explicit `source.repo`/`source.cwd`). Resolution order mirrors the
+ *  request body precedence: a single `criterionId` (narrowest) wins, then a
+ *  `workstreamId`, then a `projectId`. Returns undefined when nothing matches. */
+interface DodTarget {
+  criteria: DoDCriterion[];
+  projectId?: string;
+  cwd?: string;
+}
+function resolveDodTarget(registry: ProjectRegistry, body: Record<string, unknown>): DodTarget | undefined {
+  const criterionId = typeof body.criterionId === "string" ? body.criterionId : "";
+  const workstreamId = typeof body.workstreamId === "string" ? body.workstreamId : "";
+  const projectId = typeof body.projectId === "string" ? body.projectId : "";
+
+  const wsCwd = (ws: typeof registry.workstreams[number]): string | undefined =>
+    ws.matchCwd || registry.projects.find((p) => p.id === ws.projectId)?.roots[0];
+
+  if (criterionId) {
+    for (const project of registry.projects) {
+      const found = project.dod?.criteria.find((c) => c.id === criterionId);
+      if (found) return { criteria: [found], projectId: project.id, cwd: project.roots[0] };
+    }
+    for (const ws of registry.workstreams) {
+      const found = ws.dod?.criteria.find((c) => c.id === criterionId);
+      if (found) return { criteria: [found], projectId: ws.projectId, cwd: wsCwd(ws) };
+    }
+    return undefined;
+  }
+  if (workstreamId) {
+    const ws = registry.workstreams.find((w) => w.id === workstreamId);
+    if (!ws) return undefined;
+    const dod: DoD | undefined = ws.dod ?? registry.projects.find((p) => p.id === ws.projectId)?.dod;
+    return { criteria: dod?.criteria ?? [], projectId: ws.projectId, cwd: wsCwd(ws) };
+  }
+  if (projectId) {
+    const project = registry.projects.find((p) => p.id === projectId);
+    if (!project) return undefined;
+    return { criteria: project.dod?.criteria ?? [], projectId: project.id, cwd: project.roots[0] };
+  }
+  return undefined;
 }
 
 // Models confirmed broken with this Copilot integration — tracked at runtime.
@@ -1418,6 +1621,10 @@ const ROLLUP_TERMINAL_EVENTS = new Set([
 // terminal events for one session collapse to a single resolve. We resolve them to
 // project ids at FLUSH time (one cached registry read) rather than per-event.
 const pendingDirtySessions = new Map<string, { id: string; cwd: string }>();
+// Project ids marked dirty by an event that already knows its owning project (the
+// on-demand /api/dod/evaluate path), so they skip the session→project resolve and
+// flush directly alongside the session-derived dirty set.
+const pendingDirtyProjectIds = new Set<string>();
 let rollupFlushTimer: ReturnType<typeof setTimeout> | undefined;
 
 function rollupDebounceMs(): number {
@@ -1439,14 +1646,27 @@ function rollupCwdForEvent(sessionFile: string, sessionId: string): string {
   return piCwd;
 }
 
+function scheduleRollupFlush() {
+  if (rollupFlushTimer !== undefined) return;
+  rollupFlushTimer = setTimeout(flushRollupDirty, rollupDebounceMs());
+  rollupFlushTimer.unref?.();
+}
+
 function enqueueDirty(id: string, cwd: string) {
   // The working tree may have changed; drop the cached git status for this repo so
   // the post-debounce refetch re-evaluates git-derived DoD.
   if (cwd) repoStatusCache.invalidate(knownRepoRoot(cwd));
   pendingDirtySessions.set(id || cwd, { id, cwd });
-  if (rollupFlushTimer !== undefined) return;
-  rollupFlushTimer = setTimeout(flushRollupDirty, rollupDebounceMs());
-  rollupFlushTimer.unref?.();
+  scheduleRollupFlush();
+}
+
+// Mark a KNOWN project id dirty (the on-demand /api/dod/evaluate path already knows
+// the owning project). Drops the cached git status for the criterion's cwd so the
+// post-debounce refetch re-evaluates git-derived DoD against the fresh tree.
+function enqueueDirtyProject(projectId: string, cwd?: string) {
+  if (cwd && cwd.trim()) repoStatusCache.invalidate(knownRepoRoot(cwd));
+  pendingDirtyProjectIds.add(projectId);
+  scheduleRollupFlush();
 }
 
 function markRollupDirty(sessionFile: string, sessionId: string) {
@@ -1462,14 +1682,18 @@ function markRollupDirtyForCwd(cwd: string) {
 
 async function flushRollupDirty() {
   rollupFlushTimer = undefined;
-  if (pendingDirtySessions.size === 0) return;
+  if (pendingDirtySessions.size === 0 && pendingDirtyProjectIds.size === 0) return;
   const sessions = [...pendingDirtySessions.values()];
   pendingDirtySessions.clear();
+  const explicitProjectIds = [...pendingDirtyProjectIds];
+  pendingDirtyProjectIds.clear();
   try {
-    const registry = await projectRegistryStore.read();
-    const { assignments } = mapSessionsToProjects(registry, sessions);
-    const dirtyProjectIds = new Set<string>();
-    for (const assignment of assignments.values()) dirtyProjectIds.add(assignment.projectId);
+    const dirtyProjectIds = new Set<string>(explicitProjectIds);
+    if (sessions.length) {
+      const registry = await projectRegistryStore.read();
+      const { assignments } = mapSessionsToProjects(registry, sessions);
+      for (const assignment of assignments.values()) dirtyProjectIds.add(assignment.projectId);
+    }
     for (const projectId of dirtyProjectIds) broadcast({ type: "rollup_changed", projectId });
   } catch (error) {
     console.warn("Could not flush rollup dirty set:", error);
@@ -2764,6 +2988,79 @@ const server = createServer(async (req, res) => {
         }
       }
 
+      // /api/dod/evaluate  (POST — on-demand DoD evaluation, S10)
+      // Evaluates a DoD target (one criterion, a workstream's DoD, or a project's
+      // DoD): git criteria inline, `command` criteria via the sandboxed runner
+      // (opt-in + cwd-allowlisted). Caches command results so a subsequent
+      // /api/rollups reflects them fresh, then marks the owning project dirty so
+      // exactly one debounced rollup_changed fires. This is the ONLY path that ever
+      // spawns a command — never the render path.
+      if (method === "POST" && url.pathname === "/api/dod/evaluate") {
+        const parsed = await parseJsonBody(req, res);
+        if (!parsed.ok) return;
+        const registry = await projectRegistryStore.read();
+        const target = resolveDodTarget(registry, parsed.body);
+        if (!target) {
+          return sendJson(res, 404, { ok: false, error: "No matching DoD criterion/workstream/project" });
+        }
+        // Guard: every command criterion in scope must run in an allowlisted cwd.
+        for (const criterion of target.criteria) {
+          if (criterion.source.kind === "command" && !isCommandCwdAllowed(criterion.source.cwd, registry)) {
+            return sendJson(res, 400, {
+              ok: false,
+              error: `command cwd is not under a registered project root or known session cwd: ${criterion.source.cwd}`,
+            });
+          }
+        }
+        const now = new Date();
+        const evals: CriterionEval[] = [];
+        for (const criterion of target.criteria) {
+          const source = criterion.source;
+          if (source.kind === "command") {
+            const evaluated = await runCommandCriterion(criterion, now);
+            // Cache a RUN result (not the disabled `unrun` sentinel) so /api/rollups
+            // reflects it; a disabled eval is returned but never cached as truth.
+            if (!evaluated.unrun) commandEvalCache.set(criterion.id, evaluated);
+            evals.push(evaluated);
+          } else if (source.kind === "git_clean" || source.kind === "git_ahead_zero" || source.kind === "git_merged") {
+            const repo = typeof (source as { repo?: string }).repo === "string" && (source as { repo?: string }).repo
+              ? (source as { repo: string }).repo
+              : target.cwd;
+            const root = repo ? resolve(repo) : undefined;
+            const status = root ? await cachedGitStatus(root).catch(() => undefined) : undefined;
+            evals.push(
+              await evalGitCriterion(
+                criterion,
+                status,
+                (ancestor, into) => gitIsAncestor(ancestor, into, root || piCwd).catch(() => false),
+                now,
+              ),
+            );
+          } else if (source.kind === "manual") {
+            evals.push({
+              id: criterion.id,
+              met: criterion.met === true,
+              evidence: criterion.met === true ? "you checked it" : "not checked",
+              evaluatedAt: now.toISOString(),
+              sourceKind: "manual",
+              ...(criterion.gate === true ? { gate: true } : {}),
+            });
+          } else {
+            // session_idle / unknown: evaluated on the rollup read path, not here.
+            evals.push({
+              id: criterion.id,
+              met: false,
+              evidence: "evaluated on the rollup read path, not on demand",
+              evaluatedAt: now.toISOString(),
+              sourceKind: source.kind,
+            });
+          }
+        }
+        // One coalesced rollup_changed for the owning project (via the debounce).
+        if (target.projectId) enqueueDirtyProject(target.projectId, target.cwd);
+        return sendJson(res, 200, { ok: true, evals });
+      }
+
       // ---- Project Rollups: the dashboard feed (S3) ----------------------
       // Joins the registry with live sessions, evaluates DoD (git inline, command
       // EXCLUDED — never spawned here), and computes ProgressSnapshot + counts.
@@ -2786,6 +3083,10 @@ const server = createServer(async (req, res) => {
           // on a `master` repo). On the render path a missing `into` ref honestly
           // means "not merged" = false; it must never 500 the whole feed.
           isAncestor: (ancestor, into, cwd) => gitIsAncestor(ancestor, into, cwd).catch(() => false),
+          // On-demand command DoD evals (S10), with a staleness pass applied so an
+          // old result asterisks the ring and can't back a 100%. NEVER spawns a
+          // command here — only reads what /api/dod/evaluate already ran.
+          commandEvals: commandEvalsForRender(),
         });
         if (seg.length === 3) {
           const projectId = safeDecode(seg[2]);

@@ -353,3 +353,188 @@ describe("rollups registry CRUD auth", () => {
     expect(authed.body.ok).toBe(true);
   });
 });
+
+// ── S10: POST /api/dod/evaluate — sandboxed, opt-in command DoD ───────────────
+describe("POST /api/dod/evaluate (command DoD, enabled)", () => {
+  let server: RollupServer;
+  let realtime: RealtimeCollector;
+  let repo: string;
+  let projectId: string;
+  let wsId: string;
+  // criterion ids by source kind (resolved after the DoD is set).
+  const ids: Record<string, string> = {};
+
+  const getWs = async () => {
+    const res = await server.api("GET", "/api/rollups");
+    const project = (res.body.rollups as any[]).find((r) => r.project.id === projectId);
+    return project.workstreams.find((w: any) => w.workstream.id === wsId);
+  };
+  const critOf = (ws: any, kind: string) =>
+    (ws.progress?.criteria || []).find((c: any) => c.sourceKind === kind);
+
+  beforeAll(async () => {
+    repo = await mkdtemp(join(tmpdir(), "rollups-eval-repo-"));
+    await initRepo(repo);
+    await commitFile(repo, "README.md", "base\n", "base");
+    await renameBranch(repo, "main");
+    await checkoutNew(repo, "feat/x");
+    await commitFile(repo, "feature.txt", "feature\n", "feature work");
+    await checkout(repo, "main");
+    await mergeNoFf(repo, "feat/x");
+    await checkout(repo, "feat/x"); // merged into main
+
+    server = await startServer({
+      extraEnv: {
+        PI_WEB_ALLOW_DOD_COMMANDS: "1",
+        PI_WEB_GIT_CACHE_TTL_MS: "1",
+        // A short command timeout so `sleep 999` is killed in-test (no 60s hang).
+        PI_WEB_DOD_COMMAND_TIMEOUT_MS: "400",
+        // A session in the repo so the workstream ring aggregates its criteria.
+        PI_WEB_MOCK_EXTRA_SESSIONS: JSON.stringify([{ id: "eval-sess", cwd: repo }]),
+      },
+    });
+    realtime = await openRealtime(server);
+
+    const project = await server.api("POST", "/api/projects", { name: "Verify", roots: [repo] });
+    projectId = project.body.project.id;
+    const ws = await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "ci" });
+    wsId = ws.body.workstream.id;
+
+    // Two command criteria (one passing, one failing) + a git_merged (true) so the
+    // ring is honest k-of-n once the commands run.
+    const dod = await server.api("PUT", `/api/workstreams/${wsId}/dod`, {
+      criteria: [
+        { text: "tests pass", source: { kind: "command", cwd: repo, cmd: "exit 0" } },
+        { text: "lint clean", source: { kind: "command", cwd: repo, cmd: "exit 1" } },
+        { text: "merged into main", source: { kind: "git_merged", into: "main" } },
+      ],
+    });
+    for (const c of dod.body.workstream.dod.criteria as any[]) {
+      if (c.source.kind === "command") ids[c.source.cmd] = c.id;
+      else ids[c.source.kind] = c.id;
+    }
+    await server.api("PUT", `/api/workstreams/${wsId}/sessions`, { sessionIds: ["eval-sess"] });
+  }, 40_000);
+
+  afterAll(async () => {
+    realtime?.close();
+    await server?.stop();
+    if (repo) await rm(repo, { recursive: true, force: true });
+  });
+
+  it("on the render path, command criteria are unrun (never spawned) before evaluate", async () => {
+    const ws = await getWs();
+    const pass = critOf(ws, "command");
+    expect(pass.unrun).toBe(true);
+    expect(pass.met).toBe(false);
+  });
+
+  it("cmd 'exit 0' → met, cmd 'exit 1' → not met, git_merged inline → met", async () => {
+    const res = await server.api("POST", "/api/dod/evaluate", { workstreamId: wsId });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    const evals = res.body.evals as any[];
+    const byId = new Map(evals.map((e) => [e.id, e]));
+    expect(byId.get(ids["exit 0"]).met).toBe(true);
+    expect(byId.get(ids["exit 0"]).evidence).toMatch(/exit 0/);
+    expect(byId.get(ids["exit 1"]).met).toBe(false);
+    expect(byId.get(ids["exit 1"]).evidence).toMatch(/exit 1/);
+    expect(byId.get(ids.git_merged).met).toBe(true);
+  });
+
+  it("a subsequent /api/rollups reflects the cached fresh command result + exactly one rollup_changed", async () => {
+    realtime.clear();
+    const res = await server.api("POST", "/api/dod/evaluate", { criterionId: ids["exit 0"] });
+    expect(res.status).toBe(200);
+    // One coalesced rollup_changed for the owning project within the debounce window.
+    await realtime.waitForType("rollup_changed", 1);
+    await new Promise((r) => setTimeout(r, 700)); // let any extra envelopes arrive
+    expect(realtime.typeCount("rollup_changed")).toBe(1);
+
+    const ws = await getWs();
+    const pass = critOf(ws, "command");
+    expect(pass.met).toBe(true);
+    expect(pass.unrun).toBeUndefined();
+    expect(pass.stale).toBeUndefined(); // fresh, not asterisked
+  });
+
+  it("cmd cwd outside a registered root → 400, runs nothing", async () => {
+    // Author a fresh out-of-tree command (cwd /etc) to prove the allowlist rejects
+    // a path that is not under any registered project root or known session cwd.
+    const escapeWs = await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "escape" });
+    const escapeId = escapeWs.body.workstream.id;
+    await server.api("PUT", `/api/workstreams/${escapeId}/dod`, {
+      criteria: [{ text: "evil", source: { kind: "command", cwd: "/etc", cmd: "echo nope" } }],
+    });
+    const rejected = await server.api("POST", "/api/dod/evaluate", { workstreamId: escapeId });
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.ok).toBe(false);
+    expect(rejected.body.error).toMatch(/not under a registered/i);
+  });
+
+  it("'sleep 999' is killed at the timeout → not met, no hang", async () => {
+    const slowWs = await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "slow" });
+    const slowId = slowWs.body.workstream.id;
+    await server.api("PUT", `/api/workstreams/${slowId}/dod`, {
+      criteria: [{ text: "slow check", source: { kind: "command", cwd: repo, cmd: "sleep 999" } }],
+    });
+    const started = Date.now();
+    const res = await server.api("POST", "/api/dod/evaluate", { workstreamId: slowId });
+    const elapsed = Date.now() - started;
+    expect(res.status).toBe(200);
+    const slow = (res.body.evals as any[])[0];
+    expect(slow.met).toBe(false);
+    expect(slow.evidence).toMatch(/timed out/i);
+    // The 400ms timeout must have fired well before the 999s sleep would finish.
+    expect(elapsed).toBeLessThan(10_000);
+  }, 15_000);
+});
+
+describe("POST /api/dod/evaluate (command DoD, disabled by default)", () => {
+  let server: RollupServer;
+  let repo: string;
+  let projectId: string;
+  let wsId: string;
+
+  beforeAll(async () => {
+    repo = await mkdtemp(join(tmpdir(), "rollups-eval-off-"));
+    await initRepo(repo);
+    await commitFile(repo, "README.md", "base\n", "base");
+    // No PI_WEB_ALLOW_DOD_COMMANDS — default off.
+    server = await startServer({
+      extraEnv: { PI_WEB_MOCK_EXTRA_SESSIONS: JSON.stringify([{ id: "off-sess", cwd: repo }]) },
+    });
+    const project = await server.api("POST", "/api/projects", { name: "Off", roots: [repo] });
+    projectId = project.body.project.id;
+    const ws = await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "ci" });
+    wsId = ws.body.workstream.id;
+    await server.api("PUT", `/api/workstreams/${wsId}/dod`, {
+      criteria: [{ text: "tests pass", source: { kind: "command", cwd: repo, cmd: "exit 0" } }],
+    });
+    await server.api("PUT", `/api/workstreams/${wsId}/sessions`, { sessionIds: ["off-sess"] });
+  }, 30_000);
+
+  afterAll(async () => {
+    await server?.stop();
+    if (repo) await rm(repo, { recursive: true, force: true });
+  });
+
+  it("with the env unset, evaluate returns unrun (runs nothing) and the ring never reaches allMet", async () => {
+    // A command that WOULD pass if it ran ("exit 0"), but the runner is disabled.
+    const res = await server.api("POST", "/api/dod/evaluate", { workstreamId: wsId });
+    expect(res.status).toBe(200);
+    const evaluated = (res.body.evals as any[])[0];
+    expect(evaluated.unrun).toBe(true);
+    expect(evaluated.met).toBe(false);
+    expect(evaluated.evidence).toMatch(/disabled/i);
+
+    // The cache was NOT populated → a subsequent /api/rollups still shows unrun, and
+    // the un-run command keeps allMet false (it can never back a 100%).
+    const rollups = await server.api("GET", "/api/rollups");
+    const project = (rollups.body.rollups as any[]).find((r) => r.project.id === projectId);
+    const ws = project.workstreams.find((w: any) => w.workstream.id === wsId);
+    const cmd = (ws.progress.criteria as any[]).find((c) => c.sourceKind === "command");
+    expect(cmd.unrun).toBe(true);
+    expect(ws.progress.allMet).toBe(false);
+  });
+});
