@@ -470,7 +470,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
       const runTxt = bits.length ? bits.join(" · ") : "nothing running";
       let headline: string; const subBits: string[] = [];
       if (c.sign) {
-        headline = `<em class="sign">${c.sign} done</em> — ready for your review.`;
+        headline = `<em class="sign">${c.sign} done</em> — review below.`;
         if (c.loop) subBits.push(`<b>${c.loop} loop${c.loop > 1 ? "s" : ""}</b> running`);
         if (c.run) subBits.push(`<b>${c.run} running</b>`);
       } else if (c.setup) {
@@ -673,7 +673,10 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
         ? `<span style="color:var(--st-merge);font-weight:650">✓ Signed off</span>${mergeAffordance(s)}`
         : pending
           ? `<button class="btn remedy sm" data-recheckcard="${s.id}" title="command DoD evidence is stale — re-run it on demand (coming in a later update)"${DEFER}>${recheckIcon()} Re-check</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`
-          : `<button class="btn sign soon" data-signoff="${esc(critId)}"${deferTip("Sign-off")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off ${soonTag}</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`;
+          // Review is the WIRED action this slice, so it carries the primary weight and leads —
+          // the eye lands on a control the user can actually press. Sign-off stays the honest
+          // dashed "soon" affordance, demoted to the trailing slot until S7 makes it live.
+          : `<button class="btn primary sm" data-open="${s.id}">Review</button><button class="btn sign soon" data-signoff="${esc(critId)}"${deferTip("Sign-off")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off ${soonTag}</button>`;
       return `<article class="soff ${gone ? "gone" : ""}">
         <div class="sleft">
           <div class="scrumb"><b>${esc(p.name)}</b>${lineage} › ${esc(w.name)} · <span class="sn">${esc(s.name)}</span></div>
