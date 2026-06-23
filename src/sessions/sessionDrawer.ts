@@ -16,6 +16,7 @@ export type SessionsController = {
   renderCurrentSessionBucketButton: () => void;
   applySessionUiState: (value: unknown) => void;
   markSessionRead: (sessionId?: string) => Promise<void>;
+  openSession: (sessionId: string, cwd: string) => Promise<void>;
 };
 
 function formatRelativeTime(value: string) {
@@ -1540,5 +1541,6 @@ export function createSessions(options: {
     renderCurrentSessionBucketButton,
     applySessionUiState,
     markSessionRead,
+    openSession: openSessionTab,
   };
 }

@@ -39,7 +39,7 @@ export function createDashboard(options: {
   sessions: SessionsController;
   addMessage: (role: "system", text: string, extraClass?: string) => HTMLDivElement;
 }): DashboardController {
-  const { elements, api, addMessage } = options;
+  const { elements, api, sessions, addMessage } = options;
 
   let open = false;
   let fetchToken = 0;
@@ -163,6 +163,97 @@ export function createDashboard(options: {
     }, REFETCH_DEBOUNCE_MS);
   }
 
+  // Find an overlay element by id WITHOUT touching the host document — keeps every
+  // `data-jump` target scoped under #dashboardView (HARD RULE: nothing leaks out).
+  function byId(id: string): HTMLElement | null {
+    if (!id) return null;
+    try {
+      return elements.dashboardWrap.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
+    } catch {
+      return null;
+    }
+  }
+
+  // Drill-in / continue → the REAL session. Look up the session's cwd from the
+  // adapter-built SESS index, close the overlay, then reuse the sessions controller's
+  // open flow (POST /api/sessions/open → writeActiveSessionIdToUrl → refresh). The
+  // landing target is the live conversation + composer — never a synthetic one.
+  async function openSessionFromCard(sessionId: string) {
+    const ref = view.SESS[sessionId];
+    const cwd = ref?.s.cwd ?? "";
+    closeDashboard();
+    await sessions.openSession(sessionId, cwd);
+  }
+
+  // Ported from the mockup click delegation (index.html L3166-3213), scoped to
+  // #dashboardView. S6 wires: data-open (overridden → real session), data-jump
+  // (scroll + auto-expand), and the data-toggle expand/collapse family. Quick-reply
+  // chips, sign-off, recheck, focus-triage land in S7 (left as no-ops here).
+  function handleClick(event: MouseEvent) {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+
+    const open = target.closest<HTMLElement>("[data-open]");
+    if (open) {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = open.getAttribute("data-open");
+      if (id) void openSessionFromCard(id);
+      return;
+    }
+
+    // jump-links land ON the matching surface AND auto-expand collapsed targets.
+    const jump = target.closest<HTMLElement>("[data-jump]");
+    if (jump) {
+      event.preventDefault();
+      event.stopPropagation();
+      const el = byId(jump.getAttribute("data-jump") || "");
+      if (el) {
+        const grp = el.closest(".grpcard");
+        if (grp) grp.classList.add("open");
+        if (el.classList.contains("grpcard") || el.classList.contains("done") || el.classList.contains("pcard")) el.classList.add("open");
+        if (el.classList.contains("prow")) {
+          el.classList.add("open");
+          const body = el.nextElementSibling;
+          if (body && body.classList.contains("prow-body")) body.classList.add("open");
+        }
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
+
+    // generic "show all" reveal — Done/Planned groups + the dormant/needs lists.
+    const more = target.closest<HTMLElement>("[data-toggle=more]");
+    if (more) {
+      event.stopPropagation();
+      const mr = more.previousElementSibling as HTMLElement | null;
+      if (mr && mr.classList.contains("more-rows")) mr.hidden = false;
+      more.remove();
+      return;
+    }
+
+    const tg = target.closest<HTMLElement>("[data-toggle]");
+    if (tg) {
+      const kind = tg.getAttribute("data-toggle");
+      if (kind === "card") tg.closest(".pcard")?.classList.toggle("open");
+      else if (kind === "ws") tg.closest(".ws")?.classList.toggle("open");
+      else if (kind === "sessmore") {
+        const ex = tg.previousElementSibling as HTMLElement | null;
+        if (ex && ex.classList.contains("sess-extra")) ex.hidden = false;
+        tg.remove();
+      } else if (kind === "done") tg.closest(".done")?.classList.toggle("open");
+      else if (kind === "grp") tg.closest(".grpcard")?.classList.toggle("open");
+      else if (kind === "needmore") tg.closest(".needmore")?.classList.toggle("open");
+      else if (kind === "prow") {
+        tg.classList.toggle("open");
+        const id = tg.getAttribute("data-rowp") || "";
+        const body = id ? elements.dashboardWrap.querySelector<HTMLElement>(`[data-rowbody="${CSS.escape(id)}"]`) : null;
+        if (body) body.classList.toggle("open");
+      }
+      return;
+    }
+  }
+
   function init() {
     elements.dashboardCloseButton.addEventListener("click", () => closeDashboard());
     elements.dashboardBackdrop.addEventListener("click", () => closeDashboard());
@@ -170,6 +261,8 @@ export function createDashboard(options: {
     elements.dashboardView.addEventListener("click", (event) => {
       if (event.target === elements.dashboardView) closeDashboard();
     });
+    // Delegated drill-in / continue / expand-collapse, scoped to the overlay.
+    elements.dashboardWrap.addEventListener("click", handleClick);
   }
 
   return {
