@@ -250,14 +250,15 @@ export async function evalGitCriterion(
     }
     case "git_merged": {
       const branch = status.branch || "";
-      if (!branch) return evalBase(criterion, false, "no current branch", at);
+      if (!branch) return evalBase(criterion, false, "no current branch", at, { into: source.into });
       // `isAncestor` (git merge-base --is-ancestor) RETHROWS on a non-1 exit —
       // e.g. exit 128 when `into` does not resolve (a typo, a `main` default on a
       // `master` repo, a deleted branch). On the /api/rollups render path that
       // must NOT bubble up and 500 the whole feed (S3: never throw on a messy
       // session). A missing `into` ref honestly means "not merged" → degrade to
-      // not-met with evidence. The rethrow stays intact for callers that want the
-      // real error (the on-demand /api/dod/evaluate path).
+      // not-met with evidence that names the target ref so the user can see the
+      // target branch is wrong (vs. the work being incomplete). The rethrow stays
+      // intact for callers that want the real error (the on-demand evaluate path).
       let merged = false;
       try {
         merged = await isAncestor(branch, source.into);
@@ -265,8 +266,9 @@ export async function evalGitCriterion(
         return evalBase(
           criterion,
           false,
-          `could not verify merge into ${source.into} (ref unavailable)`,
+          `could not verify merge into "${source.into}" — target branch not found (does this repo use a different default branch?)`,
           at,
+          { into: source.into },
         );
       }
       return evalBase(
@@ -276,6 +278,7 @@ export async function evalGitCriterion(
           ? `${branch} merged into ${source.into}`
           : `${branch} is not an ancestor of ${source.into}`,
         at,
+        { into: source.into },
       );
     }
     default:

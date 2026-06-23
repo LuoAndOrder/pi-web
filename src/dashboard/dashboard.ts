@@ -206,10 +206,47 @@ export function createDashboard(options: {
 
   // Rebuild the mockup-shaped view model from the current state.rollups and (when open)
   // re-render. The single seam from server ProjectRollup[] → renderer view model.
+  //
+  // Reconcile the optimistic sign-off overlay against server truth (review finding):
+  // `view.signed[id]` is a PRE-ECHO optimism written by `flipLocal`; the server
+  // `ProgressSnapshot` is the single source of truth after a refetch. Rebuild the map
+  // from the fresh `_gate.met` so (a) it never grows unbounded over a long-lived
+  // dashboard, and (b) a gate un-signed elsewhere (another tab / a reused criterion id)
+  // can no longer keep rendering a stale "✓ Signed off" that the server contradicts.
+  // Any still-in-flight optimistic flip is re-applied immediately after, so a refetch
+  // landing mid-PATCH doesn't flicker the row back.
   function rebuildView() {
     const vm = toViewModel(state.rollups);
     view.data = vm.data;
     view.SESS = vm.SESS;
+    reconcileSigned();
+  }
+
+  // Sessions with an optimistic sign-off PATCH still genuinely in flight — their local
+  // flip must survive a refetch that lands before the server echo, so we don't prune them
+  // in the reconcile. (Counts outstanding PATCHes; the never-cleared `critChain` promise
+  // would read "pending" forever after the first sign-off.)
+  function hasPendingFlip(sessionId: string): boolean {
+    const critId = view.SESS[sessionId]?.s._gate?.id;
+    return !!critId && (critInFlight.get(critId) ?? 0) > 0;
+  }
+  function reconcileSigned() {
+    const next: Record<string, boolean> = {};
+    for (const sessionId of Object.keys(view.SESS)) {
+      // Server truth is the gate's met flag (the adapter only surfaces an UNMET gate as
+      // `_gate`, so a missing/already-met gate means the session is past sign-off). Keep
+      // an optimistic `true` only while its PATCH is in flight (the pre-echo window) so a
+      // refetch landing mid-PATCH doesn't flicker the row back to unsigned.
+      const gate = view.SESS[sessionId].s._gate;
+      const serverSigned = !gate || gate.met === true;
+      // When the server already reports the gate met (or there is no unmet gate), the
+      // renderer derives "signed" straight from `_gate` — no overlay entry needed. Only
+      // a still-unmet gate with an in-flight PATCH retains its optimistic flip.
+      if (!serverSigned && view.signed[sessionId] && hasPendingFlip(sessionId)) {
+        next[sessionId] = true;
+      }
+    }
+    view.signed = next;
   }
 
   async function refetch() {
@@ -385,14 +422,21 @@ export function createDashboard(options: {
   // reconciles the truth regardless.
   const critGen = new Map<string, number>();
   const critChain = new Map<string, Promise<boolean>>();
+  // Count of genuinely outstanding PATCHes per criterion (incremented when an intent is
+  // queued, decremented when it settles). `reconcileSigned` reads this to keep an
+  // optimistic flip across a refetch ONLY while its PATCH is actually in flight — the
+  // never-cleared `critChain` promise alone would read "pending" forever after the first
+  // sign-off and defeat the prune.
+  const critInFlight = new Map<string, number>();
 
   // Serialize PATCHes for one criterion so they can't land out of order. Returns whether
   // THIS call's intent is still the latest (its gen is current) AND the PATCH succeeded.
   function patchCriterionGuarded(criterionId: string, met: boolean): Promise<boolean> {
     const gen = (critGen.get(criterionId) ?? 0) + 1;
     critGen.set(criterionId, gen);
+    critInFlight.set(criterionId, (critInFlight.get(criterionId) ?? 0) + 1);
     const prior = critChain.get(criterionId) ?? Promise.resolve(true);
-    const next = prior
+    const settled = prior
       .catch(() => false)
       .then(async () => {
         // A newer intent superseded this one before its turn — skip the network call.
@@ -409,6 +453,13 @@ export function createDashboard(options: {
           return false;
         }
       });
+    // Decrement the in-flight counter once this PATCH settles (success or failure), so
+    // `hasPendingFlip` stops protecting its optimistic entry from the next reconcile.
+    const next = settled.finally(() => {
+      const remaining = (critInFlight.get(criterionId) ?? 1) - 1;
+      if (remaining > 0) critInFlight.set(criterionId, remaining);
+      else critInFlight.delete(criterionId);
+    });
     critChain.set(criterionId, next);
     return next;
   }
@@ -523,14 +574,21 @@ export function createDashboard(options: {
     | { kind: "session_idle"; sessionId: string }
     | { kind: "command"; cwd: string; cmd: string };
 
+  // The repo's integration branch fallback when one can't be detected. `git_merged` is
+  // evaluated as `git merge-base --is-ancestor <branch> <into>`; on a repo whose default
+  // branch is `master` (or anything non-`main`), a hardcoded `into:"main"` hits git exit
+  // 128 (ref unavailable) and the criterion can NEVER be met (review finding). The drawer
+  // detects the repo's default branch and lets the user override the target per criterion.
+  const DEFAULT_MERGE_TARGET = "main";
+
   const DOD_EVALUATORS: Array<{
     key: string;
     fam: string;
     label: string;
     auto: boolean;
-    make: (ctx: { cwd: string; sessionId: string }) => DodSource;
+    make: (ctx: { cwd: string; sessionId: string; defaultBranch: string }) => DodSource;
   }> = [
-    { key: "git_merged", fam: "git", label: "Branch merged into main", auto: true, make: () => ({ kind: "git_merged", into: "main" }) },
+    { key: "git_merged", fam: "git", label: "Branch merged into target", auto: true, make: (ctx) => ({ kind: "git_merged", into: ctx.defaultBranch || DEFAULT_MERGE_TARGET }) },
     { key: "git_clean", fam: "git", label: "Working tree clean", auto: true, make: () => ({ kind: "git_clean" }) },
     { key: "git_ahead_zero", fam: "git", label: "Branch fully pushed", auto: true, make: () => ({ kind: "git_ahead_zero" }) },
     { key: "session_idle", fam: "runtime", label: "Session idle (loop settled)", auto: true, make: (ctx) => ({ kind: "session_idle", sessionId: ctx.sessionId }) },
@@ -542,8 +600,10 @@ export function createDashboard(options: {
   // workstream to PUT to. Authoring a DoD on it CREATES a real workstream under the project (POST
   // /api/projects/:id/workstreams with the criteria + the session attached), then the next /api/rollups
   // folds the session into that real workstream with an honest k-of-n ring.
+  // `defaultBranch` is the repo's detected integration branch (origin/HEAD short → current
+  // branch → "main"); it seeds new `git_merged` criteria so they target a ref that exists.
   let drawer:
-    | { workstreamId: string; projectId: string; synthetic: boolean; wsName: string; cwd: string; sessionId: string; draft: DraftCrit[] }
+    | { workstreamId: string; projectId: string; synthetic: boolean; wsName: string; cwd: string; sessionId: string; defaultBranch: string; draft: DraftCrit[] }
     | null = null;
 
   // The structured `source.kind` → the short evaluator-family label shown on each draft chip.
@@ -584,17 +644,41 @@ export function createDashboard(options: {
     return el;
   }
 
+  // Detect the repo's integration branch for a session's cwd so new `git_merged` criteria
+  // target a ref that EXISTS (review finding: a hardcoded "main" strands a `master` repo at
+  // git exit 128 forever). Reads GET /api/git/status?sessionId, preferring origin/HEAD's
+  // short name, then the current branch, then "main". Best-effort — the drawer's editable
+  // target input lets the user correct it regardless.
+  async function detectDefaultBranch(sessionId: string): Promise<string> {
+    try {
+      const res = await fetch(`/api/git/status?sessionId=${encodeURIComponent(sessionId)}`, { headers: api.headers() });
+      if (!res.ok) return DEFAULT_MERGE_TARGET;
+      const st = await res.json();
+      const remote = typeof st?.defaultRemoteBranch === "string" ? st.defaultRemoteBranch.trim() : "";
+      // origin/HEAD short form is "origin/main" — strip the remote prefix to a local ref.
+      const fromRemote = remote.includes("/") ? remote.slice(remote.indexOf("/") + 1) : remote;
+      const branch = typeof st?.branch === "string" ? st.branch.trim() : "";
+      return fromRemote || branch || DEFAULT_MERGE_TARGET;
+    } catch {
+      return DEFAULT_MERGE_TARGET;
+    }
+  }
+
   // Open the authoring drawer for the workstream that owns `sessionId`. Seeds the draft from any
   // existing criteria so re-opening edits rather than wipes (the server PUT replaces the full set).
-  function openDodDrawer(sessionId: string) {
+  async function openDodDrawer(sessionId: string) {
     const ref = view.SESS[sessionId];
     if (!ref) return;
     const ws = ref.w;
+    const defaultBranch = await detectDefaultBranch(sessionId);
+    // A newer drawer-open superseded this async detection — abandon this stale open.
+    if (!view.SESS[sessionId]) return;
     const seed: DraftCrit[] = (ref.s.crit ?? [])
       .map((c) => {
         const kind = (c.src || "manual") as DodSource["kind"];
         let source: DodSource;
-        if (kind === "git_merged") source = { kind: "git_merged", into: "main" };
+        // Re-seed git_merged from the REAL stored target (c.into), not a hardcoded "main".
+        if (kind === "git_merged") source = { kind: "git_merged", into: (c.into || defaultBranch || DEFAULT_MERGE_TARGET) };
         else if (kind === "git_clean") source = { kind: "git_clean" };
         else if (kind === "git_ahead_zero") source = { kind: "git_ahead_zero" };
         else if (kind === "session_idle") source = { kind: "session_idle", sessionId };
@@ -612,6 +696,7 @@ export function createDashboard(options: {
       wsName: synthetic ? (ref.s.name || "New workstream") : ws.name,
       cwd: ref.s.cwd ?? "",
       sessionId,
+      defaultBranch,
       draft: seed,
     };
     renderDrawer();
@@ -639,7 +724,13 @@ export function createDashboard(options: {
         const gateToggle = c.source.kind === "manual"
           ? `<button class="critgate${c.gate ? " on" : ""}" data-critgate="${i}" title="${c.gate ? "this manual boolean is the sign-off gate (excluded from %) — click to make it a plain criterion" : "make this the sign-off gate you approve (excluded from %)"}" aria-pressed="${c.gate ? "true" : "false"}">${c.gate ? "gate ✓" : "make gate"}</button>`
           : "";
-        return `<li><span class="fam">${escText(famOf(c.source))}</span><span class="grow-txt">${escText(c.text)}</span>${c.gate ? `<span class="gatepill" title="excluded from %; the manual gate you sign off">gate</span>` : ""}<span class="grow"></span>${gateToggle}<button data-critrm="${i}" title="remove criterion">✕</button></li>`;
+        // git_merged needs an EDITABLE target branch — a hardcoded "main" can never be met on
+        // a repo whose default branch is "master" (review finding). The input is bound to
+        // source.into and persisted as the criterion's target ref.
+        const mergeTarget = c.source.kind === "git_merged"
+          ? `<label class="critinto" title="the branch your work must be merged into (this repo's default branch by default)">into <input type="text" class="critinto-in" data-critinto="${i}" value="${escText(c.source.into)}" spellcheck="false"></label>`
+          : "";
+        return `<li><span class="fam">${escText(famOf(c.source))}</span><span class="grow-txt">${escText(c.text)}</span>${mergeTarget}${c.gate ? `<span class="gatepill" title="excluded from %; the manual gate you sign off">gate</span>` : ""}<span class="grow"></span>${gateToggle}<button data-critrm="${i}" title="remove criterion">✕</button></li>`;
       })
       .join("");
     const count = drawer.draft.length;
@@ -680,12 +771,22 @@ export function createDashboard(options: {
     if (!drawer) return;
     const e = DOD_EVALUATORS.find((x) => x.key === key);
     if (!e) return;
-    const source = e.make({ cwd: drawer.cwd, sessionId: drawer.sessionId });
+    const source = e.make({ cwd: drawer.cwd, sessionId: drawer.sessionId, defaultBranch: drawer.defaultBranch });
     // The manual gate is the human sign-off; offer it as a gate so the ring's % excludes it (the
     // HARD RULE: a manual boolean is the only toggleable truth, and a sign-off gate is excluded
     // from the percent). Other evaluators are plain weighted criteria.
     drawer.draft.push({ text: e.label, source });
     renderDrawer();
+  }
+  // Update a git_merged draft criterion's target branch (source.into) from its inline input.
+  // Mutates the draft model directly (no re-render) so typing isn't interrupted; saveDoD reads
+  // the final value. An empty target falls back to the detected default so we never PUT a
+  // criterion the normalizer drops (it requires a non-empty `into`).
+  function setDraftMergeTarget(i: number, into: string) {
+    if (!drawer || i < 0 || i >= drawer.draft.length) return;
+    const c = drawer.draft[i];
+    if (c.source.kind !== "git_merged") return;
+    c.source.into = into.trim() || drawer.defaultBranch || DEFAULT_MERGE_TARGET;
   }
   function addDraftManual(text: string) {
     if (!drawer) return;
@@ -1057,6 +1158,13 @@ export function createDashboard(options: {
         ke.preventDefault();
         addDraftManual((target as HTMLInputElement).value);
       }
+    });
+    // git_merged target-branch input: update the draft model live without re-rendering (a
+    // re-render would steal focus mid-type); saveDoD reads the final value.
+    drawerHost.addEventListener("input", (event) => {
+      const target = event.target as HTMLElement | null;
+      const into = target?.closest<HTMLInputElement>("[data-critinto]");
+      if (into) setDraftMergeTarget(Number.parseInt(into.getAttribute("data-critinto") || "-1", 10), into.value);
     });
     // Drill-in context band: dismiss (×) or expand/collapse the DoD criteria list.
     elements.rollupContextBand.addEventListener("click", (event) => {

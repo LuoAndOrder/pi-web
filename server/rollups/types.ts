@@ -99,6 +99,9 @@ export interface CriterionEval {
   stale?: boolean; // ran, but the cached result is old -> can't back a 100%
   // carry the source kind so the renderer keys families/asterisks off structure, not substrings
   sourceKind?: DoDSourceKind;
+  // the git_merged target branch (source.into), surfaced so the authoring drawer can seed
+  // its editable target from the REAL stored ref (not a hardcoded "main") on re-open.
+  into?: string;
   gate?: boolean;
   weight?: number;
   text?: string;

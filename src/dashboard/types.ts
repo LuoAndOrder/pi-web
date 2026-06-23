@@ -86,6 +86,9 @@ export interface CriterionEval {
   unrun?: boolean;
   stale?: boolean;
   sourceKind?: DoDSourceKind;
+  // the git_merged target branch (source.into) so the authoring drawer seeds its editable
+  // target from the real stored ref on re-open.
+  into?: string;
   gate?: boolean;
   weight?: number;
   text?: string;

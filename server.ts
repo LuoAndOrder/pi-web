@@ -39,7 +39,7 @@ import type {
   ProjectRegistry,
   ProjectRollup,
 } from "./server/rollups/types.js";
-import { evalGitCriterion } from "./server/rollups/gitDod.js";
+import { evalBase, evalGitCriterion } from "./server/rollups/gitDod.js";
 
 const appDir = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const distDir = join(appDir, "dist");
@@ -600,17 +600,13 @@ async function runCommandCriterion(
     return evalGitCriterion(criterion, undefined, async () => false, now);
   }
   if (!DOD_COMMANDS_ENABLED()) {
-    return {
-      id: criterion.id,
-      met: false,
-      evidence: "command DoD disabled (set PI_WEB_ALLOW_DOD_COMMANDS=1 to enable)",
-      evaluatedAt: at,
-      unrun: true,
-      sourceKind: "command",
-      ...(criterion.gate === true ? { gate: true } : {}),
-      ...(typeof criterion.weight === "number" ? { weight: criterion.weight } : {}),
-      ...(criterion.text ? { text: criterion.text } : {}),
-    };
+    return evalBase(
+      criterion,
+      false,
+      "command DoD disabled (set PI_WEB_ALLOW_DOD_COMMANDS=1 to enable)",
+      at,
+      { unrun: true },
+    );
   }
   const expectExit = typeof source.expectExit === "number" ? source.expectExit : 0;
   const envTimeout = Number(process.env.PI_WEB_DOD_COMMAND_TIMEOUT_MS);
@@ -638,34 +634,16 @@ async function runCommandCriterion(
       exit = err.code;
     } else {
       // Spawn failure (e.g. /bin/sh missing) — treat as not met with the message.
-      return makeCommandEval(criterion, false, `command failed to run: ${String((error as Error)?.message || error)}`, at);
+      return evalBase(criterion, false, `command failed to run: ${String((error as Error)?.message || error)}`, at);
     }
   }
   const met = !timedOut && exit === expectExit;
   const evidence = timedOut
     ? `timed out after ${timeoutMs}ms (killed)`
     : `exit ${exit}${exit === expectExit ? "" : ` (expected ${expectExit})`}`;
-  return makeCommandEval(criterion, met, evidence, at);
-}
-
-/** Build a command CriterionEval carrying the gate/weight/text copy + sourceKind. */
-function makeCommandEval(
-  criterion: DoDCriterion,
-  met: boolean,
-  evidence: string,
-  evaluatedAt: string,
-): CriterionEval {
-  const out: CriterionEval = {
-    id: criterion.id,
-    met,
-    evidence,
-    evaluatedAt,
-    sourceKind: "command",
-  };
-  if (criterion.gate === true) out.gate = true;
-  if (typeof criterion.weight === "number") out.weight = criterion.weight;
-  if (criterion.text) out.text = criterion.text;
-  return out;
+  // evalBase copies the gate/weight/text + sourceKind ("command") off the criterion — the
+  // same record shape every other evaluator family uses (review finding: one builder).
+  return evalBase(criterion, met, evidence, at);
 }
 
 // Hard backstop on the command-eval cache size so a long-lived process can't grow it
@@ -3178,23 +3156,24 @@ const server = createServer(async (req, res) => {
               ),
             );
           } else if (source.kind === "manual") {
-            evals.push({
-              id: criterion.id,
-              met: criterion.met === true,
-              evidence: criterion.met === true ? "you checked it" : "not checked",
-              evaluatedAt: now.toISOString(),
-              sourceKind: "manual",
-              ...(criterion.gate === true ? { gate: true } : {}),
-            });
+            evals.push(
+              evalBase(
+                criterion,
+                criterion.met === true,
+                criterion.met === true ? "you checked it" : "not checked",
+                now.toISOString(),
+              ),
+            );
           } else {
             // session_idle / unknown: evaluated on the rollup read path, not here.
-            evals.push({
-              id: criterion.id,
-              met: false,
-              evidence: "evaluated on the rollup read path, not on demand",
-              evaluatedAt: now.toISOString(),
-              sourceKind: source.kind,
-            });
+            evals.push(
+              evalBase(
+                criterion,
+                false,
+                "evaluated on the rollup read path, not on demand",
+                now.toISOString(),
+              ),
+            );
           }
         }
         // One coalesced rollup_changed for the owning project (via the debounce).

@@ -51,6 +51,9 @@ export interface VCrit {
   gate?: boolean;
   weight?: number;
   kind?: string;
+  // git_merged target branch (source.into) so the authoring drawer re-seeds the editable
+  // target from the real stored ref instead of a hardcoded "main" (review finding).
+  into?: string;
 }
 export interface VSession {
   id: string;
@@ -107,6 +110,11 @@ export interface VProject {
   desc?: string;
   nest?: string;
   workstreams: VWorkstream[];
+  // The server-computed project ProgressSnapshot (rollup.ts projectProgress: k-of-n
+  // scorable workstreams done). The client trusts this and NEVER re-derives the project
+  // gauge on render — `met`/`total`/`percent` are the single source of truth for the ring,
+  // matching the workstream/session rings that already read toProg(...) (review finding).
+  _prog?: VProg | null;
 }
 // A cold-start onboarding candidate: an unregistered cwd that pi has sessions in. Derived
 // client-side from GET /api/sessions (impl-plan S9 — prefer client-derive to stay
@@ -391,6 +399,11 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     if (st === "queued" || st === "planned") return { tone: "calm", loop: false, txt: t.live || "", id: t.id };
     return { tone: "calm", loop: false, txt: "All work merged. Nothing pending.", id: t.id };
   }
+  // wsDone / wsOpenEnded / wsUnscorable are NO LONGER the project gauge — the displayed
+  // project ring percent now comes straight from the server `p._prog` (rollup.ts
+  // projectProgress) so the client never re-derives a shown percent (review finding). They
+  // survive ONLY as the `longPole` spotlight heuristic (which one workstream to call out as
+  // the bottleneck) — a cosmetic pick, never a number rendered as truth.
   function wsDone(w: VWorkstream) { return w.status === "merge" || w.status === "sign" || !!(w._prog && w._prog.allMet) || !!(w._sessGauge && w._sessGauge.total > 0 && w._sessGauge.done === w._sessGauge.total); }
   function wsOpenEnded(w: VWorkstream) { return w.status === "loop" || !!w.loop; }
   function wsEmptyDod(w: VWorkstream) {
@@ -399,7 +412,6 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     return !w._prog;
   }
   function wsUnscorable(w: VWorkstream) { return wsOpenEnded(w) || wsEmptyDod(w); }
-  function projGauge(p: VProject) { const counted = p.workstreams.filter((w) => !wsUnscorable(w)); const total = counted.length, done = counted.filter(wsDone).length; return { done, total, percent: total ? Math.round(done / total * 100) : 0 }; }
   function longPole(p: VProject): VWorkstream | null {
     const closed = p.workstreams.filter((w) => !wsUnscorable(w));
     const order = closed.slice().sort((a, b) => byAttention(a, b) || ((a._prog ? a._prog.percent : 0) - (b._prog ? b._prog.percent : 0)));
@@ -868,7 +880,12 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     if (c.sign) { countPills.push(`<button class="countpill sgn jumplink" data-jump="sec-signoff">${c.sign} to sign off ↑</button>`); }
     if (!hasNeeds && !c.sign) { countPills.push(c.run ? `<span class="countpill calm">${c.run} running</span>` : `<span class="countpill calm">all calm</span>`); }
 
-    const g = projGauge(p);
+    // The project gauge is the SERVER's k-of-n ProgressSnapshot (rollup.ts
+    // projectProgress), not a client re-derivation — `met`/`total` are scorable
+    // workstreams done / counted (review finding: one source of truth, no client copy of
+    // the formula that can silently diverge from the server's workstreamDone()).
+    const pp = p._prog;
+    const g = { done: pp?.met ?? 0, total: pp?.total ?? 0, percent: pp?.percent ?? 0 };
     const pole = longPole(p);
     const someLoop = p.workstreams.some(wsOpenEnded);
     const allOpenEnded = g.total === 0 && someLoop;

@@ -110,6 +110,7 @@ function toCrit(ce: CriterionEval): VCrit {
     at: critAt(ce),
     gate: ce.gate,
     weight: ce.weight,
+    into: ce.into, // git_merged target branch → seed the drawer's editable target on re-open
   };
 }
 
@@ -273,6 +274,10 @@ function toProject(pr: ProjectRollup): VProject {
     desc: pr.project.description ?? "",
     nest: pr.lineage ? `in ${pr.lineage.parentProjectName}` : undefined,
     workstreams: pr.workstreams.map(toWorkstream),
+    // The server's k-of-n project gauge (rollup.ts projectProgress) flows straight onto
+    // `_prog` so the ring reads the server ProgressSnapshot — the client never re-derives
+    // the project percent (review finding; matches the ws/session rings via toProg).
+    _prog: toProg(pr.progress),
   };
 }
 
