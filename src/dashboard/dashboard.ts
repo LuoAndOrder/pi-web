@@ -970,6 +970,186 @@ export function createDashboard(options: {
     }
   }
 
+  // ── per-workstream lifecycle (M3) ──────────────────────────────────────────
+  // The full lifecycle is first-class and USER-driven from the kebab menu + the sign-off
+  // strip's Cancel action: Mark done / Archive / Cancel (abandon) / Delete / Restore — each
+  // wired to the REAL registry route. Destructive verbs (Cancel/Delete) confirm first;
+  // Delete also offers an Undo that re-creates the workstream from a snapshot. After every
+  // mutation we refetch /api/rollups (the server emits project_registry_changed too) so the
+  // whole set re-shapes honestly — archived/abandoned workstreams move to the Archived
+  // surface, out of the active gauge & counts.
+
+  // The registry workstream id → its name (for toast copy) + owning project + a snapshot of
+  // its current criteria/sessions, resolved from the SESS index (an archived workstream's
+  // sessions are indexed too). Returns null if the workstream has no sessions indexed (a
+  // zero-session workstream is unreachable via SESS — guarded at the call sites).
+  function findWsContext(workstreamId: string): { wsName: string; projectId: string } | null {
+    for (const ref of Object.values(view.SESS)) {
+      if (ref.w.id === workstreamId) {
+        return { wsName: ref.w.name, projectId: ref.p.id };
+      }
+    }
+    // A zero-session workstream isn't in SESS; fall back to a scan of the rollup view model.
+    for (const p of view.data) {
+      const w = [...(p.workstreams || []), ...(p.archivedWorkstreams || [])].find((x) => x.id === workstreamId);
+      if (w) return { wsName: w.name, projectId: p.id };
+    }
+    return null;
+  }
+
+  // Build the re-create payload for an Undo-after-delete: the workstream's name, its DoD
+  // criteria (round-tripped from the rollup view model's `crit`), and its attached session
+  // ids. A new id is minted server-side (delete is irreversible at the id level), but the
+  // user's work — the criteria + membership — is restored intact.
+  function snapshotWorkstream(workstreamId: string): { projectId: string; body: Record<string, unknown> } | null {
+    for (const p of view.data) {
+      const w = [...(p.workstreams || []), ...(p.archivedWorkstreams || [])].find((x) => x.id === workstreamId);
+      if (!w) continue;
+      const sessionIds = w.sessions.map((s) => s.id);
+      // Reconstruct the DoD criteria from the first session that carries them (the DoD is
+      // workstream-level, mirrored onto every session). Manual `met` is preserved.
+      const critSrc = (w.sessions.find((s) => s.crit && s.crit.length)?.crit) || [];
+      const criteria = critSrc.map((c) => {
+        const kind = (c.src || "manual");
+        let source: Record<string, unknown>;
+        if (kind === "git_merged") source = { kind, into: c.into || "main" };
+        else if (kind === "command") source = { kind, cwd: w.sessions[0]?.cwd || "", cmd: "npm test" };
+        else if (kind === "session_idle") source = { kind, sessionId: sessionIds[0] || "" };
+        else source = { kind };
+        return {
+          text: c.text || "",
+          source,
+          ...(c.gate ? { gate: true } : {}),
+          ...(kind === "manual" ? { met: !!c.met } : {}),
+          ...(c.weight != null ? { weight: c.weight } : {}),
+        };
+      });
+      const body: Record<string, unknown> = { name: w.name, sessionIds };
+      if (criteria.length) body.dod = { criteria };
+      return { projectId: p.id, body };
+    }
+    return null;
+  }
+
+  // PATCH a workstream's fields (status / archived) then refetch. Returns ok.
+  async function patchWorkstream(workstreamId: string, patch: Record<string, unknown>): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/workstreams/${encodeURIComponent(workstreamId)}`, {
+        method: "PATCH",
+        headers: api.headers(),
+        body: JSON.stringify(patch),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async function markWsDone(workstreamId: string) {
+    const ctx = findWsContext(workstreamId);
+    const name = ctx?.wsName || "Workstream";
+    const ok = await patchWorkstream(workstreamId, { status: "done" });
+    if (ok) { showToast(`<b>${escText(name)}</b> marked done.`); await refetch(); }
+    else showToast(`Couldn't mark <b>${escText(name)}</b> done — try again.`);
+  }
+
+  async function archiveWs(workstreamId: string) {
+    const ctx = findWsContext(workstreamId);
+    const name = ctx?.wsName || "Workstream";
+    const ok = await patchWorkstream(workstreamId, { archived: true });
+    if (ok) {
+      showToast(`<b>${escText(name)}</b> archived — moved to Archived, out of active counts.`, () => {
+        void patchWorkstream(workstreamId, { archived: false }).then((undone) => { if (undone) void refetch(); });
+      });
+      await refetch();
+    } else showToast(`Couldn't archive <b>${escText(name)}</b> — try again.`);
+  }
+
+  // Cancel / Abandon — sets the workstream abandoned (PATCH status:"abandoned"). Confirmed
+  // first (destructive lifecycle exit). Reachable from the kebab AND the sign-off strip's
+  // "Cancel — no longer relevant" action. Offers Undo (back to in_progress).
+  async function cancelWs(workstreamId: string) {
+    const ctx = findWsContext(workstreamId);
+    const name = ctx?.wsName || "this workstream";
+    if (!window.confirm(`Cancel "${name}" as no longer relevant? It moves to Archived and drops out of active counts. You can re-open it later.`)) return;
+    const ok = await patchWorkstream(workstreamId, { status: "abandoned" });
+    if (ok) {
+      showToast(`<b>${escText(name)}</b> cancelled — no longer relevant. Moved to Archived.`, () => {
+        void patchWorkstream(workstreamId, { status: "in_progress" }).then((undone) => { if (undone) void refetch(); });
+      });
+      await refetch();
+    } else showToast(`Couldn't cancel <b>${escText(name)}</b> — try again.`);
+  }
+
+  // Restore — bring an archived/abandoned workstream back into the active grid. Clears BOTH
+  // the archived flag and (if abandoned) re-sets the status to in_progress, so a row that was
+  // cancelled AND archived comes fully back. Reachable from the Archived section + the kebab.
+  async function restoreWs(workstreamId: string) {
+    const ctx = findWsContext(workstreamId);
+    const name = ctx?.wsName || "Workstream";
+    const ok = await patchWorkstream(workstreamId, { archived: false, status: "in_progress" });
+    if (ok) { showToast(`<b>${escText(name)}</b> restored to the active grid.`); await refetch(); }
+    else showToast(`Couldn't restore <b>${escText(name)}</b> — try again.`);
+  }
+
+  // Delete — irreversible at the id level (the registry has no undelete), so we confirm,
+  // snapshot the workstream's criteria + sessions BEFORE deleting, and offer an Undo that
+  // re-creates it (new id, same work). DELETE /api/workstreams/:id.
+  async function deleteWs(workstreamId: string) {
+    const ctx = findWsContext(workstreamId);
+    const name = ctx?.wsName || "this workstream";
+    if (!window.confirm(`Delete "${name}"? This removes the workstream and its Definition of Done. Undo re-creates it from a snapshot (a new id).`)) return;
+    const snap = snapshotWorkstream(workstreamId);
+    let ok = false;
+    try {
+      const res = await fetch(`/api/workstreams/${encodeURIComponent(workstreamId)}`, { method: "DELETE", headers: api.headers() });
+      ok = res.ok;
+    } catch { ok = false; }
+    if (!ok) { showToast(`Couldn't delete <b>${escText(name)}</b> — try again.`); return; }
+    const undo = snap
+      ? () => {
+          void fetch(`/api/projects/${encodeURIComponent(snap.projectId)}/workstreams`, {
+            method: "POST",
+            headers: api.headers(),
+            body: JSON.stringify(snap.body),
+          }).then((r) => { if (r.ok || r.status === 201) void refetch(); else showToast(`Couldn't restore <b>${escText(name)}</b>.`); })
+            .catch(() => showToast(`Couldn't restore <b>${escText(name)}</b>.`));
+        }
+      : undefined;
+    showToast(`<b>${escText(name)}</b> deleted.`, undo);
+    await refetch();
+  }
+
+  // Route a kebab/archived-row lifecycle action to its handler. Centralizes the verb→handler
+  // map so both the menu (data-wsaction) and the sign-off Cancel (data-wscancel) reuse it.
+  function runWsAction(action: string, workstreamId: string) {
+    if (!workstreamId) return;
+    closeWsMenus();
+    switch (action) {
+      case "done": void markWsDone(workstreamId); break;
+      case "archive": void archiveWs(workstreamId); break;
+      case "cancel": void cancelWs(workstreamId); break;
+      case "restore": void restoreWs(workstreamId); break;
+      case "delete": void deleteWs(workstreamId); break;
+    }
+  }
+
+  // Open/close the small kebab popup menus. Only one is open at a time; a click elsewhere
+  // (handled by the document listener wired in init) closes them.
+  function closeWsMenus() {
+    elements.dashboardWrap.querySelectorAll<HTMLElement>(".wsmenu-pop").forEach((pop) => { pop.hidden = true; });
+    elements.dashboardWrap.querySelectorAll<HTMLElement>("[data-wsmenu-toggle]").forEach((b) => b.setAttribute("aria-expanded", "false"));
+  }
+  function toggleWsMenu(workstreamId: string) {
+    const menu = elements.dashboardWrap.querySelector<HTMLElement>(`.wsmenu[data-wsmenu="${CSS.escape(workstreamId)}"]`);
+    if (!menu) return;
+    const pop = menu.querySelector<HTMLElement>(".wsmenu-pop");
+    const toggle = menu.querySelector<HTMLElement>("[data-wsmenu-toggle]");
+    const wasOpen = pop ? !pop.hidden : false;
+    closeWsMenus();
+    if (pop && !wasOpen) { pop.hidden = false; toggle?.setAttribute("aria-expanded", "true"); }
+  }
+
   // Find an overlay element by id WITHOUT touching the host document — keeps every
   // `data-jump` target scoped under #dashboardView (HARD RULE: nothing leaks out).
   function byId(id: string): HTMLElement | null {
@@ -1022,6 +1202,34 @@ export function createDashboard(options: {
   function handleClick(event: MouseEvent) {
     const target = event.target as HTMLElement | null;
     if (!target) return;
+
+    // ── per-workstream lifecycle menu (M3) ── checked FIRST so the kebab + its menu items
+    // never fall through to the row toggle / data-open beneath them.
+    const kebab = target.closest<HTMLElement>("[data-wsmenu-toggle]");
+    if (kebab) {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleWsMenu(kebab.getAttribute("data-wsmenu-toggle") || "");
+      return;
+    }
+    const wsAction = target.closest<HTMLElement>("[data-wsaction]");
+    if (wsAction) {
+      event.preventDefault();
+      event.stopPropagation();
+      runWsAction(wsAction.getAttribute("data-wsaction") || "", wsAction.getAttribute("data-wsid") || "");
+      return;
+    }
+    // A click anywhere else inside the overlay (not on a menu) dismisses any open kebab menu
+    // before the click's own handling proceeds.
+    if (!target.closest(".wsmenu")) closeWsMenus();
+    // Sign-off strip "Cancel — no longer relevant" → abandon the owning workstream.
+    const wsCancel = target.closest<HTMLElement>("[data-wscancel]");
+    if (wsCancel) {
+      event.preventDefault();
+      event.stopPropagation();
+      runWsAction("cancel", wsCancel.getAttribute("data-wscancel") || "");
+      return;
+    }
 
     // Quick-reply chip → POST /api/prompt then open the session. Checked BEFORE data-open so a chip
     // inside a `data-open` session row routes to the reply, not a bare open.
@@ -1162,7 +1370,14 @@ export function createDashboard(options: {
     // The opaque full-screen #dashboardView is the click target; clicking its scroll
     // surface (outside the centered .wrap) closes — no separate backdrop node needed.
     elements.dashboardView.addEventListener("click", (event) => {
-      if (event.target === elements.dashboardView) closeDashboard();
+      if (event.target === elements.dashboardView) { closeWsMenus(); closeDashboard(); }
+    });
+    // ESC dismisses an open kebab menu first (before the app's ESC closes the overlay), so
+    // the menu can be escaped without losing the whole dashboard.
+    elements.dashboardView.addEventListener("keydown", (event) => {
+      if ((event as KeyboardEvent).key !== "Escape") return;
+      const anyOpen = !!elements.dashboardWrap.querySelector<HTMLElement>(".wsmenu-pop:not([hidden])");
+      if (anyOpen) { event.stopPropagation(); closeWsMenus(); }
     });
     // Delegated drill-in / continue / expand-collapse, scoped to the overlay.
     elements.dashboardWrap.addEventListener("click", handleClick);

@@ -237,7 +237,7 @@ function toSession(sr: SessionRollup, wsLoop?: WorkstreamRollup["loop"]): VSessi
   };
 }
 
-function toWorkstream(wr: WorkstreamRollup): VWorkstream {
+function toWorkstream(wr: WorkstreamRollup, project: ProjectRollup["project"]): VWorkstream {
   // A loop is a workstream-level concept (Workstream.isLoop/loopStartedAt) — push it
   // down to each session so the per-row "∞ looping {elapsed}" badge + proposed band
   // render with elapsed grounded in the workstream's stored loopStartedAt.
@@ -257,6 +257,16 @@ function toWorkstream(wr: WorkstreamRollup): VWorkstream {
     loop: !!wr.workstream.isLoop,
     // Renderer fallback for a merge-status session whose receipt carries no mergedAgo.
     mergedAgo: mergedAgoFromCriteria(wr.progress?.criteria),
+    // M3 lifecycle: carry the server `inactive` flag + the canonical WorkItemStatus +
+    // the owning project context so the actions menu can show the right verbs and the
+    // Archived section can render rows outside a `.pcard`.
+    _inactive: !!wr.inactive,
+    _itemStatus: wr.workstream.status,
+    _projectId: project.id,
+    _projectName: project.name,
+    // The synthetic rollup-time "Unfiled" bucket has no STORED workstream (id ends
+    // `:unfiled`), so it can't be PATCHed/DELETEd — the lifecycle menu is suppressed on it.
+    _synthetic: wr.workstream.id.endsWith(":unfiled"),
   };
 }
 
@@ -267,13 +277,20 @@ function prettyPath(root?: string): string {
 }
 
 function toProject(pr: ProjectRollup): VProject {
+  const all = pr.workstreams.map((wr) => toWorkstream(wr, pr.project));
+  // Split active vs archived/abandoned so the active grid (gauge, long-pole, dotStrip,
+  // fleet counts) only ever sees active workstreams; the inactive ones render in a
+  // separate collapsed "Archived" surface, out of every active count (M3 HARD RULE).
+  const workstreams = all.filter((w) => !w._inactive);
+  const archivedWorkstreams = all.filter((w) => w._inactive);
   return {
     id: pr.project.id,
     name: pr.project.name,
     path: prettyPath(pr.project.roots[0]),
     desc: pr.project.description ?? "",
     nest: pr.lineage ? `in ${pr.lineage.parentProjectName}` : undefined,
-    workstreams: pr.workstreams.map(toWorkstream),
+    workstreams,
+    ...(archivedWorkstreams.length ? { archivedWorkstreams } : {}),
     // The server's k-of-n project gauge (rollup.ts projectProgress) flows straight onto
     // `_prog` so the ring reads the server ProgressSnapshot — the client never re-derives
     // the project percent (review finding; matches the ws/session rings via toProg).
@@ -285,6 +302,13 @@ function toProject(pr: ProjectRollup): VProject {
 export function toViewModel(rollups: ProjectRollup[]): ViewModel {
   const data = (rollups || []).map(toProject);
   const SESS: ViewModel["SESS"] = {};
-  data.forEach((p) => p.workstreams.forEach((w) => w.sessions.forEach((s) => { SESS[s.id] = { s, w, p }; })));
+  // Index BOTH active and archived workstreams' sessions: a row's actions menu (and the
+  // Archived section's per-session controls) resolves the session/workstream via SESS,
+  // so an archived session must still be reachable for restore / delete / open.
+  const indexWs = (p: VProject, w: VWorkstream) => w.sessions.forEach((s) => { SESS[s.id] = { s, w, p }; });
+  data.forEach((p) => {
+    p.workstreams.forEach((w) => indexWs(p, w));
+    (p.archivedWorkstreams || []).forEach((w) => indexWs(p, w));
+  });
   return { data, SESS };
 }

@@ -106,8 +106,10 @@ test.describe("Project Rollups dashboard", () => {
     const res = await rollupsRequest; // network proof
     expect(res.ok()).toBe(true);
 
-    // The overlay renders real content (the hero always renders from the feed).
-    await expect(view.locator(".hero")).toBeVisible();
+    // The overlay renders real content from the feed: a populated registry shows the hero;
+    // an empty one (the isolated playwright registry starts empty) shows the first-run
+    // onboarding card. Either is an honest, non-blank render.
+    await expect(view.locator(".hero, [data-testid='first-run']").first()).toBeVisible();
 
     // ESC closes and returns to the live conversation untouched.
     await page.keyboard.press("Escape");
@@ -286,6 +288,114 @@ test.describe("Project Rollups dashboard", () => {
       // Still open after reload — the route survives, not just the in-memory toggle.
       await expect(page.locator("#dashboardView")).toBeVisible();
       expect(new URL(page.url()).searchParams.get("view")).toBe("dashboard");
+
+      expect(pageErrors).toEqual([]);
+    });
+  });
+
+  // M3 — manual workstream lifecycle UI: the per-workstream kebab (⋯) menu (Mark done /
+  // Archive / Cancel / Delete) + the sign-off strip's "Cancel — no longer relevant". Each
+  // action persists via the REAL registry route and the UI re-shapes honestly (archived /
+  // abandoned workstreams leave the active grid for the collapsed Archived surface). All
+  // mutations ride the dedicated playwright server (its own PI_WEB_PROJECTS_FILE), never
+  // the real registry.
+  test.describe("M3: workstream lifecycle menu", () => {
+    // Read a single project's rollup from the live feed (the persistence assertion).
+    async function rollupFor(page: Page, projectId: string) {
+      const res = await page.request.get("/api/rollups");
+      expect(res.ok()).toBe(true);
+      const rollups = (await res.json()).rollups as Array<{
+        project: { id: string };
+        workstreams: Array<{ workstream: { id: string; status: string; archived?: boolean }; inactive?: boolean }>;
+      }>;
+      return rollups.find((r) => r.project.id === projectId);
+    }
+
+    test("Mark done / Archive / Cancel / Delete each persist and re-shape the UI", async ({ page }) => {
+      const pageErrors = trackPageErrors(page);
+      const name = `E2E Lifecycle ${Date.now()}`;
+      const { projectId, workstreamId } = await createSignProject(page.request, name);
+
+      await page.locator("#dashboardButton").click();
+      const view = page.locator("#dashboardView");
+      await expect(view).toBeVisible();
+
+      const pcard = view.locator(`.pcard[data-project-id="${projectId}"]`);
+      await expect(pcard).toBeVisible();
+
+      // The single-workstream card-header kebab + its menu (scoped to that one `.wsmenu` so
+      // the duplicate `.ws`-row kebab for the same workstream doesn't ambiguate selectors).
+      const cardMenu = pcard.locator(".pcard-head .wsmenu").first();
+      const cardKebab = cardMenu.locator("[data-wsmenu-toggle]");
+      const menuItem = (action: string) => cardMenu.locator(`[data-wsaction="${action}"]`);
+
+      // ── Mark done ──
+      await expect(cardKebab).toBeVisible();
+      await cardKebab.click();
+      await expect(menuItem("done")).toBeVisible();
+      await menuItem("done").click();
+      // Persisted: the workstream's WorkItemStatus is now "done".
+      await expect.poll(async () => (await rollupFor(page, projectId))?.workstreams[0]?.workstream.status).toBe("done");
+
+      // ── Archive ── re-open the menu (Mark done is now gone), archive the workstream.
+      await cardKebab.click();
+      await expect(menuItem("archive")).toBeVisible();
+      await menuItem("archive").click();
+      // Persisted as inactive (archived) → the Archived surface appears, the card leaves the grid.
+      await expect.poll(async () => (await rollupFor(page, projectId))?.workstreams[0]?.inactive).toBe(true);
+      const archived = view.locator('[data-testid="archived"]');
+      await expect(archived).toBeVisible();
+      // The Archived surface is collapsed by default (it never competes with live work) —
+      // expand it to reveal the shelved row.
+      await archived.locator(".done-head").click();
+      await expect(archived.locator(`.archrow[data-ws-id="${workstreamId}"]`)).toBeVisible();
+      // The archived workstream is OUT of the active grid (no active .ws row for it).
+      await expect(pcard.locator(`.ws[data-ws-id="${workstreamId}"]`)).toHaveCount(0);
+
+      // ── Restore then Cancel ── restore from the Archived row, then cancel (abandon) it.
+      await archived.locator(`.archrow[data-ws-id="${workstreamId}"] [data-wsaction="restore"]`).click();
+      await expect.poll(async () => (await rollupFor(page, projectId))?.workstreams[0]?.inactive ?? false).toBe(false);
+
+      // Cancel confirms via window.confirm → accept it.
+      page.once("dialog", (d) => d.accept());
+      const cardMenu2 = pcard.locator(".pcard-head .wsmenu").first();
+      await cardMenu2.locator("[data-wsmenu-toggle]").click();
+      await cardMenu2.locator(`[data-wsaction="cancel"]`).click();
+      // Persisted as abandoned → inactive again, surfaced as "Cancelled" in Archived.
+      await expect.poll(async () => (await rollupFor(page, projectId))?.workstreams[0]?.workstream.status).toBe("abandoned");
+      const archived2 = view.locator('[data-testid="archived"]');
+      await expect(archived2).toBeVisible();
+      await archived2.locator(".done-head").click(); // expand (re-rendered collapsed)
+      await expect(archived2.locator(`.archrow[data-ws-id="${workstreamId}"]`)).toContainText("Cancelled");
+
+      // ── Delete ── from the Archived row; confirm dialog accepted. The workstream is gone.
+      page.once("dialog", (d) => d.accept());
+      await archived2.locator(`.archrow[data-ws-id="${workstreamId}"] [data-wsaction="delete"]`).click();
+      await expect.poll(async () => (await rollupFor(page, projectId))?.workstreams.length ?? 0).toBe(0);
+
+      expect(pageErrors).toEqual([]);
+    });
+
+    test("Cancel is dismissable — declining the confirm leaves the workstream active", async ({ page }) => {
+      const pageErrors = trackPageErrors(page);
+      const name = `E2E Cancel-decline ${Date.now()}`;
+      const { projectId, workstreamId } = await createSignProject(page.request, name);
+
+      await page.locator("#dashboardButton").click();
+      const view = page.locator("#dashboardView");
+      await expect(view).toBeVisible();
+      const pcard = view.locator(`.pcard[data-project-id="${projectId}"]`);
+      await expect(pcard).toBeVisible();
+
+      // Decline the confirm → no mutation.
+      page.once("dialog", (d) => d.dismiss());
+      const cardMenu = pcard.locator(".pcard-head .wsmenu").first();
+      await cardMenu.locator("[data-wsmenu-toggle]").click();
+      await cardMenu.locator(`[data-wsaction="cancel"]`).click();
+      // Still active (not abandoned, not inactive).
+      const r = await rollupFor(page, projectId);
+      expect(r?.workstreams[0]?.workstream.status).not.toBe("abandoned");
+      expect(r?.workstreams[0]?.inactive ?? false).toBe(false);
 
       expect(pageErrors).toEqual([]);
     });

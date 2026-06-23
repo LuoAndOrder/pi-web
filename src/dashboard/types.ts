@@ -70,6 +70,10 @@ export interface Workstream {
   loopStartedAt?: string;
   budget?: { maxMinutes?: number; maxCostUsd?: number };
   paused?: boolean;
+  // Archived OR status==="abandoned" workstreams are excluded from active
+  // counts/gauge/long-pole and surfaced in a separate collapsed bucket; the
+  // workstream stays in the registry (retrievable). Normalized like project.archived.
+  archived?: boolean;
 }
 
 export interface ProjectRegistry {
@@ -182,6 +186,10 @@ export interface WorkstreamRollup {
   sessionGauge?: { done: number; total: number; percent: number };
   counts: StatusCounts;
   loop?: SessionRollup["loop"];
+  // True when the workstream is archived OR its status is "abandoned": the UI groups
+  // these into a separate collapsed surface and the project ring/gauge/long-pole and
+  // active counts EXCLUDE them (M1/M3).
+  inactive?: boolean;
 }
 
 export interface ProjectRollup {
@@ -190,5 +198,8 @@ export interface ProjectRollup {
   progress: ProgressSnapshot;
   counts: StatusCounts;
   activeSessionCount: number;
+  // Sessions in archived/abandoned workstreams (the separate collapsed surface).
+  // Absent when zero — excluded from activeSessionCount and the gauge.
+  archivedSessionCount?: number;
   lineage?: { parentProjectName: string; fullPath: string };
 }

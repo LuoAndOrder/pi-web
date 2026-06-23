@@ -102,6 +102,22 @@ export interface VWorkstream {
   _sessGauge?: VGauge;
   loop?: boolean;
   mergedAgo?: string;
+  // Archived OR abandoned: this workstream is shelved. The adapter routes inactive
+  // workstreams into `VProject.archivedWorkstreams` (a separate collapsed surface),
+  // out of the active gauge/counts; the flag also drives the Archived-row chrome.
+  _inactive?: boolean;
+  // The workstream's canonical 5-value WorkItemStatus (planned/in_progress/blocked/
+  // done/abandoned), carried so the per-workstream actions menu can hide/show the
+  // right verbs (e.g. "Mark done" is hidden once status is already "done").
+  _itemStatus?: string;
+  // The project this workstream belongs to — the actions menu PATCHes/ DELETEs by
+  // workstream id, but the Archived section renders rows outside a `.pcard`, so each
+  // row carries its project crumb for context.
+  _projectId?: string;
+  _projectName?: string;
+  // The synthetic rollup-time "Unfiled" bucket has no stored registry workstream, so the
+  // lifecycle menu (PATCH/DELETE by id) is suppressed on it (it would 404).
+  _synthetic?: boolean;
 }
 export interface VProject {
   id: string;
@@ -110,6 +126,10 @@ export interface VProject {
   desc?: string;
   nest?: string;
   workstreams: VWorkstream[];
+  // Archived / abandoned workstreams, split out by the adapter so the active grid
+  // (gauge, long-pole, dotStrip, fleet counts) never sees them; rendered in a
+  // separate collapsed "Archived" surface, out of the active counts (M3 HARD RULE).
+  archivedWorkstreams?: VWorkstream[];
   // The server-computed project ProgressSnapshot (rollup.ts projectProgress: k-of-n
   // scorable workstreams done). The client trusts this and NEVER re-derives the project
   // gauge on render — `met`/`total`/`percent` are the single source of truth for the ring,
@@ -191,6 +211,9 @@ export interface DashboardRenderer {
   // shared `state` (signed map, SESS, _evaluating), so the caller mutates state then re-renders.
   renderSignoff: () => void;
   renderGrid: () => void;
+  // M3 — repaint the Archived section after a lifecycle action (archive / cancel / restore)
+  // re-shapes which workstreams are shelved, without a full master re-render.
+  renderArchived: () => void;
   // Tells whether a `sign`-status session still rests on stale/unrun evidence — used to decide
   // batch sign-off eligibility (only clean items flip).
   signPending: (sessionId: string) => boolean;
@@ -425,6 +448,41 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
   const focusIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>`;
   const recheckIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg>`;
   const closeIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="14" height="14"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
+  const kebabIcon = () => `<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>`;
+
+  // ─────────────────────────── per-workstream lifecycle menu (M3) ───────────────────────────
+  // A kebab (⋯) on every workstream row + card header opens a small menu with the full
+  // lifecycle: Mark done / Archive / Cancel (abandon) / Delete — all driven from the UI
+  // (operability lens), wired in dashboard.ts to the REAL PATCH/DELETE registry routes.
+  // The menu is data-attribute-only (the delegated click handler in dashboard.ts reads
+  // `data-wsaction` + `data-wsid`); it carries no inline handlers. Destructive verbs
+  // (Cancel/Delete) get a confirm + (for Delete) an undo toast in the controller.
+  //
+  // `inactive` (archived/abandoned) rows flip the menu to restore-oriented verbs: Restore
+  // (un-archive / re-open) + Delete — Mark done / Archive / Cancel are meaningless on
+  // already-shelved work, so they're hidden to keep the menu honest.
+  function wsMenu(w: VWorkstream): string {
+    // The synthetic Unfiled bucket has no stored workstream to act on — no lifecycle menu.
+    if (w._synthetic) return "";
+    const id = esc(w.id);
+    const item = (action: string, label: string, danger?: boolean) =>
+      `<button class="wsmenu-item${danger ? " danger" : ""}" type="button" data-wsaction="${action}" data-wsid="${id}" role="menuitem">${esc(label)}</button>`;
+    let items: string;
+    if (w._inactive) {
+      const restoreLabel = w._itemStatus === "abandoned" ? "Re-open workstream" : "Restore from archive";
+      items = item("restore", restoreLabel) + item("delete", "Delete permanently…", true);
+    } else {
+      const markDone = w._itemStatus === "done" ? "" : item("done", "Mark done");
+      items = markDone
+        + item("archive", "Archive")
+        + item("cancel", "Cancel — no longer relevant…", true)
+        + item("delete", "Delete…", true);
+    }
+    return `<div class="wsmenu" data-wsmenu="${id}">
+      <button class="wskebab" type="button" data-wsmenu-toggle="${id}" aria-haspopup="menu" aria-expanded="false" title="Workstream actions" aria-label="Workstream actions">${kebabIcon()}</button>
+      <div class="wsmenu-pop" role="menu" hidden>${items}</div>
+    </div>`;
+  }
 
   // ═══════════════════════════ master render ═══════════════════════════
   function renderAll(sc?: { empty?: boolean; candidates?: number }) {
@@ -444,6 +502,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       ${projectsSectionHtml(counts)}
       ${plannedSectionHtml(counts)}
       ${doneSectionHtml(counts)}
+      ${archivedSectionHtml()}
       ${tailNoteHtml(counts)}
     `;
     renderRail(counts);
@@ -452,6 +511,62 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     renderGrid(counts);
     renderPlanned();
     renderDone();
+    renderArchived();
+  }
+
+  // ─────────────────────────── archived / abandoned surface (M3) ───────────────────────────
+  // A separate COLLAPSED surface for archived + abandoned workstreams: excluded from every
+  // active count, the gauge, the long-pole and the fleet hero (the adapter already split
+  // them off into `p.archivedWorkstreams`). Each row carries Restore + Delete so a shelved
+  // workstream is fully recoverable from the UI (full-lifecycle lens). Collapsed by default
+  // so it never competes with live work for attention.
+  function archivedRows(): Array<{ w: VWorkstream; p: VProject }> {
+    const rows: Array<{ w: VWorkstream; p: VProject }> = [];
+    state.data.forEach((p) => (p.archivedWorkstreams || []).forEach((w) => rows.push({ w, p })));
+    return rows;
+  }
+  function archivedSectionHtml(): string {
+    if (!archivedRows().length) return "";
+    return `<section class="done archived" id="sec-archived" data-testid="archived" style="margin-top:32px"></section>`;
+  }
+  function renderArchived() {
+    const host = document.getElementById("sec-archived"); if (!host) return;
+    const rows = archivedRows();
+    if (!rows.length) { host.innerHTML = ""; return; }
+    const abandoned = rows.filter(({ w }) => w._itemStatus === "abandoned").length;
+    const archived = rows.length - abandoned;
+    const sumBits: string[] = [];
+    if (archived) sumBits.push(`${archived} archived`);
+    if (abandoned) sumBits.push(`${abandoned} cancelled`);
+    const row = ({ w, p }: { w: VWorkstream; p: VProject }) => {
+      const sessN = w.sessions.length;
+      const why = w._itemStatus === "abandoned"
+        ? `<span class="badge idle"><span class="d"></span>Cancelled · no longer relevant</span>`
+        : `<span class="badge idle"><span class="d"></span>Archived</span>`;
+      const restoreLabel = w._itemStatus === "abandoned" ? "Re-open" : "Restore";
+      return `<div class="drow archrow" data-ws-id="${esc(w.id)}">
+        <div class="dleft">
+          <div class="dcrumb"><b>${esc(p.name)}</b>${p.nest ? ` <span class="nest">⤷ ${esc(p.nest)}</span>` : ""} › ${esc(w.name)}</div>
+          <div class="dname">${esc(w.name)} ${why}</div>
+          <div class="dnote">${sessN} session${sessN === 1 ? "" : "s"} · excluded from the project gauge &amp; active counts · last DoD: ${dodInline(w.dod || "none set", w.dodSrc)}</div>
+        </div>
+        <div class="sess-act">
+          <button class="btn ghost sm" type="button" data-wsaction="restore" data-wsid="${esc(w.id)}" title="Bring this workstream back into the active grid">${restoreLabel}</button>
+          <button class="btn ghost sm danger" type="button" data-wsaction="delete" data-wsid="${esc(w.id)}" title="Permanently delete this workstream + its Definition of Done">Delete</button>
+        </div>
+      </div>`;
+    };
+    const CAP = 6, shown = rows.slice(0, CAP), extra = rows.slice(CAP);
+    host.innerHTML = `
+      <div class="done-head" data-toggle="done">
+        <div class="done-title">⦸ Archived</div>
+        <div class="done-sum"><b>${rows.length} shelved workstream${rows.length === 1 ? "" : "s"}</b> — ${esc(sumBits.join(" · "))} · out of the active gauge &amp; counts</div>
+        <span class="chev">${chevIcon()}</span>
+      </div>
+      <div class="done-body">
+        <div class="done-grp"><div class="done-grp-h"><span class="sw"></span> Shelved · ${rows.length}</div>
+          ${shown.map(row).join("")}${extra.length ? `<div class="more-rows" hidden>${extra.map(row).join("")}</div><button class="morelink" data-toggle="more">+${extra.length} more — show all</button>` : ""}</div>
+      </div>`;
   }
 
   function dormantIds() { return new Set(state.data.filter((p) => pClass(p) === "calm").map((p) => p.id)); }
@@ -759,7 +874,10 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
           ? `<button class="btn remedy sm" data-recheckcard="${s.id}" title="command DoD evidence is stale — re-run it on demand">${recheckIcon()} Re-check</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`
           // Sign-off is now a LIVE one-click control (optimistic PATCH of the gate criterion);
           // Review (the read action) stays beside it. Sign-off is NEVER fused with merge.
-          : `<button class="btn sign sm" data-signoff="${esc(critId)}"${deferTip("Sign off — merge stays a separate step")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`;
+          // "Cancel — no longer relevant" abandons the owning workstream (PATCH status:
+          // "abandoned", confirm) — a first-class lifecycle exit beside sign-off (M3): a
+          // done-per-DoD item the user has decided to shelve rather than ship.
+          : `<button class="btn sign sm" data-signoff="${esc(critId)}"${deferTip("Sign off — merge stays a separate step")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off</button><button class="btn ghost sm" data-open="${s.id}">Review</button>${w._synthetic ? "" : `<button class="btn ghost sm wscancel" data-wscancel="${esc(w.id)}" title="No longer relevant — abandon this workstream instead of signing it off (it moves to Archived)">Cancel</button>`}`;
       return `<article class="soff ${gone ? "gone" : ""}">
         <div class="sleft">
           <div class="scrumb"><b>${esc(p.name)}</b>${lineage} › ${esc(w.name)} · <span class="sn">${esc(s.name)}</span></div>
@@ -942,7 +1060,10 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
           <div class="ppath mono" title="${esc(p.path)}${p.desc ? ` · ${esc(p.desc)}` : ""}"><span class="pp-path">${esc(p.path)}</span>${p.desc ? `<span class="pp-desc"> · ${esc(p.desc)}</span>` : ""}</div>
         </div>
         <div class="pcard-counts">
-          <span class="chev">${chevIcon()}</span>
+          <div class="pcard-counts-top">
+            ${p.workstreams.length === 1 ? wsMenu(p.workstreams[0]) : ""}
+            <span class="chev">${chevIcon()}</span>
+          </div>
           ${countPills.join("")}
         </div>
       </div>
@@ -1011,6 +1132,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
         </div>
         <div class="ws-meta">
           <span class="ws-cnt">${w.sessions.length} session${w.sessions.length > 1 ? "s" : ""}</span>
+          ${wsMenu(w)}
           <span class="ws-chev chev">${chevIcon()}</span>
         </div>
       </div>
@@ -1306,6 +1428,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     contextBandHtml,
     renderSignoff,
     renderGrid: () => renderGrid(fleetCounts()),
+    renderArchived,
     signPending: (id: string) => { const ref = state.SESS[id]; return !!ref && signPending(ref.s); },
   };
 }
