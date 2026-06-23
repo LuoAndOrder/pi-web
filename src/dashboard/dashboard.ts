@@ -13,6 +13,8 @@ import type { ApiClient } from "../app/api.js";
 import type { AppElements } from "../app/elements.js";
 import type { SessionsController } from "../sessions/sessionDrawer.js";
 import type { ProjectRollup } from "./types.js";
+import { createRenderer, type RenderState } from "./render.js";
+import { toViewModel } from "./rollupAdapter.js";
 
 export type DashboardController = {
   init: () => void;
@@ -44,6 +46,12 @@ export function createDashboard(options: {
   let refetchTimer: number | undefined;
   const state: DashboardState = { rollups: [], loading: false, error: null };
 
+  // The mockup-shaped view model the ported render core reads. `toViewModel` (the
+  // adapter seam) fills `data`/`SESS` from the server `ProjectRollup[]`; the client
+  // trusts the server `ProgressSnapshot` and never re-derives it here.
+  const view: RenderState = { data: [], SESS: {}, signed: {}, lastVisit: null, _pingId: null };
+  const renderer = createRenderer({ wrap: elements.dashboardWrap, state: view });
+
   function escapeHtml(value: string) {
     return value.replace(/[&<>"']/g, (char) =>
       char === "&" ? "&amp;"
@@ -54,57 +62,33 @@ export function createDashboard(options: {
     );
   }
 
-  // S4 placeholder render. S5 replaces this body with the ported render core
-  // (rollupAdapter.toViewModel + render.renderAll) driven by `state.rollups`.
-  function renderWrap() {
-    if (state.loading && state.rollups.length === 0) {
-      elements.dashboardWrap.innerHTML = `
-        <div class="hero">
-          <div class="eyebrow">Project Rollups</div>
-          <h1 class="headline">Loading your projects…</h1>
-          <div class="subline">Aggregating live pi sessions into project rollups.</div>
-        </div>`;
-      return;
-    }
+  function renderLoadingOrError(): boolean {
     if (state.error) {
       elements.dashboardWrap.innerHTML = `
-        <div class="hero">
+        <section class="hero">
           <div class="eyebrow">Project Rollups</div>
           <h1 class="headline">Couldn't load rollups</h1>
-          <div class="subline">${escapeHtml(state.error)}</div>
-        </div>`;
-      return;
+          <p class="subline">${escapeHtml(state.error)}</p>
+        </section>`;
+      return true;
     }
-    if (state.rollups.length === 0) {
+    if (state.loading && view.data.length === 0) {
       elements.dashboardWrap.innerHTML = `
-        <div class="hero">
+        <section class="hero">
           <div class="eyebrow">Project Rollups</div>
-          <h1 class="headline">No projects yet</h1>
-          <div class="subline">Register a project to start tracking its sessions against a Definition of Done.</div>
-        </div>`;
-      return;
+          <h1 class="headline">Loading your projects…</h1>
+          <p class="subline">Aggregating live pi sessions into project rollups.</p>
+        </section>`;
+      return true;
     }
-    const workstreamCount = state.rollups.reduce((sum, rollup) => sum + rollup.workstreams.length, 0);
-    const activeCount = state.rollups.reduce((sum, rollup) => sum + (rollup.activeSessionCount || 0), 0);
-    const rail = state.rollups
-      .map((rollup) => {
-        const name = escapeHtml(rollup.project?.name || "Untitled project");
-        const sessions = rollup.workstreams.reduce((sum, ws) => sum + ws.sessions.length, 0);
-        return `<span class="pill" data-project-id="${escapeHtml(rollup.project?.id || "")}">`
-          + `${name}<span class="n">${sessions}</span></span>`;
-      })
-      .join("");
-    elements.dashboardWrap.innerHTML = `
-      <div class="hero">
-        <div class="eyebrow">Project Rollups</div>
-        <h1 class="headline">${state.rollups.length} project${state.rollups.length === 1 ? "" : "s"} in view</h1>
-        <div class="subline">
-          <b>${workstreamCount}</b> workstream${workstreamCount === 1 ? "" : "s"}
-          · <b>${activeCount}</b> active session${activeCount === 1 ? "" : "s"}.
-          Full rollup view (rings, needs-you, sign-off) lands in the next slice.
-        </div>
-        <div class="rail">${rail}</div>
-      </div>`;
+    return false;
+  }
+
+  // Drive the ported render core (rollupAdapter.toViewModel → render.renderAll). An
+  // empty registry renders the first-run onboarding; otherwise the full rollup grid.
+  function renderWrap() {
+    if (renderLoadingOrError()) return;
+    renderer.renderAll(view.data.length === 0 ? { empty: true, candidates: 0 } : {});
   }
 
   async function refetch() {
@@ -125,6 +109,9 @@ export function createDashboard(options: {
       const data = await res.json();
       if (token !== fetchToken) return;
       state.rollups = Array.isArray(data?.rollups) ? (data.rollups as ProjectRollup[]) : [];
+      const vm = toViewModel(state.rollups);
+      view.data = vm.data;
+      view.SESS = vm.SESS;
       state.loading = false;
       if (open) renderWrap();
     } catch (error) {
@@ -151,6 +138,8 @@ export function createDashboard(options: {
   function openDashboard() {
     if (open) return;
     reveal();
+    // Show the loading hero (not the empty-onboarding flash) until the first fetch lands.
+    if (view.data.length === 0) state.loading = true;
     renderWrap();
     void refetch();
   }

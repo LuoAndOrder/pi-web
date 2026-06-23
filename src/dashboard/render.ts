@@ -1,0 +1,1112 @@
+// Project Rollups — read-only render core.
+//
+// Ported nearly byte-for-byte from the validated mockup
+// `docs/dashboard-designs-final/index.html` (render functions L896-2862). The ONE
+// structural change is the data seam: the mockup derived `_prog`/`_gate`/`_mixed`/
+// `_sessGauge` in `enrich(data)` and read a fixture; here `rollupAdapter.toViewModel`
+// maps the server `ProjectRollup[]` onto these same fixture field names BEFORE render,
+// so every function below reads exactly what it read in the mockup — and the client
+// NEVER re-derives progress (it trusts the server `ProgressSnapshot`).
+//
+// All functions live inside `createRenderer` so they close over the live `state` and
+// the `wrap` element (the dashboard overlay's `.wrap`), keeping the bodies verbatim.
+// Interactions (Continue / sign-off / drill-in click delegation, the synthetic
+// `#conv` composer, DoD authoring) are intentionally NOT ported here — they land in
+// S6/S7/S9/S10 wired to the REAL conversation + REST surface.
+
+// ─────────────────────────── view-model shapes the renderers read ───────────────────────────
+
+export interface VProg {
+  met: number;
+  total: number;
+  percent: number;
+  allMet: boolean;
+  unrun: number;
+  stale: number;
+  metW?: number;
+  totW?: number;
+  gateOnly?: boolean;
+}
+export interface VGauge {
+  done: number;
+  total: number;
+  percent: number;
+}
+export interface VCheck {
+  cmd?: string;
+  exit?: number;
+  at?: string;
+  kind?: string;
+}
+export interface VArtifact {
+  kind?: string;
+  branch?: string;
+  sha?: string;
+  merged?: boolean;
+  add?: number;
+  del?: number;
+  ahead?: number;
+  note?: string;
+  files?: number;
+  check?: VCheck;
+  mergedAgo?: string;
+}
+export interface VCrit {
+  text?: string;
+  met?: boolean;
+  src?: string;
+  ev?: string;
+  at?: string;
+  gate?: boolean;
+  weight?: number;
+  kind?: string;
+}
+export interface VSession {
+  id: string;
+  name?: string;
+  cwd?: string;
+  status: string;
+  _prog?: VProg | null;
+  _gate?: VCrit | null;
+  _evaluating?: boolean;
+  crit?: VCrit[];
+  live?: string;
+  dod?: string;
+  dodSrc?: string;
+  meta?: string;
+  kind?: string;
+  elicited?: boolean;
+  chips?: string[];
+  blast?: string;
+  failAction?: string;
+  loop?: boolean;
+  iter?: number;
+  iterspark?: number[];
+  elapsedMin?: number;
+  budget?: { maxMinutes?: number; maxCostUsd?: number };
+  cost?: number;
+  queue?: string[];
+  queueTotal?: number;
+  artifact?: VArtifact | null;
+  mergedAgo?: string;
+  unread?: boolean;
+  messageCount?: number;
+  modified?: string;
+}
+export interface VWorkstream {
+  id: string;
+  name: string;
+  status: string;
+  dod?: string;
+  dodSrc?: string;
+  sessions: VSession[];
+  _prog?: VProg | null;
+  _mixed?: boolean;
+  _sessGauge?: VGauge;
+  _crit?: VCrit[];
+  loop?: boolean;
+  mergedAgo?: string;
+}
+export interface VProject {
+  id: string;
+  name: string;
+  path?: string;
+  desc?: string;
+  nest?: string;
+  workstreams: VWorkstream[];
+}
+export interface RenderState {
+  data: VProject[];
+  SESS: Record<string, { s: VSession; w: VWorkstream; p: VProject }>;
+  signed: Record<string, boolean>;
+  lastVisit: string | null;
+  _pingId: string | null;
+}
+
+type RingItem = {
+  status?: string;
+  _prog?: VProg | null;
+  _sessGauge?: VGauge;
+  loop?: boolean;
+  _evaluating?: boolean;
+};
+type RowOpts = { navOnly?: boolean; setup?: boolean; live?: boolean };
+interface Counts {
+  run: number;
+  loop: number;
+  block: number;
+  softwait: number;
+  sign: number;
+  plan: number;
+  merge: number;
+  fail: number;
+  unset: number;
+  total: number;
+  projects: number;
+  active: number;
+  needs: number;
+  healthy: number;
+  setup: number;
+}
+interface CardLive {
+  tone: string;
+  loop: boolean;
+  txt: string;
+  id: string | null;
+  pointUp?: string;
+  qDelta?: { total: number } | null;
+}
+
+export interface DashboardRenderer {
+  renderAll: (sc?: { empty?: boolean; candidates?: number }) => void;
+}
+
+export function createRenderer(options: { wrap: HTMLElement; state: RenderState }): DashboardRenderer {
+  const { wrap, state } = options;
+
+  const ST: Record<string, { label: string; cls: string; color: string }> = {
+    block: { label: "Blocked · needs input", cls: "block", color: "var(--st-block)" },
+    run: { label: "Running", cls: "run", color: "var(--st-run)" },
+    loop: { label: "Looping", cls: "run", color: "var(--st-run)" },
+    sign: { label: "Done · awaiting sign-off", cls: "sign", color: "var(--st-sign)" },
+    merge: { label: "Completed · merged", cls: "merge", color: "var(--st-merge)" },
+    fail: { label: "Failed", cls: "fail", color: "var(--st-fail)" },
+    queued: { label: "Queued", cls: "idle", color: "var(--st-idle)" },
+    planned: { label: "Planned · not started", cls: "idle", color: "var(--st-idle)" },
+    unset: { label: "Set criterion", cls: "unset", color: "var(--st-sign)" },
+  };
+  const STATUS_RANK: Record<string, number> = { block: 0, fail: 0, unset: 1, run: 2, loop: 2, sign: 3, queued: 4, planned: 4, merge: 5 };
+  function statusRank(st: string) { return STATUS_RANK[st] != null ? STATUS_RANK[st] : 9; }
+  function byAttention(a: { status: string; id?: string; name?: string }, b: { status: string; id?: string; name?: string }) {
+    return (statusRank(a.status) - statusRank(b.status)) || String(a.id || a.name || "").localeCompare(String(b.id || b.name || ""));
+  }
+
+  // a sign-status session resting on stale/unrun command evidence — can't be signed off yet (#5)
+  function signPending(s: VSession) { return s.status === "sign" && !!s._prog && (s._prog.unrun > 0 || s._prog.stale > 0); }
+
+  // ─────────────────────────── small helpers ───────────────────────────
+  const esc = (t?: unknown) => String(t == null ? "" : t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
+  // a HARD need = a FAILURE or a STRUCTURALLY-ELICITED block; a non-elicited free-text stop can't be
+  // PROVEN a blocker (spec §5.3), so it degrades to a quiet "may be waiting", never Needs-you.
+  const isNeed = (s: VSession) => s.status === "fail" || (s.status === "block" && !!s.elicited);
+  const isSoftWait = (s: VSession) => s.status === "block" && !s.elicited;
+  const isRecent = (ago?: string) => /(^now|sec|min|m ago|h ago|hour)/i.test(ago || "");
+  function blastRadius(s: VSession): string {
+    if (s.blast) return s.blast;
+    const t = ((s.live || "") + " " + (s.name || "")).toLowerCase();
+    if (/(drop|delete|destroy|migrat|irrevers|\brm\b|--force|reset --hard|truncate)/.test(t)) return "hi";
+    return "lo";
+  }
+  const blastRank = (b: string) => (b === "hi" ? 0 : b === "md" ? 1 : 2);
+  const blastLabel = (b: string) => (b === "hi" ? "high blast radius" : b === "md" ? "elevated blast radius" : "low blast radius");
+  function waitLabel(s: VSession) { if (!s.meta) return ""; const m = agoToMin(s.meta); return (m >= 1e9 || m <= 0) ? "" : fmtMin(m); }
+  const shortWs = (nm?: string) => String(nm || "").replace("Nightly ", "").replace("Spike: ", "").replace(" loop", "");
+
+  // ─────────────────────────── SEGMENTED progress ring (#1,#5,#15) ───────────────────────────
+  function segArcs(met: number, runTotal: number, unrun: number, _percent: number, color: string) {
+    const r = 15.5, C = 2 * Math.PI * r, n = runTotal + unrun;
+    if (n > 6) { // past 6 criteria → one clean proportional arc over the RUN criteria (#15)
+      const off = C * (1 - (runTotal ? met / runTotal : 0));
+      const faint = unrun ? `<circle cx="18" cy="18" r="${r}" fill="none" stroke="color-mix(in srgb,var(--st-idle) 42%,transparent)" stroke-width="1.6" stroke-dasharray="2 3"/>` : "";
+      return faint + `<circle class="ring-fill" cx="18" cy="18" r="${r}" stroke="${color}" stroke-dasharray="${C} ${C}" stroke-dashoffset="${off}" transform="rotate(-90 18 18)"/>`;
+    }
+    const seg = C / n, gap = Math.min(seg * 0.22, 3.4), dash = Math.max(seg - gap, 1.4);
+    let out = "";
+    for (let i = 0; i < n; i++) {
+      const isUnrun = i >= runTotal;
+      const stroke = i < met ? color : (isUnrun ? "color-mix(in srgb,var(--st-idle) 45%,transparent)" : "var(--seg-off)");
+      const sw = isUnrun ? 1.6 : 3.4;
+      const da = isUnrun ? `${(dash * 0.5).toFixed(2)} ${(C - dash * 0.5).toFixed(2)}` : `${dash.toFixed(2)} ${(C - dash).toFixed(2)}`;
+      out += `<circle cx="18" cy="18" r="${r}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="butt" ` +
+        `stroke-dasharray="${da}" stroke-dashoffset="${(-i * seg).toFixed(2)}" transform="rotate(-90 18 18)"/>`;
+    }
+    return out;
+  }
+  // colourblind-safe status SHAPE at the 12-o'clock cap (#13)
+  function ringShape(st: string, color: string) {
+    if (st === "run") return `<circle cx="18" cy="3.6" r="2.7" fill="${color}"/>`;
+    if (st === "block") return `<rect x="15.3" y="0.9" width="5.4" height="5.4" rx="0.7" fill="${color}"/>`;
+    if (st === "sign") return `<rect x="15.4" y="1" width="5.2" height="5.2" fill="${color}" transform="rotate(45 18 3.6)"/>`;
+    if (st === "fail") return `<text x="18" y="7.6" text-anchor="middle" font-size="11" font-weight="800" fill="${color}">×</text>`;
+    return "";
+  }
+  // item = a session or workstream carrying .status, ._prog (or ._sessGauge for mixed), .loop.
+  // [data-testid="ring"] + [data-percent]/[data-asterisk] are the e2e contract hooks; data-percent
+  // ALWAYS equals a server-derived percent (never an invented one), satisfying DoD invariant #6.
+  function ringSvg(item: RingItem, size: number, opts?: { neutral?: boolean }) {
+    const o = opts || {}, r = 15.5, C = 2 * Math.PI * r, st = item.status || "";
+    const hue = (ST[st] && ST[st].color) || "var(--st-idle)";
+    const color = o.neutral ? "color-mix(in srgb,var(--muted) 70%,transparent)" : hue;
+    const svgAttrs = (extra?: string) => `class="ring" data-testid="ring"${extra || ""} viewBox="0 0 36 36" style="width:${size}px;height:${size}px"`;
+    const wrap2 = (inner: string, track?: boolean, extra?: string) => `<svg ${svgAttrs(extra)}>${track ? `<circle class="ring-track" cx="18" cy="18" r="${r}"/>` : ""}${inner}</svg>`;
+    if (item._evaluating) return `<svg ${svgAttrs()}><circle class="ring-track eval" cx="18" cy="18" r="${r}"/></svg>`;
+    if (st === "merge") return wrap2(`<circle class="ring-fill" cx="18" cy="18" r="${r}" stroke="${color}" stroke-dasharray="${C} ${C}" stroke-dashoffset="0" transform="rotate(-90 18 18)"/><text class="ring-gly" x="18" y="22.5" text-anchor="middle" fill="${color}">✓</text>`, true, ` data-percent="100" data-asterisk="0"`);
+    if (st === "loop" || item.loop) { // an autonomous loop is just "running" (cyan ∞); no live alarm
+      return wrap2(`<circle class="ring-dot" cx="18" cy="18" r="${r}" style="stroke:color-mix(in srgb,var(--st-run) 55%,transparent)"/><text class="ring-gly" x="18" y="22.8" text-anchor="middle" fill="${color}">∞</text>`, true);
+    }
+    if (st === "queued" || st === "planned") return wrap2(`<circle class="ring-dot" cx="18" cy="18" r="${r}"/><text class="ring-gly" x="18" y="22.6" text-anchor="middle" fill="var(--st-idle)">·</text>`, true);
+    if (item._sessGauge) {
+      const g = item._sessGauge;
+      return wrap2(`${segArcs(g.done, g.total, 0, g.percent, "color-mix(in srgb,var(--muted) 78%,transparent)")}${ringShape(st, o.neutral ? color : hue)}<text class="ring-num" x="18" y="22.2" text-anchor="middle" font-size="9">${g.done}/${g.total}</text>`, false, ` data-percent="${g.percent}" data-asterisk="0"`);
+    }
+    const prog = item._prog;
+    if (st === "unset" || !prog || (prog.total === 0 && !prog.unrun)) return wrap2(`<circle class="ring-dot" cx="18" cy="18" r="${r}" style="stroke:color-mix(in srgb,var(--st-sign) 55%,transparent)"/><text class="ring-gly" x="18" y="22.5" text-anchor="middle" fill="var(--st-sign)">?</text>`, true);
+    const showFrac = prog.unrun > 0 || prog.stale > 0;
+    const numTxt = `${prog.met}/${prog.total}${showFrac ? "*" : ""}`;
+    const numFill = showFrac ? "color-mix(in srgb,var(--muted) 88%,transparent)" : (o.neutral ? color : "var(--text)");
+    const tip = `<title>${prog.percent}% · ${prog.met} of ${prog.total} criteria met${prog.unrun ? ` · ${prog.unrun} not yet run` : ""}${prog.stale ? ` · ${prog.stale} stale` : ""}</title>`;
+    return wrap2(`${tip}${segArcs(prog.met, prog.total, prog.unrun || 0, prog.percent, color)}${ringShape(st, o.neutral ? color : hue)}<text class="ring-num" x="18" y="22.3" text-anchor="middle" font-size="9" fill="${numFill}">${numTxt}</text>`, false, ` data-percent="${prog.percent}" data-asterisk="${showFrac ? "1" : "0"}"`);
+  }
+
+  function badge(status: string, soft?: boolean) {
+    const m = ST[status]; if (!m) return "";
+    if (status === "block" && soft) return `<span class="badge idle"><span class="d"></span>Idle · may be waiting</span>`;
+    return `<span class="badge ${m.cls}"><span class="d"></span>${m.label}</span>`;
+  }
+  function srcTag(src?: string) { return `<span class="srcTag" title="DoD source: ${esc(src)}">${esc(src)}</span>`; }
+  function dodInline(dod?: string, src?: string) { return `${esc(dod)} ${srcTag(src)}`; }
+
+  // dot-strip: one shape-coded dot per workstream (compact rows + onboarding only, #15), capped (#6)
+  function dotStrip(p: VProject) {
+    const DCAP = 12, ws = p.workstreams, shown = ws.slice(0, DCAP), extra = ws.length - shown.length;
+    const dots = shown.map((w) => {
+      const cls = ST[w.status] ? ST[w.status].cls : "idle";
+      return `<span class="d ${cls}" title="${esc(w.name)} · ${esc((ST[w.status] || {}).label || w.status)}"></span>`;
+    }).join("");
+    const tail = extra > 0 ? `<span class="dot-more" title="${extra} more workstream${extra > 1 ? "s" : ""} — full list below">+${extra}</span>` : "";
+    return `<span class="dotstrip">${dots}${tail}</span>`;
+  }
+
+  // per-project counts
+  function projNeeds(p: VProject) {
+    let you = 0, fail = 0, sign = 0, run = 0;
+    p.workstreams.forEach((w) => w.sessions.forEach((s) => {
+      if (s.status === "block" && s.elicited) you++;
+      if (s.status === "fail") fail++;
+      if (s.status === "sign") sign++;
+      if (s.status === "run" || s.status === "loop") run++;
+    }));
+    return { you, fail, sign, run };
+  }
+  function allUnset(p: VProject) { let any = false; for (const w of p.workstreams) for (const s of w.sessions) { any = true; if (s.status !== "unset") return false; } return any; }
+  function pClass(p: VProject) { const c = projNeeds(p); if (c.you || c.fail) return "attn"; if (c.run) return "active"; if (c.sign) return "signoff"; if (allUnset(p)) return "needsSetup"; return "calm"; }
+  function cardBlast(p: VProject) { let best = "lo"; p.workstreams.forEach((w) => w.sessions.forEach((s) => { if (isNeed(s)) { const b = blastRadius(s); if (blastRank(b) < blastRank(best)) best = b; } })); return best; }
+  function firstSessId(p: VProject, statuses: string[]) { for (const w of p.workstreams) for (const s of w.sessions) if (statuses.includes(s.status)) return s.id; return null; }
+
+  // representative live one-liner (#A): surface the HIGHEST-priority state first and point UP when blocking
+  function cardLive(p: VProject): CardLive {
+    let top: VSession | null = null, topW: VWorkstream | null = null, topRank = 99;
+    p.workstreams.forEach((w) => w.sessions.forEach((s) => {
+      const rk = statusRank(s.status);
+      if (rk < topRank) { topRank = rk; top = s; topW = w; }
+    }));
+    if (!top || !topW) return { tone: "calm", loop: false, txt: "All quiet.", id: null };
+    const t: VSession = top, w: VWorkstream = topW;
+    const st = t.status, wn = shortWs(w.name);
+    if (st === "block" && !t.elicited) return { tone: "calm", loop: false, txt: `${wn} went idle — may be waiting, or may have finished`, id: t.id };
+    if (st === "block") return { tone: "block", loop: false, pointUp: "sec-needs", txt: `${wn} needs your input — ${t.live}`, id: t.id };
+    if (st === "fail") return { tone: "fail", loop: false, pointUp: "sec-needs", txt: `${wn} failed — ${t.live}`, id: t.id };
+    if (st === "run" || st === "loop") {
+      const qd = (st === "loop" && t.queueTotal != null) ? { total: t.queueTotal } : null;
+      return { tone: st === "loop" ? "loop" : "run", loop: st === "loop", txt: t.live || "", id: t.id, qDelta: qd };
+    }
+    if (st === "sign") return { tone: "sign", loop: false, pointUp: "sec-signoff", txt: `${wn} is done per its DoD — sign off above`, id: t.id };
+    if (st === "unset") return { tone: "calm", loop: false, txt: `${wn} — no Definition of Done set yet`, id: t.id };
+    if (st === "queued" || st === "planned") return { tone: "calm", loop: false, txt: t.live || "", id: t.id };
+    return { tone: "calm", loop: false, txt: "All work merged. Nothing pending.", id: t.id };
+  }
+  function wsDone(w: VWorkstream) { return w.status === "merge" || w.status === "sign" || !!(w._prog && w._prog.allMet) || !!(w._sessGauge && w._sessGauge.total > 0 && w._sessGauge.done === w._sessGauge.total); }
+  function wsOpenEnded(w: VWorkstream) { return w.status === "loop" || !!w.loop; }
+  function wsEmptyDod(w: VWorkstream) {
+    if (w.status === "merge" || w.status === "sign") return false;
+    if (w._mixed) return false;
+    return !w._prog;
+  }
+  function wsUnscorable(w: VWorkstream) { return wsOpenEnded(w) || wsEmptyDod(w); }
+  function projGauge(p: VProject) { const counted = p.workstreams.filter((w) => !wsUnscorable(w)); const total = counted.length, done = counted.filter(wsDone).length; return { done, total, percent: total ? Math.round(done / total * 100) : 0 }; }
+  function longPole(p: VProject): VWorkstream | null {
+    const closed = p.workstreams.filter((w) => !wsUnscorable(w));
+    const order = closed.slice().sort((a, b) => byAttention(a, b) || ((a._prog ? a._prog.percent : 0) - (b._prog ? b._prog.percent : 0)));
+    return order.find((w) => !wsDone(w)) || order[order.length - 1] || null;
+  }
+
+  // ─────────────────────────── icons ───────────────────────────
+  const continueIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 11.5a8.4 8.4 0 0 1-12 7.6L3 21l1.9-6A8.4 8.4 0 1 1 21 11.5Z"/></svg>`;
+  const chevIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="14" height="14"><path d="m9 6 6 6-6 6"/></svg>`;
+  const plusIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>`;
+  const focusIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>`;
+  const recheckIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg>`;
+
+  // ═══════════════════════════ master render ═══════════════════════════
+  function renderAll(sc?: { empty?: boolean; candidates?: number }) {
+    const scn = sc || {};
+    if (scn.empty) { wrap.innerHTML = onboardHtml(scn.candidates || 0); bindOnboard(); return; }
+
+    const counts = fleetCounts();
+    state._pingId = (function () {
+      let best: string | null = null, rk = 99;
+      Object.values(state.SESS).forEach(({ s }) => { if (s.status === "run" || s.status === "loop") { const r = statusRank(s.status); if (r < rk) { rk = r; best = s.id; } } });
+      return best;
+    })();
+    wrap.innerHTML = `
+      <section class="hero">${heroHtml(counts)}<div class="rail" id="rail"></div></section>
+      ${needsSectionHtml(counts)}
+      ${signoffSectionHtml(counts)}
+      ${projectsSectionHtml(counts)}
+      ${plannedSectionHtml(counts)}
+      ${doneSectionHtml(counts)}
+      ${tailNoteHtml(counts)}
+    `;
+    renderRail(counts);
+    renderNeeds();
+    renderSignoff();
+    renderGrid();
+    renderPlanned();
+    renderDone();
+  }
+
+  function dormantIds() { return new Set(state.data.filter((p) => pClass(p) === "calm").map((p) => p.id)); }
+  function setupIds() { return new Set(state.data.filter((p) => pClass(p) === "needsSetup").map((p) => p.id)); }
+
+  function fleetCounts(): Counts {
+    const c: Counts = { run: 0, loop: 0, block: 0, softwait: 0, sign: 0, plan: 0, merge: 0, fail: 0, unset: 0, total: 0, projects: state.data.length, active: 0, needs: 0, healthy: 0, setup: 0 };
+    const dorm = dormantIds();
+    Object.values(state.SESS).forEach(({ s, p }) => {
+      c.total++;
+      const inDorm = dorm.has(p.id);
+      if (s.status === "run") c.run++;
+      else if (s.status === "loop") c.loop++;
+      else if (s.status === "block") { if (s.elicited) c.block++; else c.softwait++; }
+      else if (s.status === "sign") c.sign++;
+      else if (s.status === "queued" || s.status === "planned") { if (!inDorm) c.plan++; }
+      else if (s.status === "merge") { if (!inDorm) c.merge++; }
+      else if (s.status === "fail") c.fail++;
+      else if (s.status === "unset") c.unset++;
+    });
+    c.active = c.run + c.loop;
+    c.needs = c.block + c.fail;
+    c.healthy = dorm.size;
+    c.setup = setupIds().size;
+    return c;
+  }
+
+  const NEEDS_LOUD = 12;
+  function needsOverflow(c: Counts): { n: number; dominant: { cause: string; n: number } | null } | null {
+    if (c.needs < NEEDS_LOUD) return null;
+    const tally: Record<string, number> = {};
+    Object.values(state.SESS).forEach(({ s }) => {
+      if (!isNeed(s)) return;
+      const cause = (s.failAction || "").trim();
+      if (cause) { tally[cause] = (tally[cause] || 0) + 1; }
+    });
+    let top: string | null = null, topN = 0;
+    Object.keys(tally).forEach((k) => { if (tally[k] > topN) { topN = tally[k]; top = k; } });
+    const dominant = (top && topN >= Math.ceil(c.needs * 0.55)) ? { cause: top, n: topN } : null;
+    return { n: c.needs, dominant };
+  }
+
+  const fmtN = (n: number) => (n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n));
+  function fleetDelta() {
+    let merges = 0, add = 0, del = 0, blocked = 0;
+    const visitMin = agoToMin(state.lastVisit || "");
+    const sinceVisit = (ago?: string) => { const m = agoToMin(ago); return m < 1e9 && m <= visitMin; };
+    Object.values(state.SESS).forEach(({ s, w }) => {
+      if (s.status === "merge" && sinceVisit((s.artifact && s.artifact.mergedAgo) || (w && w.mergedAgo) || "")) {
+        merges++; if (s.artifact) { add += s.artifact.add || 0; del += s.artifact.del || 0; }
+      }
+      if (s.status === "block" && s.elicited && sinceVisit(s.meta)) blocked++;
+    });
+    return { merges, add, del, blocked, since: state.lastVisit };
+  }
+  function deltaClause(needs: number) {
+    const d = fleetDelta();
+    const frags: string[] = [];
+    if (d.merges) {
+      const net = (d.add || d.del) ? ` <span class="dnums">+${fmtN(d.add)}/−${fmtN(d.del)} lines</span>` : "";
+      const tip = (d.add || d.del) ? "net git numstat over commits merged since your last visit" : "merged since your last visit";
+      frags.push(`<a data-jump="sec-done" title="${esc(tip)}"><b>+${d.merges}</b> merged${net}</a>`);
+    }
+    if (d.blocked && !needs) frags.push(`<a data-jump="sec-needs"><b>${d.blocked}</b> newly blocked</a>`);
+    if (!frags.length) return "";
+    const head = d.since ? `Since you last looked <b>${esc(d.since)}</b>` : `Recent activity`;
+    return `<span class="delta">${head}: ${frags.join('<span class="sep">·</span> ')}.</span>`;
+  }
+
+  function loopMinutes(s: VSession, _w?: VWorkstream) { return s.elapsedMin != null ? s.elapsedMin : 0; }
+  function fmtMin(min: number) { if (min >= 1440) { const d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60); return h ? `${d}d ${h}h` : `${d}d`; } if (min >= 60) { const h = Math.floor(min / 60), m = min % 60; return m ? `${h}h ${m}m` : `${h}h`; } return `${min}m`; }
+  function wsLoopMinutes(w: VWorkstream) { let best = 0; (w.sessions || []).forEach((s) => { if (s.loop) { const m = loopMinutes(s, w); if (m > best) best = m; } }); return best; }
+  function longestLoop(): { min: number; label: string } | null {
+    let best: { min: number; label: string } | null = null;
+    Object.values(state.SESS).forEach(({ s, w }) => { if (s.loop) { const min = loopMinutes(s, w); if (!best || min > best.min) best = { min, label: fmtMin(min) }; } });
+    return best;
+  }
+  const CLOSE_TAB_LOOP_MIN = 45;
+
+  // ─────────────────────────── hero ───────────────────────────
+  function heroHtml(c: Counts) {
+    const day = "Project Rollups";
+    const maybe = c.softwait ? `<span class="maybe" title="non-elicited idle stops — pi can't PROVE these are blocked, so they're a quiet tally, never inside the 'things need you' count."><b>${c.softwait}</b> may be waiting</span>` : "";
+    const softLine = c.softwait ? `<div class="softline"><span class="dot"></span>${maybe} — pi can't prove these are blocked (free-text stops, not structured asks)<button class="swjump" data-jump="sec-proj">review idle work →</button></div>` : "";
+    if (c.needs === 0) {
+      const bits: string[] = [];
+      if (c.loop) bits.push(`${c.loop} loop${c.loop > 1 ? "s" : ""} running`);
+      if (c.run) bits.push(`${c.run} task${c.run > 1 ? "s" : ""} running`);
+      const runTxt = bits.length ? bits.join(" · ") : "nothing running";
+      let headline: string; const subBits: string[] = [];
+      if (c.sign) {
+        headline = `<em class="sign">${c.sign} done</em> — your sign-off is all that's pending.`;
+        if (c.loop) subBits.push(`<b>${c.loop} loop${c.loop > 1 ? "s" : ""}</b> running`);
+        if (c.run) subBits.push(`<b>${c.run} running</b>`);
+      } else if (c.setup) {
+        headline = `<em class="setup">${c.setup} project${c.setup > 1 ? "s" : ""} need${c.setup > 1 ? "" : "s"} setup</em> — author a Definition of Done to start tracking.`;
+        if (c.loop) subBits.push(`<b>${c.loop} loop${c.loop > 1 ? "s" : ""}</b> running`);
+        if (c.run) subBits.push(`<b>${c.run} running</b>`);
+      } else {
+        headline = `<em class="calm">Nothing needs you.</em> ${esc(runTxt)}, everything else can wait.`;
+      }
+      if (c.plan) subBits.push(`<b>${c.plan} planned</b>`);
+      let closeTab = "";
+      if (c.sign === 0 && c.needs === 0 && !c.softwait && !c.setup) {
+        const ll = longestLoop();
+        closeTab = (ll && ll.min >= CLOSE_TAB_LOOP_MIN) ? ` Longest loop running <b>${esc(ll.label)}</b>.` : " You can close this tab.";
+      } else if (c.setup && c.sign === 0 && c.needs === 0 && !c.softwait) {
+        closeTab = ` <button class="hero-setup-cta" data-jump="sec-setup">Set a Definition of Done →</button>`;
+      }
+      const dc = deltaClause(c.needs);
+      return `<div class="eyebrow">${day} · everything in one quiet view</div>
+        <h1 class="headline">${headline}</h1>
+        <p class="subline">${subBits.join(" · ")}${subBits.length && !(dc && !closeTab) ? "." : ""}${closeTab}${dc}</p>${softLine}`;
+    }
+    const subBits: string[] = [];
+    if (c.active) {
+      const runProjects = state.data.filter((p) => projNeeds(p).run > 0);
+      const activeProjects = runProjects.length;
+      subBits.push(activeProjects === 1
+        ? `<b>${c.active} running</b> in ${esc(runProjects[0].name)}`
+        : `<b>${c.active} running</b> across ${activeProjects} active projects`);
+    }
+    const dc = deltaClause(c.needs);
+    const ov = needsOverflow(c);
+    let needHeadline: string;
+    if (ov) {
+      const causeClause = ov.dominant
+        ? ` — most (<b>${ov.dominant.n}</b>) clear with one fix: <b>${esc(ov.dominant.cause)}</b>.`
+        : `, but they can wait their turn.`;
+      needHeadline = `<em>A lot needs you</em> — <b>${ov.n}</b> items${causeClause}`;
+    } else {
+      needHeadline = `<em>${c.needs} ${c.needs === 1 ? "thing needs" : "things need"} you.</em> Everything else can wait.`;
+    }
+    return `<div class="eyebrow">${day} · everything in one quiet view</div>
+      <h1 class="headline">${needHeadline}</h1>
+      <p class="subline">${subBits.join(" · ")}${subBits.length && !dc ? "." : ""}${dc}</p>${softLine}`;
+  }
+
+  // ─────────────────────────── tally rail (jump-links) ───────────────────────────
+  function renderRail(c: Counts) {
+    const railEl = document.getElementById("rail"); if (!railEl) return;
+    const pills: Array<[string, string, number | string, string, boolean]> = [];
+    const calm = c.needs === 0;
+    if (c.sign) pills.push(["sign", "Sign-off", calm ? "" : c.sign, "sec-signoff", true]);
+    if (c.active) pills.push(["", "Running", calm ? "" : c.active, "sec-proj", false]);
+    if (c.plan) pills.push(["", "Planned", c.plan, "sec-planned", false]);
+    if (c.merge) pills.push(["", "Merged", calm ? "" : c.merge, "sec-done", false]);
+    if (c.setup) pills.push(["setup", "Needs setup", c.setup, "sec-setup", true]);
+    if (c.healthy) pills.push(["", `Healthy · ${c.healthy} project${c.healthy > 1 ? "s" : ""}`, "", "sec-healthy", false]);
+    if (!pills.length && c.needs === 0 && !c.setup) pills.push(["", "Everything healthy — nothing needs you", "", "sec-proj", false]);
+    railEl.innerHTML = pills.map(([cl, l, n, j, sw]) =>
+      `<button class="pill ${cl}" data-jump="${j}">${sw ? '<span class="sw"></span>' : ""}${l}${n !== "" ? ` <span class="n">${n}</span>` : ""}</button>`).join("");
+  }
+
+  // ─────────────────────────── needs you (4 bands, #14) ───────────────────────────
+  function needsSectionHtml(c: Counts) {
+    if (c.needs === 0) return "";
+    const focusBtn = c.needs > 2 ? `<button class="hbtn" id="focusBtn">${focusIcon()} Triage all in focus</button>` : `<span class="hint">answer inline — your reply continues the conversation</span>`;
+    return `<div class="shead" id="sec-needs"><h2>Needs you</h2>${focusBtn}</div>
+      <section class="needs${c.needs === 1 ? " single" : ""}" id="needs" data-testid="needs-you"></section>`;
+  }
+  function renderNeeds() {
+    const host = document.getElementById("needs"); if (!host) return;
+    const items: Array<{ s: VSession; w: VWorkstream; p: VProject }> = [];
+    Object.values(state.SESS).forEach(({ s, w, p }) => { if (isNeed(s)) items.push({ s, w, p }); });
+    items.sort((a, b) => blastRank(blastRadius(a.s)) - blastRank(blastRadius(b.s))
+      || (agoToMin(b.s.meta) - agoToMin(a.s.meta))
+      || ((a.s.status === "block" ? 0 : 1) - (b.s.status === "block" ? 0 : 1))
+      || String(a.s.id).localeCompare(String(b.s.id)));
+    const top = items.slice(0, 2);
+    const rest = items.slice(2);
+    let html = top.map(({ s, w, p }) => {
+      const cls = s.status === "block" ? "block" : "fail";
+      const blast = blastRadius(s);
+      const soft = s.status === "block" && !s.elicited;
+      const statusBadge = s.status === "fail" ? badge("fail") : badge("block", soft);
+      const blastTag = (blast === "hi" || blast === "md") ? `<span class="blast ${cls}" title="Blast radius is a HEURISTIC triage hint. It only ORDERS Needs-you; it gates nothing.">${blastLabel(blast)}</span>` : "";
+      const wait = waitLabel(s);
+      const waitTag = wait ? `<span class="waitage" title="time since the agent went idle waiting on you">waiting ${wait}</span>` : "";
+      const headTag = `${statusBadge} ${blastTag} ${waitTag}`;
+      let chips = "";
+      if (s.elicited && s.chips && s.chips.length) {
+        chips = `<div class="qreply"><span class="qlbl">quick reply →</span>` + s.chips.map((q) => `<button data-reply="${s.id}" data-text="${esc(q)}">${esc(q)}</button>`).join("") + `</div>`;
+      }
+      const askHtml = soft
+        ? `<span style="color:var(--muted)">No structured question — pi went idle (${esc(s.meta || "a while ago")}), unread. It may be waiting on you, or may simply have finished. Open to read its last message.</span>`
+        : esc(s.live);
+      let actions: string;
+      if (s.status === "fail") {
+        const remedy = esc(s.failAction || "Re-run");
+        if (!chips) {
+          chips = `<div class="qreply"><span class="qlbl">quick reply →</span><button data-reply="${s.id}" data-text="${remedy}">${remedy}</button></div>`;
+        }
+        actions = `<button class="btn primary" data-open="${s.id}">${continueIcon()} Continue the conversation</button>`;
+      } else {
+        actions = `<button class="btn primary" data-open="${s.id}">${continueIcon()} ${soft ? "Open conversation" : "Continue the conversation"}</button>`;
+      }
+      return `<article class="need ${cls}">
+        <div class="crumb"><b>${esc(p.name)}</b> &nbsp;›&nbsp; ${esc(w.name)}</div>
+        <div class="sname"><span class="nm">${esc(s.name)}</span> ${headTag}</div>
+        <div class="ask">${askHtml}</div>
+        ${chips}
+        <div class="actions">
+          ${actions}
+        </div>
+      </article>`;
+    }).join("");
+    if (rest.length) {
+      const needRow = ({ s, w, p }: { s: VSession; w: VWorkstream; p: VProject }) => {
+        const blast = blastRadius(s);
+        const blastTag = (blast === "hi" || blast === "md") ? `<span class="blast ${s.status === "fail" ? "fail" : "block"}" title="Blast radius is a HEURISTIC triage hint. It only orders Needs-you; it gates nothing.">${blast === "hi" ? "high" : "elevated"}</span>` : "";
+        const wait = waitLabel(s); const waitTag = wait ? `<span class="waitage">waiting ${wait}</span>` : "";
+        let rowChips = (s.elicited && s.chips && s.chips.length)
+          ? `<div class="qreply rowqreply"><span class="qlbl">quick reply →</span>` + s.chips.map((q) => `<button data-reply="${s.id}" data-text="${esc(q)}">${esc(q)}</button>`).join("") + `</div>`
+          : "";
+        if (s.status === "fail" && !rowChips) {
+          const rRemedy = esc(s.failAction || "Re-run");
+          rowChips = `<div class="qreply rowqreply"><span class="qlbl">quick reply →</span><button data-reply="${s.id}" data-text="${rRemedy}">${rRemedy}</button></div>`;
+        }
+        const rowBtn = `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} Continue</button>`;
+        const hay = esc(`${p.name} ${w.name} ${s.name} ${s.live || ""}`.toLowerCase());
+        return `<div class="needrow" id="needrow-${esc(s.id)}" data-needfilter="${hay}">
+          <span class="sess-dot ${(ST[s.status] || {}).cls || "idle"}" style="background:${(ST[s.status] || {}).color}"></span>
+          <div class="nleft">
+            <div class="ncrumb"><b>${esc(p.name)}</b> › ${esc(w.name)} ${blastTag}${waitTag}</div>
+            <div class="nq">${esc(s.live)}</div>
+            ${rowChips}
+          </div>
+          ${rowBtn}
+        </div>`;
+      };
+      const RCAP = 6, rShown = rest.slice(0, RCAP), rExtra = rest.slice(RCAP);
+      const JUMP_MIN = 8;
+      const jumpBox = rest.length >= JUMP_MIN
+        ? `<input class="needjump" type="search" placeholder="jump to item — filter ${rest.length} by project / workstream / name" aria-label="jump to a blocked item" oninput="filterNeeds(this)">`
+        : "";
+      html += `<div class="needmore" id="needmore" style="grid-column:1/-1">
+        <div class="needmore-h" data-toggle="needmore"><b>+${rest.length} more need you</b> — collapsed to stay calm; ordered by blast radius, then waiting time<span class="chev">${chevIcon()}</span></div>
+        <div class="needmore-b">${jumpBox}<div class="needjump-empty" hidden>No matching item.</div>${rShown.map(needRow).join("")}${rExtra.length ? `<div class="more-rows" hidden>${rExtra.map(needRow).join("")}</div><button class="morelink" data-toggle="more">+${rExtra.length} more — show all</button>` : ""}</div>
+      </div>`;
+    }
+    host.innerHTML = html;
+  }
+  function filterNeeds(inp: HTMLInputElement) {
+    const w = inp.closest(".needmore-b"); if (!w) return;
+    const q = String(inp.value || "").trim().toLowerCase();
+    const tail = w.querySelector<HTMLElement>(".more-rows");
+    const moreBtn = w.querySelector<HTMLElement>(".morelink");
+    const empty = w.querySelector<HTMLElement>(".needjump-empty");
+    const rows = Array.from(w.querySelectorAll<HTMLElement>(".needrow"));
+    if (q) { if (tail) tail.hidden = false; if (moreBtn) moreBtn.style.display = "none"; }
+    else { if (moreBtn) moreBtn.style.display = ""; }
+    let shown = 0;
+    rows.forEach((r) => { const hit = !q || (r.getAttribute("data-needfilter") || "").includes(q); r.style.display = hit ? "" : "none"; if (hit) shown++; });
+    if (!q && tail) { tail.hidden = true; tail.querySelectorAll<HTMLElement>(".needrow").forEach((r) => { r.style.display = ""; }); }
+    if (empty) empty.hidden = !(q && shown === 0);
+  }
+
+  // ─────────────────────────── sign-off — first-class to-do LIST ───────────────────────────
+  function hasGitBranch(s: VSession) { return !!(s.artifact && s.artifact.branch && s.artifact.kind !== "doc"); }
+  function branchOf(s: VSession) { return (s.artifact && s.artifact.branch) || ""; }
+  function signoffSectionHtml(c: Counts) {
+    if (!c.sign) return "";
+    const batch = c.sign > 1
+      ? `<button class="hbtn sgn" id="signAll"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="13" height="13"><path d="M20 6 9 17l-5-5"/></svg> Sign off all ${c.sign}</button>`
+      : `<span class="hint">one click — no reply needed</span>`;
+    const cnt = c.sign > 1 ? "" : `<span class="cnt">${c.sign} done</span>`;
+    return `<div class="shead" id="sec-signoff"><h2>Awaiting your sign-off</h2>${cnt}${batch}</div>
+      <section class="signoff" id="signoffHost" data-testid="signoff"></section>`;
+  }
+  function mergeAffordance(s: VSession) {
+    return hasGitBranch(s)
+      ? `<button class="btn ghost sm" data-open="${s.id}">Ask pi to merge ${esc(branchOf(s))} → main</button><span class="infg" title="Merge is a SEPARATE step — this sends the agent the prompt &quot;merge ${esc(branchOf(s))} into main&quot; via /api/prompt.">i</span>`
+      : `<button class="btn ghost sm" data-open="${s.id}">Archive</button>`;
+  }
+  function renderSignoff() {
+    const host = document.getElementById("signoffHost"); if (!host) return;
+    const items: Array<{ s: VSession; w: VWorkstream; p: VProject }> = [];
+    Object.values(state.SESS).forEach(({ s, w, p }) => { if (s.status === "sign") items.push({ s, w, p }); });
+    const CAP = 3, shown = items.slice(0, CAP), rest = items.slice(CAP);
+    const rowHtml = ({ s, w, p }: { s: VSession; w: VWorkstream; p: VProject }) => {
+      const gate = s._gate, gone = !!state.signed[s.id], pending = signPending(s);
+      const lineage = p.nest ? ` <span class="nest" title="own project root nested inside its parent — not counted toward the parent">⤷ ${esc(p.nest)}</span>` : "";
+      const crit = pending
+        ? `<span class="pend">Done — pending recheck</span> · ${esc((gate && gate.text) || s.dod)} ${srcTag(s.dodSrc)}`
+        : `Done per its DoD — <span class="gk">${esc((gate && gate.text) || s.dod)}</span> ${srcTag(s.dodSrc)}`;
+      const act = gone
+        ? `<span style="color:var(--st-merge);font-weight:650">✓ Signed off</span>${mergeAffordance(s)}`
+        : pending
+          ? `<button class="btn remedy sm" data-recheckcard="${s.id}" title="command DoD evidence is stale — re-run it on demand">${recheckIcon()} Re-check</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`
+          : `<button class="btn sign" data-signoff="${s.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`;
+      return `<article class="soff ${gone ? "gone" : ""}">
+        <div class="sleft">
+          <div class="scrumb"><b>${esc(p.name)}</b>${lineage} › ${esc(w.name)} · <span class="sn">${esc(s.name)}</span></div>
+          <div class="scrit">${crit}${s.artifact ? ` <span style="opacity:.45">·</span> ${artChip(s)}` : ""}</div>
+        </div>
+        <div class="sact">${act}</div>
+      </article>`;
+    };
+    let html = shown.map(rowHtml).join("");
+    if (rest.length) {
+      html += `<div class="needmore" id="signmore"><div class="needmore-h" data-toggle="needmore"><b>+${rest.length} more to sign off</b> — collapsed to keep the fold tight<span class="chev">${chevIcon()}</span></div>
+        <div class="needmore-b">${rest.map(rowHtml).join("")}</div></div>`;
+    }
+    host.innerHTML = html;
+  }
+
+  // ─────────────────────────── projects ───────────────────────────
+  function projectsSectionHtml(_c: Counts) {
+    return `<div class="shead" id="sec-proj"><h2>Projects</h2><span class="cnt">${state.data.length}</span>
+        <span class="hint">tap a card to drill in <span class="infg" title="Each ring is one workstream. Segments = its Definition-of-Done criteria, filled = met. ✓ = merged · ∞ = autonomous loop · ? = no DoD set yet.">?</span></span>
+      </div>
+      <section id="projectsHost"></section>`;
+  }
+  function projWarn(_p: VProject) { return false; }
+  function allWsSurfaced(p: VProject) { return p.workstreams.length > 0 && p.workstreams.every((w) => (w.sessions || []).length > 0 && w.sessions.every((s) => s.status === "block" || s.status === "fail")); }
+  function agoToMin(a?: string) {
+    const s = String(a || "").toLowerCase(); const m = s.match(/(\d+(?:\.\d+)?)/); const v = m ? parseFloat(m[1]) : 1;
+    if (/yesterday/.test(s)) return 1440;
+    if (/min|m ago/.test(s)) return v;
+    if (/h ago|hour/.test(s)) return v * 60;
+    if (/d ago|day/.test(s)) return v * 1440;
+    if (/w ago|week/.test(s)) return v * 10080;
+    return 1e9;
+  }
+  function mergeRecency(p: VProject) { let best = 1e9; p.workstreams.forEach((w) => w.sessions.forEach((s) => { const a = (s.artifact && s.artifact.mergedAgo) || w.mergedAgo; if (a) { const n = agoToMin(a); if (n < best) best = n; } })); return best; }
+
+  function renderGrid() {
+    const host = document.getElementById("projectsHost"); if (!host) return;
+    const attn = state.data.filter((p) => pClass(p) === "attn");
+    const active = state.data.filter((p) => pClass(p) === "active");
+    const dormant = state.data.filter((p) => pClass(p) === "calm");
+    const setup = state.data.filter((p) => pClass(p) === "needsSetup");
+    let signoff = state.data.filter((p) => pClass(p) === "signoff");
+
+    let fullSign: VProject[] = [];
+    if (!attn.length && !active.length && signoff.length) { fullSign = signoff.slice(); signoff = []; }
+
+    const fullCandidates = attn.concat(active);
+    const allCollapse = fullCandidates.length > 0 && fullCandidates.every(allWsSurfaced) && !active.some(projWarn);
+
+    let out = "";
+    if (allCollapse) {
+      out += `<div class="surfline" style="border:1px solid var(--border);border-radius:14px;background:var(--panel);margin-bottom:14px">
+        <span class="sq"></span><b>All work across ${fullCandidates.length} project${fullCandidates.length > 1 ? "s" : ""}</b> is in Needs&nbsp;you above — nothing extra to surface here
+        <button class="jump" data-jump="sec-needs">answer ↑</button></div>
+        <div class="grpcard" id="sec-collapsed"><div class="grp-h" data-toggle="grp"><span class="gt">In Needs you</span> <span class="gc">${fullCandidates.length} project${fullCandidates.length > 1 ? "s" : ""} · drill in for full context</span><span class="chev">${chevIcon()}</span></div>
+          <div class="grp-b">` + fullCandidates.map((p) => renderRow(p)).join("") + `</div></div>`;
+    } else {
+      const ATTN_CAP = 4;
+      const attnSorted = attn.slice().sort((a, b) => blastRank(cardBlast(a)) - blastRank(cardBlast(b)));
+      const attnFull = attnSorted.slice(0, ATTN_CAP);
+      const attnOverflow = attnSorted.slice(attnFull.length);
+      const ACTIVE_CAP = 4;
+      const activeFull = active.slice(0, ACTIVE_CAP);
+      const activeOverflow = active.slice(activeFull.length);
+      const full = attnFull.concat(activeFull).concat(fullSign);
+      const single = full.length === 1 && !signoff.length && !dormant.length && !activeOverflow.length && !attnOverflow.length;
+      if (full.length) out += `<div class="grid ${single ? "single" : ""}">` + full.map((p) => renderCard(p)).join("") + `</div>`;
+      if (attnOverflow.length) {
+        const AOC = 6, aoShown = attnOverflow.slice(0, AOC), aoExtra = attnOverflow.slice(AOC);
+        out += `<div class="grpcard" id="sec-attn-more"><div class="grp-h" data-toggle="grp"><span class="gt">Needs attention</span> <span class="gc">${attnOverflow.length} more need attention · answer in Needs you above</span><button class="jump" data-jump="sec-needs">answer ↑</button><span class="chev">${chevIcon()}</span></div>
+          <div class="grp-b">` + aoShown.map((p) => renderRow(p)).join("")
+          + (aoExtra.length ? `<div class="more-rows" hidden>${aoExtra.map((p) => renderRow(p)).join("")}</div><button class="morelink" data-toggle="more">+${aoExtra.length} more — show all</button>` : "")
+          + `</div></div>`;
+      }
+      if (activeOverflow.length) {
+        out += `<div class="grpcard" id="sec-running"><div class="grp-h" data-toggle="grp"><span class="gt">Running</span> <span class="gc">${activeOverflow.length} more loop${activeOverflow.length > 1 ? "s" : ""} · live · nothing needs you</span><span class="chev">${chevIcon()}</span></div>
+          <div class="grp-b">` + activeOverflow.map((p) => renderRow(p, { live: true })).join("") + `</div></div>`;
+      }
+    }
+    if (signoff.length) {
+      out += `<div class="grpcard" id="sec-signoff-grid"><div class="grp-h" data-toggle="grp"><span class="gt">Awaiting sign-off</span> <span class="gc">${signoff.length} project${signoff.length > 1 ? "s" : ""} · sign off in the strip above · drill in to review</span><button class="jump" data-jump="sec-signoff">sign off ↑</button><span class="chev">${chevIcon()}</span></div>
+        <div class="grp-b">` + signoff.map((p) => renderRow(p, { navOnly: true })).join("") + `</div></div>`;
+    }
+    if (setup.length) {
+      out += `<div class="grpcard open" id="sec-setup" data-testid="needs-setup"><div class="grp-h" data-toggle="grp"><span class="gt sup">Needs setup</span> <span class="gc">${setup.length} project${setup.length > 1 ? "s" : ""} · no Definition of Done authored yet · set one to start tracking</span><span class="chev">${chevIcon()}</span></div>
+        <div class="grp-b">` + setup.map((p) => renderRow(p, { setup: true })).join("") + `</div></div>`;
+    }
+    if (dormant.length) {
+      const sorted = dormant.slice().sort((a, b) => mergeRecency(a) - mergeRecency(b));
+      const CAP = 6, shown = sorted.slice(0, CAP), extra = sorted.slice(CAP);
+      out += `<div class="grpcard" id="sec-healthy"><div class="grp-h" data-toggle="grp"><span class="gt">Healthy &amp; dormant</span> <span class="gc">${dormant.length} project${dormant.length > 1 ? "s" : ""} · nothing needs you · last-known cached status</span><span class="chev">${chevIcon()}</span></div>
+        <div class="grp-b">` + shown.map((p) => renderRow(p)).join("")
+        + (extra.length ? `<div class="more-rows" hidden>${extra.map((p) => renderRow(p)).join("")}</div><button class="morelink" data-toggle="more">+${extra.length} more — show all</button>` : "")
+        + `</div></div>`;
+    }
+    host.innerHTML = out;
+  }
+
+  function renderWsList(p: VProject, opts?: RowOpts) {
+    const all = p.workstreams.slice().sort(byAttention);
+    const CAP = 6, shown = all.slice(0, CAP), more = all.slice(CAP);
+    return shown.map((w) => renderWorkstream(w, p, opts)).join("")
+      + (more.length ? `<div class="more-rows" hidden>${more.map((w) => renderWorkstream(w, p, opts)).join("")}</div><button class="morelink" data-toggle="more">+${more.length} more workstream${more.length > 1 ? "s" : ""}</button>` : "");
+  }
+
+  function renderCard(p: VProject) {
+    const c = projNeeds(p);
+    const live = cardLive(p);
+    const hasNeeds = (c.you || c.fail) > 0;
+    const countPills: string[] = [];
+    if (c.sign) { countPills.push(`<button class="countpill sgn jumplink" data-jump="sec-signoff">${c.sign} to sign off ↑</button>`); }
+    if (!hasNeeds && !c.sign) { countPills.push(c.run ? `<span class="countpill calm">${c.run} running</span>` : `<span class="countpill calm">all calm</span>`); }
+
+    const g = projGauge(p);
+    const pole = longPole(p);
+    const someLoop = p.workstreams.some(wsOpenEnded);
+    const allOpenEnded = g.total === 0 && someLoop;
+    const noDod = g.total === 0 && !someLoop;
+    const gaugeItem: RingItem = allOpenEnded ? { status: "loop", loop: true }
+      : noDod ? { status: "unset" }
+        : { status: "gauge", _sessGauge: { done: g.done, total: g.total, percent: g.percent } };
+    const poleInNeeds = pole && (pole.status === "block" || pole.status === "fail");
+    const poleTag = poleInNeeds
+      ? `<button class="muted-jump" data-jump="sec-needs">· in Needs you ↑</button>`
+      : (pole ? badge(pole.status) : "");
+    const loopWs = p.workstreams.filter(wsOpenEnded).length;
+    const loopClause = loopWs ? ` · <b>${loopWs} loop${loopWs > 1 ? "s" : ""} running</b>` : "";
+    const scopedWord = loopWs ? `scoped workstream${g.total > 1 ? "s" : ""}` : `workstream${g.total > 1 ? "s" : ""}`;
+    const poleLine = allOpenEnded
+      ? `<div class="csum-pole"><span class="plbl">Continuous loop — no terminal Definition of Done.</span></div>`
+      : noDod
+        ? `<div class="csum-pole"><span class="plbl">No Definition of Done set — add one to track progress.</span></div>`
+        : pole && !wsDone(pole)
+          ? `<div class="csum-pole"><span class="plbl">Long pole:</span> <b>${esc(shortWs(pole.name))}</b> ${poleTag}</div>`
+          : ``;
+    const gaugeLine = allOpenEnded
+      ? `<div class="csum-line"><b>∞ looping</b> · open-ended ${dotStrip(p)}</div>`
+      : noDod
+        ? `<div class="csum-line"><span class="muted">No Definition of Done set yet</span> ${dotStrip(p)}</div>`
+        : `<div class="csum-line"><b>${g.done} of ${g.total}</b> ${scopedWord} met DoD${loopClause} ${dotStrip(p)}</div>`;
+    const ringsBlock = `<div class="csum">
+      <div class="csum-ring" title="${allOpenEnded ? "an open-ended loop has no terminal DoD to be k-of-n against — shown as running ∞" : noDod ? "no Definition of Done set on any workstream yet — nothing to gauge" : "k of " + g.total + " workstreams have met their Definition of Done — an honest aggregate, not an authored percent"}">${ringSvg(gaugeItem, 50)}</div>
+      <div class="csum-body">
+        ${gaugeLine}
+        ${poleLine}
+      </div>
+    </div>`;
+
+    const ws = renderWsList(p);
+    const liveRun = (live.tone === "run" || live.tone === "loop");
+    let olActs: string, olAttr: string, ping = "";
+    if (live.pointUp) {
+      const lbl = live.pointUp === "sec-needs" ? "Answer ↑" : "Sign off ↑";
+      olActs = `<button class="btn ghost sm" data-jump="${live.pointUp}">${lbl}</button>`;
+      olAttr = `data-jump="${live.pointUp}"`;
+    } else {
+      olActs = live.id
+        ? `<button class="btn primary sm" data-open="${live.id}">${continueIcon()} ${liveRun ? "Open" : "Continue"}</button>`
+        : "";
+      olAttr = live.id ? `data-open="${live.id}"` : "";
+      ping = (live.id && live.id === state._pingId) ? " ping" : "";
+    }
+
+    return `<article class="pcard" id="card-${p.id}" data-p="${p.id}" data-project-id="${p.id}">
+      <div class="pcard-head" data-toggle="card">
+        <div class="pcard-id">
+          <div class="pname"><span class="nm">${esc(p.name)}</span> ${p.nest ? `<span class="nest" title="own project root nested inside its parent — its work is NOT counted toward the parent">⤷ ${esc(p.nest)}</span>` : ""}</div>
+          <div class="ppath mono" title="${esc(p.path)}${p.desc ? ` · ${esc(p.desc)}` : ""}"><span class="pp-path">${esc(p.path)}</span>${p.desc ? `<span class="pp-desc"> · ${esc(p.desc)}</span>` : ""}</div>
+        </div>
+        <div class="pcard-counts">
+          <span class="chev">${chevIcon()}</span>
+          ${countPills.join("")}
+        </div>
+      </div>
+      ${ringsBlock}
+      <div class="oneliner ${live.tone}${ping}" ${olAttr}>
+        <span class="live"></span>
+        <span class="txt">${live.loop ? `<b>loop · </b>` : ""}${esc(live.txt)}</span>
+        ${live.qDelta ? `<span class="qdelta" title="~${live.qDelta.total} items in the loop's planned queue — best-effort parsed from the agent's notes.">~${live.qDelta.total} queued</span>` : ""}
+        ${olActs ? `<span class="ol-act">${olActs}</span>` : ""}
+      </div>
+      <div class="pbody">${ws}</div>
+    </article>`;
+  }
+
+  function renderRow(p: VProject, opts?: RowOpts) {
+    const o = opts || {};
+    const c = projNeeds(p);
+    const lv = o.live ? cardLive(p) : null;
+    const unset = !o.live && allUnset(p);
+    let sum: string;
+    if (o.live && lv) sum = `<span style="color:var(--st-run)">${lv.loop ? "∞ " : ""}live</span>`;
+    else if (c.you || c.fail) sum = `<b>${c.you + c.fail}</b> need you`;
+    else if (c.sign) sum = `<b>${c.sign}</b> to sign off`;
+    else if (unset) sum = `<span class="setup-sum" title="No Definition of Done authored on any workstream yet. Open to set one."><span class="qmk">?</span> needs setup</span>`;
+    else {
+      const merged = p.workstreams.filter((w) => w.status === "merge").length; const q = p.workstreams.filter((w) => w.status === "queued" || w.status === "planned").length;
+      sum = merged ? `<b>${merged}</b> merged` + (q ? ` · ${q} queued` : "") : (q ? `<b>${q}</b> queued` : "healthy");
+    }
+    const ppTxt = (o.live && lv) ? esc(lv.txt) : esc(p.path);
+    const ppCls = o.live ? "pp" : "pp mono";
+    const ppTitle = (o.live && lv) ? esc(lv.txt) : esc(p.path);
+    const ws = renderWsList(p, { navOnly: o.navOnly });
+    const setupAct = (o.setup && unset)
+      ? `<button class="btn ghost sm setup-cta" data-open="${firstSessId(p, ["unset"]) || ""}">${continueIcon()} Set a Definition of Done</button>`
+      : "";
+    return `<div class="prow" id="card-${p.id}" data-toggle="prow" data-rowp="${p.id}" data-project-id="${p.id}">
+        ${dotStrip(p)}
+        <span class="pn">${esc(p.name)}${p.nest ? ` <span class="nest" title="nested under its parent — counted only here, not toward the parent">⤷ ${esc(p.nest)}</span>` : ""}</span>
+        <span class="${ppCls}" title="${ppTitle}">${ppTxt}</span>
+        <span class="psum">${sum}</span>
+        ${setupAct}
+        <span class="chev">${chevIcon()}</span>
+      </div>
+      <div class="prow-body" data-rowbody="${p.id}"><div class="pbody" style="display:block;border-top:0">${ws}</div></div>`;
+  }
+
+  function renderWorkstream(w: VWorkstream, p: VProject, opts?: RowOpts) {
+    let extra = "";
+    if (w.status === "loop") {
+      extra = `<span class="loopBadge"><span class="inf">∞</span> looping ${esc(fmtMin(wsLoopMinutes(w)))}</span>`;
+    } else extra = badge(w.status);
+    const sorted = w.sessions.slice().sort(byAttention);
+    const CAP = 6, shown = sorted.slice(0, CAP), more = sorted.slice(CAP);
+    const sess = shown.map((s) => renderSession(s, w, p, opts)).join("")
+      + (more.length ? `<div class="sess-extra" hidden>${more.map((s) => renderSession(s, w, p, opts)).join("")}</div><button class="sessmore" data-toggle="sessmore">+${more.length} more session${more.length > 1 ? "s" : ""}</button>` : "");
+    const mixedNote = w._mixed && w._sessGauge ? ` <span class="srcTag" title="this workstream's sessions use different DoD evaluators, so the ring is a 'k of n sessions done' gauge — not a blended percent">mixed sources · ${w._sessGauge.done}/${w._sessGauge.total} done</span>` : "";
+    const wsDod = (w.status === "unset"
+      ? `<span style="color:var(--st-sign)">not set</span> ${srcTag(w.dodSrc)}`
+      : dodInline(w.dod, w.dodSrc)) + mixedNote;
+    return `<div class="ws" data-w="${w.id}" data-ws-id="${w.id}">
+      <div class="ws-head" data-toggle="ws">
+        <div class="ws-ring">${ringSvg(w, 44)}</div>
+        <div class="ws-id">
+          <div class="ws-name">${esc(w.name)} ${extra}</div>
+          <div class="ws-dod">${wsDod}</div>
+        </div>
+        <div class="ws-meta">
+          <span class="ws-cnt">${w.sessions.length} session${w.sessions.length > 1 ? "s" : ""}</span>
+          <span class="ws-chev chev">${chevIcon()}</span>
+        </div>
+      </div>
+      <div class="sess-list">${sess}</div>
+    </div>`;
+  }
+
+  function artChip(s: VSession) {
+    const a = s.artifact; if (!a) return "";
+    if (a.kind === "doc") {
+      const gate = s._gate; const reviewed = !gate || gate.met || state.signed[s.id];
+      const tag = reviewed ? `<span class="ok">✓ user-reviewed</span>` : `<span style="color:var(--muted)">awaiting your review</span>`;
+      return `<span class="artchip doc" title="No repo — file count derived from this session's write/edit tool_result entries.">📄 ${esc(a.note)} · ${a.files} file${(a.files || 0) > 1 ? "s" : ""} · ${tag}</span>`;
+    }
+    if (a.kind === "spark") {
+      return `<span class="artchip doc" title="Visual snapshot (rendered output) — verification is your review of the rendered chart, not a git diff.">🖼 ${esc(a.note || "visual")} · <span class="ok">✓ visual · reviewed</span></span>`;
+    }
+    const merged = a.merged;
+    const diff = `<span class="add">+${a.add}</span>/<span class="del">−${a.del}</span>`;
+    const head = merged ? `✓ merged · ${esc(a.sha)}` : esc(a.branch);
+    return `<span class="artchip ${merged ? "mg" : ""}">${esc(head)} · ${diff}</span>`;
+  }
+
+  function iterSparkHtml(arr: number[]) {
+    const max = Math.max(...arr, 1);
+    return `<span class="iterspark" title="iteration rhythm — tool_execution_end events per loop iteration (health, not progress)">` + arr.map((v) => `<i style="height:${Math.max(3, Math.round(v / max * 16))}px"></i>`).join("") + `</span>`;
+  }
+  function proposedLoop(s: VSession) {
+    const parts: string[] = [];
+    if (s.iter != null) parts.push(`<b>iter ${s.iter}</b>`);
+    if (s.iterspark && s.iterspark.length) parts.push(iterSparkHtml(s.iterspark));
+    const b = s.budget || {};
+    if (b.maxMinutes != null && s.elapsedMin != null) parts.push(`budget ${s.elapsedMin}/${b.maxMinutes}m`);
+    else if (b.maxCostUsd != null && s.cost != null) parts.push(`budget $${s.cost}/$${b.maxCostUsd}`);
+    const body = parts.length ? parts.join(" · ") + " — not live yet" : "iteration count, rhythm & budget — not live yet";
+    return `<div class="proposed" title="Loop iteration telemetry needs a durable per-iteration log + an orchestrator pi does NOT expose today. Shown MUTED as a proposed signal — never live data.">
+      <span class="plab">proposed</span><span class="pbody">${body}</span></div>`;
+  }
+  function renderSession(s: VSession, w: VWorkstream, p: VProject, opts?: RowOpts) {
+    const navOnly = !!(opts && opts.navOnly);
+    const cls = (ST[s.status] || {}).cls || "idle";
+    const dot = `<span class="sess-dot ${cls}" style="background:${(ST[s.status] || {}).color || "var(--st-idle)"}"></span>`;
+    const artifact = s.artifact ? `<div style="margin-top:8px">${artChip(s)}</div>` : "";
+    let queue = "";
+    if (s.queue && s.queue.length) {
+      const total = s.queueTotal || s.queue.length;
+      const shown = s.queue.slice(0, 3);
+      const more = total - shown.length;
+      queue = `<div class="qnext"><span class="qsrc" title="pi has no TodoWrite/plan primitive — these items are best-effort parsed from the agent's notes (~).">~ parsed from notes →</span>`
+        + shown.map((q) => `<span class="qchip">${esc(q)}</span>`).join("")
+        + (more > 0 ? `<span class="qmore">~${more} more planned</span>` : "")
+        + `<span class="infg" title="Planned-next items are best-effort, parsed from the agent's notes (~).">i</span></div>`;
+    }
+    const verb = (navOnly && s.status === "sign") ? "Review"
+      : s.status === "merge" ? "View" : (s.status === "run" || s.status === "loop") ? "Open" : s.status === "unset" ? "Define done" : "Continue";
+    const primary = `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} ${verb}</button>`;
+    let secondary = "";
+    if (s.status === "sign" && !navOnly) secondary = `<button class="btn sign sm" data-signoff="${s.id}">✓ Sign off</button>`;
+    else if (s.status === "fail") secondary = `<button class="btn ghost sm" data-open="${s.id}">${esc(s.failAction || "Re-run")}</button>`;
+
+    const dodTxt = s.status === "unset" ? `<span style="color:var(--st-sign)">no criterion set — define what done means</span> ${srcTag(s.dodSrc)}`
+      : dodInline(s.dod, s.dodSrc);
+    const dodHoisted = w && w.status !== "unset" && s.status !== "unset" && s.dod === w.dod && s.dodSrc === w.dodSrc;
+    const loopTag = s.loop ? `<span class="loopBadge"><span class="inf">∞</span> looping ${esc(fmtMin(loopMinutes(s, w)))}</span>` : "";
+    const softTag = (s.status === "block" && !s.elicited) ? ` ${badge("block", true)}` : "";
+
+    return `<div class="sess" data-open="${s.id}">
+      ${dot}
+      <div class="sess-main">
+        <div class="sess-top"><span class="sess-name">${esc(s.name)}</span>${softTag} ${loopTag}</div>
+        <div class="sess-live">${s.kind === "question" ? "❔ " : ""}${s.kind === "failed" ? "⚠ " : ""}<b>${esc(s.live)}</b>${(!s.loop && s.meta && s.kind !== "failed" && s.status !== "block" && s.status !== "unset") ? ` · ${esc(s.meta)}` : ""}</div>
+        ${dodHoisted ? "" : `<div class="sess-dod">${dodTxt}</div>`}
+        ${artifact}
+        ${queue}
+        ${s.loop ? proposedLoop(s) : ""}
+      </div>
+      <div class="sess-act" onclick="event.stopPropagation()">
+        ${primary}
+        ${secondary}
+      </div>
+    </div>`;
+  }
+
+  // ─────────────────────────── planned surface ───────────────────────────
+  function plannedSectionHtml(c: Counts) {
+    if (!c.plan) return "";
+    return `<section class="done" id="sec-planned" style="margin-top:32px"></section>`;
+  }
+  function renderPlanned() {
+    const host = document.getElementById("sec-planned"); if (!host) return;
+    const dorm = dormantIds();
+    const items: Array<{ s: VSession; w: VWorkstream; p: VProject }> = [];
+    Object.values(state.SESS).forEach(({ s, w, p }) => { if ((s.status === "queued" || s.status === "planned") && !dorm.has(p.id)) items.push({ s, w, p }); });
+    const row = ({ s, w, p }: { s: VSession; w: VWorkstream; p: VProject }) => {
+      const total = s.queueTotal || (s.queue ? s.queue.length : 0); const shown = (s.queue || []).slice(0, 3); const more = total - shown.length;
+      const plan = s.queue && s.queue.length ? `<div class="qnext"><span class="qsrc" title="pi has no TodoWrite/plan primitive — best-effort parsed from notes (~).">~ parsed from notes →</span>` + shown.map((q) => `<span class="qchip">${esc(q)}</span>`).join("") + (more > 0 ? `<span class="qmore">~${more} more planned</span>` : "") + `<span class="infg" title="Best-effort, parsed from the agent's notes (~).">i</span></div>` : "";
+      return `<div class="drow" data-open="${s.id}">
+        <div class="dleft">
+          <div class="dcrumb"><b>${esc(p.name)}</b>${p.nest ? ` <span class="nest">⤷ ${esc(p.nest)}</span>` : ""} › ${esc(w.name)}</div>
+          <div class="dname">${esc(s.name)} ${badge(s.status)}</div>
+          <div class="dnote">${esc(s.live)} · DoD: ${dodInline(s.dod, s.dodSrc)}</div>
+          ${plan}
+        </div>
+        <div class="sess-act">
+          <button class="btn primary sm" data-open="${s.id}">${continueIcon()} Start</button>
+        </div>
+      </div>`;
+    };
+    const CAP = 6, shown = items.slice(0, CAP), extra = items.slice(CAP);
+    host.innerHTML = `
+      <div class="done-head" data-toggle="done">
+        <div class="done-title">≡ Planned</div>
+        <div class="done-sum"><b class="p">${items.length} planned</b>, not started — each has a ready plan</div>
+        <span class="chev">${chevIcon()}</span>
+      </div>
+      <div class="done-body">
+        <div class="done-grp"><div class="done-grp-h plan"><span class="sw"></span> Ready to start · ${items.length}</div>
+          ${shown.map(row).join("")}${extra.length ? `<div class="more-rows" hidden>${extra.map(row).join("")}</div><button class="morelink" data-toggle="more">+${extra.length} more — show all</button>` : ""}</div>
+      </div>`;
+  }
+
+  // ─────────────────────────── done surface — COMPLETED & MERGED only ───────────────────────────
+  function doneSectionHtml(c: Counts) {
+    if (!c.merge) return "";
+    return `<section class="done" id="sec-done" style="margin-top:32px"></section>`;
+  }
+  function renderDone() {
+    const host = document.getElementById("sec-done"); if (!host) return;
+    const dorm = dormantIds();
+    const mergeToday: Array<{ s: VSession; w: VWorkstream; p: VProject }> = [], mergeEarlier: Array<{ s: VSession; w: VWorkstream; p: VProject }> = [];
+    Object.values(state.SESS).forEach(({ s, w, p }) => {
+      if (s.status === "merge") {
+        if (dorm.has(p.id)) return;
+        const ago = (s.artifact && s.artifact.mergedAgo) || w.mergedAgo || "";
+        (isRecent(ago) ? mergeToday : mergeEarlier).push({ s, w, p });
+      }
+    });
+    const CAP = 6;
+    const row = ({ s, w, p }: { s: VSession; w: VWorkstream; p: VProject }) => {
+      const ago = (s.artifact && s.artifact.mergedAgo) || w.mergedAgo;
+      const note = `DoD met: <b style="color:var(--text);font-weight:650">${esc(s.dod)}</b> ${srcTag(s.dodSrc)}${ago ? ` · merged ${esc(ago)}` : ""}`;
+      return `<div class="drow" data-open="${s.id}">
+        <div class="dleft">
+          <div class="dcrumb"><b>${esc(p.name)}</b>${p.nest ? ` <span class="nest">⤷ ${esc(p.nest)}</span>` : ""} › ${esc(w.name)}</div>
+          <div class="dname">${esc(s.name)} ${badge("merge")}</div>
+          <div class="dnote">${note}</div>
+          <div style="margin-top:8px">${artChip(s)}</div>
+        </div>
+        <div class="sess-act">
+          <button class="btn ghost sm" data-open="${s.id}">View merge</button>
+        </div>
+      </div>`;
+    };
+    const cap = (arr: Array<{ s: VSession; w: VWorkstream; p: VProject }>, label: string, cls: string) => {
+      if (!arr.length) return "";
+      const shown = arr.slice(0, CAP), extra = arr.slice(CAP);
+      return `<div class="done-grp"><div class="done-grp-h ${cls}"><span class="sw"></span> ${label} · ${arr.length}</div>
+        ${shown.map(row).join("")}${extra.length ? `<div class="more-rows" hidden>${extra.map(row).join("")}</div><button class="morelink" data-toggle="more">+${extra.length} older — show all</button>` : ""}</div>`;
+    };
+    const mtot = mergeToday.length + mergeEarlier.length;
+    host.innerHTML = `
+      <div class="done-head" data-toggle="done">
+        <div class="done-title">✓ Done</div>
+        <div class="done-sum"><b class="m">${mtot} completed &amp; merged</b> — verified receipts <span class="infg" title="Verification-first: no done card without its receipt — a diff, a merge sha, or a rendered doc.">?</span></div>
+        <span class="chev">${chevIcon()}</span>
+      </div>
+      <div class="done-body">
+        ${cap(mergeToday, "Completed &amp; merged · today", "merge")}
+        ${cap(mergeEarlier, "Completed &amp; merged · earlier", "merge earlier")}
+      </div>`;
+  }
+
+  function tailNoteHtml(c: Counts) {
+    if (c.needs === 0) return "";
+    return `<p class="calmnote">All other loops are quiet. pi will surface them here the moment they need you.</p>`;
+  }
+
+  // ─────────────────────────── first-run onboarding ───────────────────────────
+  function onboardHtml(candidates: number) {
+    const disc = candidates > 0 ? `
+      <div class="disc">
+        pi found <b>${candidates} recent session folder${candidates > 1 ? "s" : ""}</b> that look like projects. Register one to start tracking.
+      </div>` : `
+      <div class="disc">No sessions yet — once you start one, pi will offer to roll its folder up into a project automatically.</div>`;
+    return `<div class="onboard" data-testid="first-run">
+      <div class="glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="11" height="6" rx="1.5"/><path d="M18 14v6M21 17h-6" opacity=".6"/></svg></div>
+      <h2>Roll up your work into projects</h2>
+      <p>pi-web groups your sessions into a calm, at-a-glance view. Tell it which folders are projects, and it organizes everything underneath.</p>
+      <div class="model">
+        <span class="node">Project</span><span class="arr">›</span>
+        <span class="node">Workstream</span><span class="arr">›</span>
+        <span class="node">Session</span><span class="arr">·</span>
+        <span class="node">Definition of Done</span>
+      </div>
+      <ol class="obsteps">
+        <li><b>Register a project</b> — point pi-web at a folder. Its sessions roll up automatically by longest-path match.</li>
+        <li><b>Attach sessions to a workstream</b> — group a project's sessions into a workstream (e.g. "auth", "billing").</li>
+        <li><b>Set a Definition of Done</b> — pick what "done" means. A ring shows honest k-of-n progress toward it.</li>
+      </ol>
+      <div class="actions">
+        <button class="btn primary" id="obAdd">${plusIcon()} Add a project</button>
+        <button class="btn" id="obStart">${continueIcon()} Start your first session</button>
+      </div>
+      ${disc}
+    </div>`;
+  }
+  // S5 is read-only — onboarding actions (register / start) are wired in S9.
+  function bindOnboard() { /* no-op until S9 */ }
+
+  // The Needs-you "jump to item" filter is invoked from an inline `oninput` handler in the
+  // ported markup; expose it on window so the verbatim attribute keeps working without
+  // adding click/input delegation in this read-only slice.
+  (window as unknown as { filterNeeds?: typeof filterNeeds }).filterNeeds = filterNeeds;
+
+  return { renderAll };
+}
