@@ -3093,6 +3093,9 @@ const server = createServer(async (req, res) => {
         }
         const result = await projectRegistryStore.setWorkstreamSessions(workstreamId, parsed.body.sessionIds);
         if (!result) return sendJson(res, 404, { ok: false, error: "Workstream not found" });
+        if ("inactive" in result) {
+          return sendJson(res, 409, { ok: false, error: "Workstream is archived or cancelled — restore it before moving sessions into it" });
+        }
         broadcast({ type: "project_registry_changed" });
         return sendJson(res, 200, { ok: true, workstream: result.workstream });
       }

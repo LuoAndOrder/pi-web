@@ -205,6 +205,31 @@ describe("rollups registry CRUD routes", () => {
     await server.api("DELETE", `/api/projects/${projectId}`);
   }, 20_000);
 
+  it("M1: PUT sessions into an archived/abandoned workstream is 409 (no silent move into the inactive bucket)", async () => {
+    const created = await server.api("POST", "/api/projects", { name: "M1-guard", roots: [process.cwd()] });
+    const projectId: string = created.body.project.id;
+    const a = await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "shelved" });
+    const b = await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "killed" });
+    const archivedId: string = a.body.workstream.id;
+    const cancelledId: string = b.body.workstream.id;
+    await server.api("PATCH", `/api/workstreams/${archivedId}`, { archived: true });
+    await server.api("PATCH", `/api/workstreams/${cancelledId}`, { status: "abandoned" });
+
+    const intoArchived = await server.api("PUT", `/api/workstreams/${archivedId}/sessions`, { sessionIds: ["s1"] });
+    expect(intoArchived.status).toBe(409);
+    expect(intoArchived.body.ok).toBe(false);
+    const intoCancelled = await server.api("PUT", `/api/workstreams/${cancelledId}/sessions`, { sessionIds: ["s2"] });
+    expect(intoCancelled.status).toBe(409);
+
+    // Membership stayed empty — the guard short-circuits before any write.
+    const state = await server.api("GET", "/api/projects");
+    const ws = state.body.registry.workstreams;
+    expect(ws.find((w: any) => w.id === archivedId).sessionIds).toEqual([]);
+    expect(ws.find((w: any) => w.id === cancelledId).sessionIds).toEqual([]);
+
+    await server.api("DELETE", `/api/projects/${projectId}`);
+  }, 20_000);
+
   it("returns 404 for unknown project PATCH/DELETE and unknown workstream PATCH", async () => {
     const patch = await server.api("PATCH", "/api/projects/missing", { name: "x" });
     expect(patch.status).toBe(404);

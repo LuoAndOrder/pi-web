@@ -549,6 +549,22 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     </div>`;
   }
 
+  // ── project-level lifecycle menu (operability lens) ──────────────────────────
+  // A per-project kebab mirroring wsMenu: Rename / Archive / Delete, all data-attribute-only
+  // (the delegated handler reads `data-projaction` + `data-projid`). Destructive verbs confirm
+  // + (Delete) offer an Undo in the controller. The synthetic Unfiled project (if any) carries
+  // no registry id to act on — but it never reaches a card header, so no guard needed here.
+  function projMenu(p: VProject): string {
+    const id = esc(p.id);
+    const item = (action: string, label: string, danger?: boolean) =>
+      `<button class="projmenu-item${danger ? " danger" : ""}" type="button" data-projaction="${action}" data-projid="${id}" role="menuitem">${esc(label)}</button>`;
+    const items = item("rename", "Rename…") + item("archive", "Archive") + item("delete", "Delete…", true);
+    return `<div class="projmenu" data-projmenu="${id}">
+      <button class="projkebab" type="button" data-projmenu-toggle="${id}" aria-haspopup="menu" aria-expanded="false" title="Project actions" aria-label="Project actions">${kebabIcon()}</button>
+      <div class="projmenu-pop" role="menu" hidden>${items}</div>
+    </div>`;
+  }
+
   // ═══════════════════════════ master render ═══════════════════════════
   function renderAll(sc?: { empty?: boolean; candidates?: number }) {
     const scn = sc || {};
@@ -942,7 +958,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
           // "Cancel — no longer relevant" abandons the owning workstream (PATCH status:
           // "abandoned", confirm) — a first-class lifecycle exit beside sign-off (M3): a
           // done-per-DoD item the user has decided to shelve rather than ship.
-          : `<button class="btn sign sm" data-signoff="${esc(critId)}"${deferTip("Sign off — merge stays a separate step")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off</button><button class="btn ghost sm" data-open="${s.id}">Review</button>${w._synthetic ? "" : `<button class="btn ghost sm wscancel" data-wscancel="${esc(w.id)}" title="No longer relevant — abandon this workstream instead of signing it off (it moves to Archived)">Cancel</button>`}`;
+          : `<button class="btn sign sm" data-signoff="${esc(critId)}"${deferTip("Sign off — merge stays a separate step")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off</button><button class="btn ghost sm" data-open="${s.id}">Review</button>${w._synthetic ? "" : `<button class="btn ghost danger sm wscancel" data-wscancel="${esc(w.id)}" title="No longer relevant — abandon this whole workstream instead of signing it off (it moves to Archived, out of active counts)">Not relevant</button>`}`;
       return `<article class="soff ${gone ? "gone" : ""}">
         <div class="sleft">
           <div class="scrumb"><b>${esc(p.name)}</b>${lineage} › ${esc(w.name)} · <span class="sn">${esc(s.name)}</span></div>
@@ -961,8 +977,13 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
 
   // ─────────────────────────── projects ───────────────────────────
   function projectsSectionHtml(_c: Counts) {
+    // A persistent "+ New project" affordance lives in the populated grid's header so a SECOND
+    // (third, …) project is registerable from the UI — not only on the empty-onboarding path
+    // (operability lens). data-projaction="new" carries no id; the controller prompts for a
+    // folder (reusing refreshCandidates) + name, then POSTs /api/projects.
     return `<div class="shead" id="sec-proj"><h2>Projects</h2><span class="cnt">${state.data.length}</span>
         <span class="hint">tap a card to drill in <span class="infg" title="Each ring is one workstream. Segments = its Definition-of-Done criteria, filled = met. ✓ = merged · ∞ = autonomous loop · ? = no DoD set yet.">?</span></span>
+        <button class="btn ghost sm newproj" type="button" data-projaction="new" title="Register another project folder — its sessions roll up by cwd-prefix">${plusIcon()} New project</button>
       </div>
       <section id="projectsHost"></section>`;
   }
@@ -1127,6 +1148,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
         <div class="pcard-counts">
           <div class="pcard-counts-top">
             ${p.workstreams.length === 1 ? wsMenu(p.workstreams[0]) : ""}
+            ${projMenu(p)}
             <span class="chev">${chevIcon()}</span>
           </div>
           ${countPills.join("")}
@@ -1170,6 +1192,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
         <span class="${ppCls}" title="${ppTitle}">${ppTxt}</span>
         <span class="psum">${sum}</span>
         ${setupAct}
+        ${projMenu(p)}
         <span class="chev">${chevIcon()}</span>
       </div>
       <div class="prow-body" data-rowbody="${p.id}"><div class="pbody" style="display:block;border-top:0">${ws}</div></div>`;
@@ -1219,7 +1242,14 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
   // every selection change. The "Move to existing" picker lists the project's REAL workstreams
   // (never the synthetic bucket itself).
   function realWorkstreamsOf(p: VProject): VWorkstream[] {
-    return [...(p.workstreams || []), ...(p.archivedWorkstreams || [])].filter((x) => !x._synthetic);
+    // ONLY active, real workstreams are valid move targets. The synthetic Unfiled bucket is
+    // never a target (no stored ws to attach to), and an archived/abandoned workstream
+    // (`_inactive`) must be excluded too: moving live sessions into a shelved workstream would
+    // silently tally them as `abandoned` and drop them out of the active grid/gauge — a
+    // data-visibility loss masquerading as a successful move. `p.archivedWorkstreams` are
+    // already split off by the adapter, so reading `p.workstreams` alone is correct; we still
+    // guard `_inactive`/`_synthetic` defensively in case the split ever changes.
+    return (p.workstreams || []).filter((x) => !x._synthetic && !x._inactive);
   }
   function unfiledAssignHtml(w: VWorkstream, p: VProject): string {
     const groups = clusterUnfiledSessions(w.sessions.map((s) => ({ id: s.id, name: s.name })));

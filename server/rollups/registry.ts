@@ -571,11 +571,19 @@ export function createProjectRegistryStore(file: string) {
   async function setWorkstreamSessions(
     id: string,
     sessionIds: unknown,
-  ): Promise<{ registry: ProjectRegistry; workstream: Workstream } | undefined> {
+  ): Promise<{ registry: ProjectRegistry; workstream: Workstream } | { inactive: true } | undefined> {
     return serializeWrite(async () => {
       const current = await read();
       const index = current.workstreams.findIndex((item) => item.id === id);
       if (index < 0) return undefined;
+      // Reject membership changes on a shelved (archived/abandoned) workstream: attaching
+      // live sessions to it would silently re-tag them `abandoned` in the rollup and drop
+      // them out of the active grid. The route maps `{ inactive: true }` to a 409 so the
+      // client can surface an honest error instead of a misleading "Moved N sessions" toast.
+      const existing = current.workstreams[index];
+      if (existing.archived === true || existing.status === "abandoned") {
+        return { inactive: true } as const;
+      }
       const updated: Workstream = {
         ...current.workstreams[index],
         sessionIds: normalizeStringArray(sessionIds),

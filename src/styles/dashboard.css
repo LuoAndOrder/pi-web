@@ -466,10 +466,30 @@
 #dashboardView .wsmenu-item:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 #dashboardView .wsmenu-item.danger { color: color-mix(in srgb, var(--st-fail) 88%, var(--text)); }
 #dashboardView .wsmenu-item.danger:hover { background: color-mix(in srgb, var(--st-fail) 16%, transparent); color: var(--st-fail); }
+/* Project-level lifecycle kebab — mirrors the workstream menu (operability lens). */
+#dashboardView .projmenu { position: relative; display: inline-flex; }
+#dashboardView .projkebab { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; padding: 0; }
+#dashboardView .projkebab:hover { color: var(--text); border-color: color-mix(in srgb, var(--border) 90%, transparent); background: color-mix(in srgb, var(--text) 5%, transparent); }
+#dashboardView .projkebab[aria-expanded="true"] { color: var(--text); border-color: var(--accent); }
+#dashboardView .projkebab svg { width: 16px; height: 16px; }
+#dashboardView .projmenu-pop { position: absolute; right: 0; top: calc(100% + 5px); z-index: 40; min-width: 168px; padding: 5px; border-radius: 11px; border: 1px solid var(--border); background: var(--panel-2); box-shadow: 0 14px 38px rgba(0, 0, 0, .45); display: flex; flex-direction: column; gap: 1px; }
+#dashboardView .projmenu-pop[hidden] { display: none; }
+#dashboardView .projmenu-item { display: block; width: 100%; text-align: left; padding: 8px 11px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+#dashboardView .projmenu-item:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+#dashboardView .projmenu-item.danger { color: color-mix(in srgb, var(--st-fail) 88%, var(--text)); }
+#dashboardView .projmenu-item.danger:hover { background: color-mix(in srgb, var(--st-fail) 16%, transparent); color: var(--st-fail); }
+/* "+ New project" sits at the far right of the Projects header; the .hint before it already
+   carries margin-left:auto, so a small left margin keeps them from colliding. */
+#dashboardView .shead .newproj { margin-left: 10px; }
+/* The compact .prow header is a grid/flex row — give the project kebab a fixed slot before
+   the chevron so it doesn't stretch. */
+#dashboardView .prow .projmenu { flex: 0 0 auto; }
 #dashboardView .btn.ghost.danger { color: color-mix(in srgb, var(--st-fail) 80%, var(--muted)); }
 #dashboardView .btn.ghost.danger:hover { color: var(--st-fail); border-color: color-mix(in srgb, var(--st-fail) 45%, var(--border)); }
-#dashboardView .soff .sact .wscancel { color: var(--muted); }
-#dashboardView .soff .sact .wscancel:hover { color: var(--st-fail); border-color: color-mix(in srgb, var(--st-fail) 38%, var(--border)); }
+/* The sign-off strip's "Not relevant" abandons the WHOLE workstream — a destructive lifecycle
+   exit. It carries .btn.ghost.danger, so its muted-red intent reads at REST (not only on hover),
+   so it's never mistaken for a low-emphasis "dismiss this action" control next to Sign off. */
+#dashboardView .soff .sact .wscancel:hover { color: var(--st-fail); border-color: color-mix(in srgb, var(--st-fail) 45%, var(--border)); }
 
 /* ───────────── archived / abandoned surface (M3) ───────────── */
 #dashboardView .done.archived .done-title { color: var(--muted); }

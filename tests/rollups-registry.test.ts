@@ -350,7 +350,7 @@ describe("domain mutators", () => {
     const ws = (await store.createWorkstream(project.id, { name: "auth" }))!.workstream;
 
     const attached = await store.setWorkstreamSessions(ws.id, ["s1", "s2", "s2", " "]);
-    expect(attached?.workstream.sessionIds).toEqual(["s1", "s2"]);
+    expect(attached && "workstream" in attached && attached.workstream.sessionIds).toEqual(["s1", "s2"]);
 
     const withDod = await store.setWorkstreamDoD(ws.id, [
       { id: "m1", text: "approved", source: { kind: "manual" }, gate: true },
@@ -360,6 +360,25 @@ describe("domain mutators", () => {
     expect(criteria.find((c) => c.id === "m1")!.met).toBe(false);
     expect(criteria.find((c) => c.id === "g1")!.met).toBeUndefined();
     expect(await store.setWorkstreamSessions("ghost", [])).toBeUndefined();
+  });
+
+  it("refuses to attach sessions to an archived or abandoned workstream (no silent data-visibility loss)", async () => {
+    const store = createProjectRegistryStore(file);
+    const { project } = await store.createProject({ name: "Alpha", roots: [dir] });
+    const archived = (await store.createWorkstream(project.id, { name: "old" }))!.workstream;
+    const cancelled = (await store.createWorkstream(project.id, { name: "dead" }))!.workstream;
+    await store.updateWorkstream(archived.id, { archived: true });
+    await store.updateWorkstream(cancelled.id, { status: "abandoned" });
+
+    const a = await store.setWorkstreamSessions(archived.id, ["s1"]);
+    const b = await store.setWorkstreamSessions(cancelled.id, ["s2"]);
+    expect(a).toEqual({ inactive: true });
+    expect(b).toEqual({ inactive: true });
+
+    // The membership must be untouched (still empty) — the guard short-circuits before any write.
+    const reg = await store.read();
+    expect(reg.workstreams.find((w) => w.id === archived.id)!.sessionIds).toEqual([]);
+    expect(reg.workstreams.find((w) => w.id === cancelled.id)!.sessionIds).toEqual([]);
   });
 
   it("toggles a manual criterion and persists across a fresh store instance", async () => {

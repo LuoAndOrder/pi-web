@@ -1120,16 +1120,16 @@ export function createDashboard(options: {
   // its current criteria/sessions, resolved from the SESS index (an archived workstream's
   // sessions are indexed too). Returns null if the workstream has no sessions indexed (a
   // zero-session workstream is unreachable via SESS — guarded at the call sites).
-  function findWsContext(workstreamId: string): { wsName: string; projectId: string } | null {
+  function findWsContext(workstreamId: string): { wsName: string; projectId: string; itemStatus?: string } | null {
     for (const ref of Object.values(view.SESS)) {
       if (ref.w.id === workstreamId) {
-        return { wsName: ref.w.name, projectId: ref.p.id };
+        return { wsName: ref.w.name, projectId: ref.p.id, itemStatus: ref.w._itemStatus };
       }
     }
     // A zero-session workstream isn't in SESS; fall back to a scan of the rollup view model.
     for (const p of view.data) {
       const w = [...(p.workstreams || []), ...(p.archivedWorkstreams || [])].find((x) => x.id === workstreamId);
-      if (w) return { wsName: w.name, projectId: p.id };
+      if (w) return { wsName: w.name, projectId: p.id, itemStatus: w._itemStatus };
     }
     return null;
   }
@@ -1209,22 +1209,32 @@ export function createDashboard(options: {
     const ctx = findWsContext(workstreamId);
     const name = ctx?.wsName || "this workstream";
     if (!window.confirm(`Cancel "${name}" as no longer relevant? It moves to Archived and drops out of active counts. You can re-open it later.`)) return;
+    // Capture the PRIOR status so Undo restores it faithfully — a workstream cancelled while
+    // `done` returns to `done` (not silently demoted to in_progress, which would lose its
+    // place in the project ring's k-of-n-done numerator). Default to in_progress for anything
+    // that wasn't already a terminal `done`.
+    const priorStatus = ctx?.itemStatus === "done" ? "done" : "in_progress";
     const ok = await patchWorkstream(workstreamId, { status: "abandoned" });
     if (ok) {
       showToast(`<b>${escText(name)}</b> cancelled — no longer relevant. Moved to Archived.`, () => {
-        void patchWorkstream(workstreamId, { status: "in_progress" }).then((undone) => { if (undone) void refetch(); });
+        void patchWorkstream(workstreamId, { status: priorStatus }).then((undone) => { if (undone) void refetch(); });
       });
       await refetch();
     } else showToast(`Couldn't cancel <b>${escText(name)}</b> — try again.`);
   }
 
-  // Restore — bring an archived/abandoned workstream back into the active grid. Clears BOTH
-  // the archived flag and (if abandoned) re-sets the status to in_progress, so a row that was
-  // cancelled AND archived comes fully back. Reachable from the Archived section + the kebab.
+  // Restore — bring an archived/abandoned workstream back into the active grid. We clear the
+  // `archived` flag unconditionally, but only RE-SET the status to in_progress when the prior
+  // status was `abandoned` (a cancelled workstream has no meaningful prior status to recover).
+  // A done-then-archived workstream (mark-done → archive-to-declutter is an expected flow) must
+  // keep its `done` status on restore, else it silently drops out of the project ring's
+  // k-of-n-done numerator. Reachable from the Archived section + the kebab.
   async function restoreWs(workstreamId: string) {
     const ctx = findWsContext(workstreamId);
     const name = ctx?.wsName || "Workstream";
-    const ok = await patchWorkstream(workstreamId, { archived: false, status: "in_progress" });
+    const patch: Record<string, unknown> = { archived: false };
+    if (ctx?.itemStatus === "abandoned") patch.status = "in_progress";
+    const ok = await patchWorkstream(workstreamId, patch);
     if (ok) { showToast(`<b>${escText(name)}</b> restored to the active grid.`); await refetch(); }
     else showToast(`Couldn't restore <b>${escText(name)}</b> — try again.`);
   }
@@ -1269,6 +1279,137 @@ export function createDashboard(options: {
       case "restore": void restoreWs(workstreamId); break;
       case "delete": void deleteWs(workstreamId); break;
     }
+  }
+
+  // ── project-level lifecycle (operability lens) ─────────────────────────────
+  // The project entity is fully USER-manageable from the populated grid, mirroring the
+  // workstream kebab: a persistent "+ New project" affordance (so a SECOND project is
+  // reachable without the empty-onboarding path) plus a per-row kebab (Rename / Archive /
+  // Delete). Each verb hits the REAL PATCH/DELETE /api/projects/:id routes, then refetches.
+  // Destructive Delete confirms first + offers an Undo that re-registers from a name+roots
+  // snapshot taken from the raw rollups (a new id, same roots → its sessions re-roll up).
+
+  // Resolve a project's display name + raw registry roots from the raw rollups (VProject.path
+  // is the ~-shortened DISPLAY path; re-registration needs the absolute roots). Returns null
+  // for an unknown id (guarded at every call site).
+  function findProjectContext(projectId: string): { name: string; roots: string[]; description?: string } | null {
+    for (const r of state.rollups) {
+      if (r.project?.id === projectId) {
+        return { name: r.project.name, roots: [...(r.project.roots || [])], description: r.project.description };
+      }
+    }
+    return null;
+  }
+
+  // "+ New project" from the populated grid. Reuses refreshCandidates() to suggest a folder,
+  // then prompts for a name — registerProject() does the POST + refetch. When there are no
+  // unregistered candidates, the user can still type an absolute path by hand (the same
+  // POST /api/projects {name, roots:[path]} contract the onboarding cards use).
+  async function newProjectFromGrid() {
+    closeProjMenus();
+    await refreshCandidates();
+    const cands = view.candidates || [];
+    const suggestedRoot = cands[0]?.path || "";
+    const root = (window.prompt(
+      cands.length
+        ? `Register a project folder (absolute path). pi found ${cands.length} unregistered folder${cands.length === 1 ? "" : "s"} with sessions — the busiest is pre-filled:`
+        : "Register a project folder — paste its absolute path:",
+      suggestedRoot,
+    ) || "").trim();
+    if (!root) return; // cancelled / empty → no-op (no fabricated default)
+    const defaultName = cands.find((c) => c.path === root)?.name || basename(root) || "New project";
+    const name = (window.prompt(`Name this project:`, defaultName) || "").trim();
+    if (!name) return;
+    await registerProject(name, root); // POSTs /api/projects, toasts, refetches
+  }
+
+  async function patchProject(projectId: string, patch: Record<string, unknown>): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, {
+        method: "PATCH",
+        headers: api.headers(),
+        body: JSON.stringify(patch),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async function renameProject(projectId: string) {
+    const ctx = findProjectContext(projectId);
+    const current = ctx?.name || "this project";
+    const next = (window.prompt(`Rename project:`, ctx?.name || "") || "").trim();
+    if (!next || next === ctx?.name) return; // cancelled / unchanged → no-op
+    const ok = await patchProject(projectId, { name: next });
+    if (ok) { showToast(`Renamed <b>${escText(current)}</b> → <b>${escText(next)}</b>.`); await refetch(); }
+    else showToast(`Couldn't rename <b>${escText(current)}</b> — try again.`);
+  }
+
+  async function archiveProject(projectId: string) {
+    const ctx = findProjectContext(projectId);
+    const name = ctx?.name || "this project";
+    if (!window.confirm(`Archive "${name}"? Its rollup drops out of the dashboard. You can un-archive it later via the API or by re-registering its folder.`)) return;
+    const ok = await patchProject(projectId, { archived: true });
+    if (ok) {
+      showToast(`<b>${escText(name)}</b> archived — removed from the active dashboard.`, () => {
+        void patchProject(projectId, { archived: false }).then((undone) => { if (undone) void refetch(); });
+      });
+      await refetch();
+    } else showToast(`Couldn't archive <b>${escText(name)}</b> — try again.`);
+  }
+
+  async function deleteProject(projectId: string) {
+    const ctx = findProjectContext(projectId);
+    const name = ctx?.name || "this project";
+    if (!window.confirm(`Delete "${name}"? This removes the project registration and its workstreams. Sessions are untouched (they revert to Unfiled). Undo re-registers it (a new id).`)) return;
+    let ok = false;
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE", headers: api.headers() });
+      ok = res.ok;
+    } catch { ok = false; }
+    if (!ok) { showToast(`Couldn't delete <b>${escText(name)}</b> — try again.`); return; }
+    // Undo: re-register from the snapshot (name + roots). A new id is minted (delete is
+    // irreversible at the id level), but the same roots re-roll up the project's sessions.
+    const undo = ctx && ctx.roots.length
+      ? () => {
+          void fetch(`/api/projects`, {
+            method: "POST",
+            headers: api.headers(),
+            body: JSON.stringify({ name: ctx.name, roots: ctx.roots, ...(ctx.description ? { description: ctx.description } : {}) }),
+          }).then((r) => { if (r.ok || r.status === 201) void refetch(); else showToast(`Couldn't restore <b>${escText(name)}</b>.`); })
+            .catch(() => showToast(`Couldn't restore <b>${escText(name)}</b>.`));
+        }
+      : undefined;
+    showToast(`<b>${escText(name)}</b> deleted — its sessions revert to Unfiled.`, undo);
+    await refetch();
+  }
+
+  function runProjAction(action: string, projectId: string) {
+    if (!projectId) return;
+    closeProjMenus();
+    switch (action) {
+      case "new": void newProjectFromGrid(); break;
+      case "rename": void renameProject(projectId); break;
+      case "archive": void archiveProject(projectId); break;
+      case "delete": void deleteProject(projectId); break;
+    }
+  }
+
+  // Project kebab popups mirror the workstream menu: only one open at a time, dismissed by a
+  // click elsewhere (the document/overlay listener in init calls both closers).
+  function closeProjMenus() {
+    elements.dashboardWrap.querySelectorAll<HTMLElement>(".projmenu-pop").forEach((pop) => { pop.hidden = true; });
+    elements.dashboardWrap.querySelectorAll<HTMLElement>("[data-projmenu-toggle]").forEach((b) => b.setAttribute("aria-expanded", "false"));
+  }
+  function toggleProjMenu(projectId: string) {
+    const menu = elements.dashboardWrap.querySelector<HTMLElement>(`.projmenu[data-projmenu="${CSS.escape(projectId)}"]`);
+    if (!menu) return;
+    const pop = menu.querySelector<HTMLElement>(".projmenu-pop");
+    const toggle = menu.querySelector<HTMLElement>("[data-projmenu-toggle]");
+    const wasOpen = pop ? !pop.hidden : false;
+    closeProjMenus();
+    if (pop && !wasOpen) { pop.hidden = false; toggle?.setAttribute("aria-expanded", "true"); }
   }
 
   // Open/close the small kebab popup menus. Only one is open at a time; a click elsewhere
@@ -1356,9 +1497,28 @@ export function createDashboard(options: {
       runWsAction(wsAction.getAttribute("data-wsaction") || "", wsAction.getAttribute("data-wsid") || "");
       return;
     }
+
+    // ── project-level lifecycle (operability lens) ── kebab toggle + actions, checked before
+    // the card/row toggle beneath them. "+ New project" carries data-projaction="new" with no id.
+    const projKebab = target.closest<HTMLElement>("[data-projmenu-toggle]");
+    if (projKebab) {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleProjMenu(projKebab.getAttribute("data-projmenu-toggle") || "");
+      return;
+    }
+    const projAction = target.closest<HTMLElement>("[data-projaction]");
+    if (projAction) {
+      event.preventDefault();
+      event.stopPropagation();
+      runProjAction(projAction.getAttribute("data-projaction") || "", projAction.getAttribute("data-projid") || "");
+      return;
+    }
+
     // A click anywhere else inside the overlay (not on a menu) dismisses any open kebab menu
     // before the click's own handling proceeds.
     if (!target.closest(".wsmenu")) closeWsMenus();
+    if (!target.closest(".projmenu")) closeProjMenus();
     // Sign-off strip "Cancel — no longer relevant" → abandon the owning workstream.
     const wsCancel = target.closest<HTMLElement>("[data-wscancel]");
     if (wsCancel) {
@@ -1549,14 +1709,14 @@ export function createDashboard(options: {
     // The opaque full-screen #dashboardView is the click target; clicking its scroll
     // surface (outside the centered .wrap) closes — no separate backdrop node needed.
     elements.dashboardView.addEventListener("click", (event) => {
-      if (event.target === elements.dashboardView) { closeWsMenus(); closeDashboard(); }
+      if (event.target === elements.dashboardView) { closeWsMenus(); closeProjMenus(); closeDashboard(); }
     });
     // ESC dismisses an open kebab menu first (before the app's ESC closes the overlay), so
     // the menu can be escaped without losing the whole dashboard.
     elements.dashboardView.addEventListener("keydown", (event) => {
       if ((event as KeyboardEvent).key !== "Escape") return;
-      const anyOpen = !!elements.dashboardWrap.querySelector<HTMLElement>(".wsmenu-pop:not([hidden])");
-      if (anyOpen) { event.stopPropagation(); closeWsMenus(); }
+      const anyOpen = !!elements.dashboardWrap.querySelector<HTMLElement>(".wsmenu-pop:not([hidden]), .projmenu-pop:not([hidden])");
+      if (anyOpen) { event.stopPropagation(); closeWsMenus(); closeProjMenus(); }
     });
     // Delegated drill-in / continue / expand-collapse, scoped to the overlay.
     elements.dashboardWrap.addEventListener("click", handleClick);
