@@ -58,6 +58,11 @@ export type AppElements = {
   emptyCwdChooserEl: HTMLDivElement;
   emptyCwdPathEl: HTMLDivElement;
   emptyCwdButton: HTMLButtonElement;
+  dashboardButton: HTMLButtonElement;
+  dashboardView: HTMLElement;
+  dashboardBackdrop: HTMLDivElement;
+  dashboardWrap: HTMLDivElement;
+  dashboardCloseButton: HTMLButtonElement;
 };
 
 export function requiredElement<T extends Element>(selector: string): T {
@@ -127,6 +132,11 @@ export function getAppElements(): AppElements {
     emptyCwdChooserEl: requiredElement<HTMLDivElement>("#emptyCwdChooser"),
     emptyCwdPathEl: requiredElement<HTMLDivElement>("#emptyCwdChooser .emptyCwdPath"),
     emptyCwdButton: requiredElement<HTMLButtonElement>("#emptyCwdChooser .emptyCwdButton"),
+    dashboardButton: requiredElement<HTMLButtonElement>("#dashboardButton"),
+    dashboardView: requiredElement<HTMLElement>("#dashboardView"),
+    dashboardBackdrop: requiredElement<HTMLDivElement>("#dashboardBackdrop"),
+    dashboardWrap: requiredElement<HTMLDivElement>("#dashboardWrap"),
+    dashboardCloseButton: requiredElement<HTMLButtonElement>("#dashboardCloseButton"),
   };
 }
 

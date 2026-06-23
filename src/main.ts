@@ -10,6 +10,7 @@ import { initKeyboardShortcuts } from "./app/shortcuts.js";
 import { createAppState, readActiveSessionIdFromUrl } from "./app/types.js";
 import { createComposer, type ComposerController } from "./composer/composer.js";
 import { createContextMeter, type ContextMeterController } from "./composer/contextMeter.js";
+import { createDashboard, type DashboardController } from "./dashboard/dashboard.js";
 import { createWebHeaderActions } from "./extensions/webHeaderActions.js";
 import { renderWebFooters } from "./extensions/webFooter.js";
 import { initGitPanel } from "./git/panel.js";
@@ -40,6 +41,7 @@ let sessions: SessionsController;
 let settings: SettingsController;
 let statusBar: StatusBar;
 let conversationTree: ConversationTreeController;
+let dashboard: DashboardController;
 const webHeaderActions = createWebHeaderActions({
   container: elements.headerActionsEl,
   headers: api.headers,
@@ -134,6 +136,8 @@ function initStaticIcons() {
   setIcon(elements.gitButton, "git-branch");
   setIcon(elements.currentSessionBucketButton, "flag");
   setIcon(elements.settingsButton, "settings");
+  setIcon(elements.dashboardButton, "layout-dashboard");
+  setIcon(elements.dashboardCloseButton, "x");
   setIcon(elements.stopButton, "square");
 }
 
@@ -178,6 +182,13 @@ sessions = createSessions({
     tools.clearActiveToolCards();
     messages.clear();
   },
+  addMessage: messages.addMessage,
+});
+
+dashboard = createDashboard({
+  elements,
+  api,
+  sessions,
   addMessage: messages.addMessage,
 });
 
@@ -232,6 +243,8 @@ composer.init();
 conversationTree.init();
 modelSettings.init();
 settings.init();
+dashboard.init();
+elements.dashboardButton.addEventListener("click", () => dashboard.open());
 initKeyboardShortcuts([
   {
     id: "sessions.toggleDrawer",
@@ -241,6 +254,23 @@ initKeyboardShortcuts([
     allowInEditable: true,
     when: () => elements.tokenOverlay.hidden,
     run: () => sessions.setSessionDrawerOpen(elements.sessionDrawer.hidden),
+  },
+  {
+    id: "dashboard.toggle",
+    key: "h",
+    scope: "global",
+    mod: true,
+    allowInEditable: true,
+    when: () => elements.tokenOverlay.hidden,
+    run: () => dashboard.toggle(),
+  },
+  {
+    id: "dashboard.close",
+    key: "Escape",
+    scope: "dashboard",
+    allowInEditable: true,
+    when: () => dashboard.isOpen(),
+    run: () => dashboard.close(),
   },
   {
     id: "session.stopFromPrompt",
@@ -262,6 +292,7 @@ initKeyboardShortcuts([
     if (document.activeElement === elements.promptEl) scopes.push("composer");
     if (!elements.sessionDrawer.hidden) scopes.push("sessions");
     if (!elements.gitPanel.hidden) scopes.push("git");
+    if (dashboard.isOpen()) scopes.push("dashboard");
     return scopes;
   },
   onError: showSystemError,

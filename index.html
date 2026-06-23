@@ -41,10 +41,21 @@
         <button id="currentSessionBucketButton" class="iconButton statusBarButton sessionBucketButton" type="button" aria-label="Set session bucket" title="Set session bucket" aria-haspopup="menu">
           <span data-icon="flag"></span>
         </button>
+        <button id="dashboardButton" class="iconButton statusBarButton" type="button" aria-label="Project rollups" title="Project rollups">
+          <span data-icon="layout-dashboard"></span>
+        </button>
         <button id="settingsButton" class="iconButton statusBarButton" type="button" aria-label="Settings" title="Settings">
           <span data-icon="settings"></span>
         </button>
       </div>
+
+      <div id="dashboardBackdrop" class="dashboardBackdrop" hidden></div>
+      <section id="dashboardView" class="dashboardView" data-testid="rollup-dashboard" aria-label="Project rollups" hidden>
+        <button id="dashboardCloseButton" class="dashClose" type="button" aria-label="Close rollups" title="Close rollups">
+          <span data-icon="x"></span>
+        </button>
+        <div class="wrap" id="dashboardWrap"></div>
+      </section>
 
       <aside id="gitPanel" class="gitPanel" aria-label="Git" hidden>
         <div class="gitPanelHeader">
