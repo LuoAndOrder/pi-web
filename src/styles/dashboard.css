@@ -45,7 +45,7 @@
 #dashboardView button { font: inherit; cursor: pointer; color: inherit; }
 #dashboardView .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-.dashClose {
+#dashboardView .dashClose {
   position: fixed;
   top: 14px;
   right: 18px;
@@ -59,8 +59,8 @@
   background: var(--panel-2);
   color: var(--muted);
 }
-.dashClose:hover { color: var(--text); border-color: var(--accent); }
-.dashClose svg { width: 16px; height: 16px; }
+#dashboardView .dashClose:hover { color: var(--text); border-color: var(--accent); }
+#dashboardView .dashClose svg { width: 16px; height: 16px; }
 
 #dashboardView .wrap { max-width: 1200px; margin: 0 auto; padding: 30px 26px 90px; }
 
@@ -553,5 +553,5 @@
   #dashboardView .needs { grid-template-columns: 1fr; }
   #dashboardView .headline { font-size: 20px; }
   #dashboardView .grid.single { grid-template-columns: 1fr; }
-  .dashClose { top: 10px; right: 12px; }
+  #dashboardView .dashClose { top: 10px; right: 12px; }
 }

@@ -32,6 +32,34 @@ type DashboardState = {
 };
 
 const REFETCH_DEBOUNCE_MS = 250;
+const LAST_VISIT_KEY = "pi-dashboard-last-visit";
+
+// Persist a real "last looked at the dashboard" timestamp so the hero delta clause counts
+// only work merged/blocked since the PREVIOUS visit — never treating a null baseline as the
+// beginning of time (which made `fleetDelta` count every merged item all-time). Returns an
+// "ago"-style string the renderer's `agoToMin` already parses, or null on the first visit.
+function readLastVisit(): string | null {
+  try {
+    const raw = window.localStorage.getItem(LAST_VISIT_KEY);
+    if (!raw) return null;
+    const epoch = Number(raw);
+    if (!Number.isFinite(epoch) || epoch <= 0) return null;
+    const min = Math.max(0, Math.round((Date.now() - epoch) / 60000));
+    if (min < 60) return `${Math.max(1, min)}m ago`;
+    const hours = Math.round(min / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.round(hours / 24)}d ago`;
+  } catch {
+    return null;
+  }
+}
+function writeLastVisit(): void {
+  try {
+    window.localStorage.setItem(LAST_VISIT_KEY, String(Date.now()));
+  } catch {
+    /* storage unavailable — the delta simply stays suppressed */
+  }
+}
 
 export function createDashboard(options: {
   elements: AppElements;
@@ -135,6 +163,10 @@ export function createDashboard(options: {
 
   function openDashboard() {
     if (open) return;
+    // Establish the "since you last looked" baseline from the previous visit, then record
+    // this visit so the next open compares against it.
+    view.lastVisit = readLastVisit();
+    writeLastVisit();
     reveal();
     // Show the loading hero (not the empty-onboarding flash) until the first fetch lands.
     if (view.data.length === 0) state.loading = true;

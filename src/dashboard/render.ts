@@ -144,6 +144,7 @@ interface CardLive {
   id: string | null;
   pointUp?: string;
   qDelta?: { total: number } | null;
+  unset?: boolean;
 }
 
 export interface DashboardRenderer {
@@ -310,7 +311,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
       return { tone: st === "loop" ? "loop" : "run", loop: st === "loop", txt: t.live || "", id: t.id, qDelta: qd };
     }
     if (st === "sign") return { tone: "sign", loop: false, pointUp: "sec-signoff", txt: `${wn} is done per its DoD — sign off above`, id: t.id };
-    if (st === "unset") return { tone: "calm", loop: false, txt: `${wn} — no Definition of Done set yet`, id: t.id };
+    if (st === "unset") return { tone: "calm", loop: false, txt: `${wn} — no Definition of Done set yet`, id: t.id, unset: true };
     if (st === "queued" || st === "planned") return { tone: "calm", loop: false, txt: t.live || "", id: t.id };
     return { tone: "calm", loop: false, txt: "All work merged. Nothing pending.", id: t.id };
   }
@@ -418,6 +419,11 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
     return { merges, add, del, blocked, since: state.lastVisit };
   }
   function deltaClause(needs: number) {
+    // No persisted last-visit baseline → no "since you last looked" delta. Without this
+    // guard a null baseline degrades to agoToMin("")=1e9 and counts every merged item
+    // all-time, not since the last visit (review finding). dashboard.ts persists the
+    // baseline so the clause lights up correctly on the second and later visits.
+    if (!state.lastVisit) return "";
     const d = fleetDelta();
     const frags: string[] = [];
     if (d.merges) {
@@ -597,7 +603,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
       const RCAP = 6, rShown = rest.slice(0, RCAP), rExtra = rest.slice(RCAP);
       const JUMP_MIN = 8;
       const jumpBox = rest.length >= JUMP_MIN
-        ? `<input class="needjump" type="search" placeholder="jump to item — filter ${rest.length} by project / workstream / name" aria-label="jump to a blocked item" oninput="filterNeeds(this)">`
+        ? `<input class="needjump" type="search" placeholder="jump to item — filter ${rest.length} by project / workstream / name" aria-label="jump to a blocked item">`
         : "";
       html += `<div class="needmore" id="needmore" style="grid-column:1/-1">
         <div class="needmore-h" data-toggle="needmore"><b>+${rest.length} more need you</b> — collapsed to stay calm; ordered by blast radius, then waiting time<span class="chev">${chevIcon()}</span></div>
@@ -818,7 +824,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
       olAttr = `data-jump="${live.pointUp}"`;
     } else {
       olActs = live.id
-        ? `<button class="btn primary sm" data-open="${live.id}">${continueIcon()} ${liveRun ? "Open" : "Continue"}</button>`
+        ? `<button class="btn primary sm" data-open="${live.id}">${continueIcon()} ${live.unset ? "Define done" : liveRun ? "Open" : "Continue"}</button>`
         : "";
       olAttr = live.id ? `data-open="${live.id}"` : "";
       ping = (live.id && live.id === state._pingId) ? " ping" : "";
@@ -1109,10 +1115,13 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
   // S5 is read-only — onboarding actions (register / start) are wired in S9.
   function bindOnboard() { /* no-op until S9 */ }
 
-  // The Needs-you "jump to item" filter is invoked from an inline `oninput` handler in the
-  // ported markup; expose it on window so the verbatim attribute keeps working without
-  // adding click/input delegation in this read-only slice.
-  (window as unknown as { filterNeeds?: typeof filterNeeds }).filterNeeds = filterNeeds;
+  // The Needs-you "jump to item" filter is driven by a single delegated `input` listener on
+  // `wrap` (mirroring the delegated click discipline) — no inline `oninput` attribute, no
+  // window global. createRenderer runs once, so this binds exactly once.
+  wrap.addEventListener("input", (e) => {
+    const t = e.target;
+    if (t instanceof HTMLInputElement && t.classList.contains("needjump")) filterNeeds(t);
+  });
 
   return { renderAll };
 }
