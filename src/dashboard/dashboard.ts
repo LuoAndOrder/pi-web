@@ -263,6 +263,7 @@ export function createDashboard(options: {
 
   function closeDashboard() {
     if (!open) return;
+    closeDodDrawer(); // a left-open authoring drawer must not survive the overlay closing
     hide();
   }
 
@@ -398,6 +399,226 @@ export function createDashboard(options: {
     });
   }
 
+  // ── DoD authoring drawer (impl-plan S10) ──
+  // The authoring flow is keyed to a WORKSTREAM (DoD is stored per-workstream and PUT to
+  // /api/workstreams/:id/dod), reached by clicking "Define done" on any unset session row.
+  // It is a modal panel mounted INSIDE #dashboardView (its .dodDrawer CSS is scoped there),
+  // so it rides above the grid and never touches the host document. On save it PUTs the
+  // structured criteria, then refetches /api/rollups so the ring updates to honest k-of-n —
+  // no fabricated percent, no client re-derivation of the saved progress.
+  //
+  // The evaluator catalog mirrors the validated mockup (index.html L2899-2906): auto-computing
+  // evaluators (git/session) re-check on every read with zero upkeep and lead; command + manual
+  // follow. Each maps to a REAL structured `source.kind` the server normalizer accepts.
+  type DraftCrit = { text: string; source: DodSource; gate?: boolean };
+  type DodSource =
+    | { kind: "manual" }
+    | { kind: "git_clean" }
+    | { kind: "git_ahead_zero" }
+    | { kind: "git_merged"; into: string }
+    | { kind: "session_idle"; sessionId: string }
+    | { kind: "command"; cwd: string; cmd: string };
+
+  const DOD_EVALUATORS: Array<{
+    key: string;
+    fam: string;
+    label: string;
+    auto: boolean;
+    make: (ctx: { cwd: string; sessionId: string }) => DodSource;
+  }> = [
+    { key: "git_merged", fam: "git", label: "Branch merged into main", auto: true, make: () => ({ kind: "git_merged", into: "main" }) },
+    { key: "git_clean", fam: "git", label: "Working tree clean", auto: true, make: () => ({ kind: "git_clean" }) },
+    { key: "git_ahead_zero", fam: "git", label: "Branch fully pushed", auto: true, make: () => ({ kind: "git_ahead_zero" }) },
+    { key: "session_idle", fam: "runtime", label: "Session idle (loop settled)", auto: true, make: (ctx) => ({ kind: "session_idle", sessionId: ctx.sessionId }) },
+    { key: "command", fam: "command", label: "A test/lint command exits 0", auto: false, make: (ctx) => ({ kind: "command", cwd: ctx.cwd, cmd: "npm test" }) },
+    { key: "manual", fam: "manual", label: "A manual boolean I check", auto: false, make: () => ({ kind: "manual" }) },
+  ];
+
+  // `synthetic` flags the rollup-time "Unfiled" bucket (`${projectId}:unfiled`) which has NO stored
+  // workstream to PUT to. Authoring a DoD on it CREATES a real workstream under the project (POST
+  // /api/projects/:id/workstreams with the criteria + the session attached), then the next /api/rollups
+  // folds the session into that real workstream with an honest k-of-n ring.
+  let drawer:
+    | { workstreamId: string; projectId: string; synthetic: boolean; wsName: string; cwd: string; sessionId: string; draft: DraftCrit[] }
+    | null = null;
+
+  // The structured `source.kind` → the short evaluator-family label shown on each draft chip.
+  function famOf(source: DodSource): string {
+    switch (source.kind) {
+      case "git_clean":
+      case "git_ahead_zero":
+      case "git_merged": return "git";
+      case "command": return "command";
+      case "session_idle": return "runtime";
+      default: return "manual";
+    }
+  }
+
+  function drawerEl(): HTMLDivElement {
+    let el = elements.dashboardView.querySelector<HTMLDivElement>("#dashboardDodDrawer");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "dashboardDodDrawer";
+      el.className = "dodDrawer";
+      el.hidden = true;
+      elements.dashboardView.appendChild(el);
+    }
+    return el;
+  }
+
+  // Open the authoring drawer for the workstream that owns `sessionId`. Seeds the draft from any
+  // existing criteria so re-opening edits rather than wipes (the server PUT replaces the full set).
+  function openDodDrawer(sessionId: string) {
+    const ref = view.SESS[sessionId];
+    if (!ref) return;
+    const ws = ref.w;
+    const seed: DraftCrit[] = (ref.s.crit ?? [])
+      .map((c) => {
+        const kind = (c.src || "manual") as DodSource["kind"];
+        let source: DodSource;
+        if (kind === "git_merged") source = { kind: "git_merged", into: "main" };
+        else if (kind === "git_clean") source = { kind: "git_clean" };
+        else if (kind === "git_ahead_zero") source = { kind: "git_ahead_zero" };
+        else if (kind === "session_idle") source = { kind: "session_idle", sessionId };
+        else if (kind === "command") source = { kind: "command", cwd: ref.s.cwd ?? "", cmd: "npm test" };
+        else source = { kind: "manual" };
+        return { text: c.text ?? "", source, gate: c.gate };
+      });
+    const synthetic = ws.id.endsWith(":unfiled");
+    drawer = {
+      workstreamId: ws.id,
+      projectId: ref.p.id,
+      synthetic,
+      // For the synthetic Unfiled bucket, author a fresh, descriptively-named workstream rather
+      // than literally calling it "Unfiled" (which would be a confusing real workstream name).
+      wsName: synthetic ? (ref.s.name || "New workstream") : ws.name,
+      cwd: ref.s.cwd ?? "",
+      sessionId,
+      draft: seed,
+    };
+    renderDrawer();
+  }
+
+  function closeDodDrawer() {
+    drawer = null;
+    const el = elements.dashboardView.querySelector<HTMLDivElement>("#dashboardDodDrawer");
+    if (el) { el.hidden = true; el.innerHTML = ""; el.classList.remove("open"); }
+  }
+
+  function renderDrawer() {
+    if (!drawer) { closeDodDrawer(); return; }
+    const el = drawerEl();
+    const auto = DOD_EVALUATORS.filter((e) => e.auto);
+    const other = DOD_EVALUATORS.filter((e) => !e.auto);
+    const pick = (arr: typeof DOD_EVALUATORS) => arr
+      .map((e) => `<button class="dodpick-b${e.auto ? " auto" : ""}" data-critadd="${e.key}"><span>+ ${escText(e.label)}</span><span class="ev">${escText(e.fam)}${e.auto ? " · auto" : ""}</span></button>`)
+      .join("");
+    const draftList = drawer.draft
+      .map((c, i) => `<li><span class="fam">${escText(famOf(c.source))}</span><span class="grow-txt">${escText(c.text)}</span>${c.gate ? `<span class="gatepill" title="excluded from %; the manual gate you sign off">gate</span>` : ""}<span class="grow"></span><button data-critrm="${i}" title="remove criterion">✕</button></li>`)
+      .join("");
+    const count = drawer.draft.length;
+    const note = count
+      ? `${count} ${count > 1 ? "criteria" : "criterion"} drafted — saving starts honest k-of-n tracking via <span class="mono">PUT /api/workstreams/:id/dod</span>.`
+      : "Pick at least one criterion to start tracking progress.";
+    el.innerHTML = `
+      <div class="dodDrawer-scrim" data-dod-close></div>
+      <div class="dodDrawer-panel" role="dialog" aria-modal="true" aria-label="Define done">
+        <div class="dodDrawer-head">
+          <div>
+            <div class="dodDrawer-eyebrow">Definition of Done</div>
+            <div class="dodDrawer-title">${escText(drawer.wsName)}</div>
+          </div>
+          <button class="dashClose dodDrawer-x" data-dod-close title="Close">✕</button>
+        </div>
+        <div class="dodauthor" data-author>
+          <div class="dah">Add / remove criteria, pick an evaluator</div>
+          <div class="grp"><b>Auto-computing</b> · re-checked on every read, zero upkeep — these keep the ring honest with no maintenance</div>
+          <div class="dodpick">${pick(auto)}</div>
+          <div class="grp"><b>On-demand / manual</b> · a command (re-run to refresh) or a boolean you toggle</div>
+          <div class="dodpick">${pick(other)}</div>
+          <div class="addrow"><input type="text" id="dodCritText" placeholder="…or describe a criterion in your own words"><button data-critaddtext>Add</button></div>
+          <ul class="draft">${draftList || `<li class="empty">No criteria yet — the ring honestly shows "?" (not set), and this workstream is excluded from the project gauge until you add one.</li>`}</ul>
+          <div class="saverow">
+            <span class="note">${note}</span>
+            <button class="btn primary sm" data-critsave ${count ? "" : "disabled"}>Save Definition of Done</button>
+          </div>
+        </div>
+      </div>`;
+    el.hidden = false;
+    requestAnimationFrame(() => el.classList.add("open"));
+    const input = el.querySelector<HTMLInputElement>("#dodCritText");
+    if (input) input.focus();
+  }
+
+  function addDraftEvaluator(key: string) {
+    if (!drawer) return;
+    const e = DOD_EVALUATORS.find((x) => x.key === key);
+    if (!e) return;
+    const source = e.make({ cwd: drawer.cwd, sessionId: drawer.sessionId });
+    // The manual gate is the human sign-off; offer it as a gate so the ring's % excludes it (the
+    // HARD RULE: a manual boolean is the only toggleable truth, and a sign-off gate is excluded
+    // from the percent). Other evaluators are plain weighted criteria.
+    drawer.draft.push({ text: e.label, source });
+    renderDrawer();
+  }
+  function addDraftManual(text: string) {
+    if (!drawer) return;
+    const t = (text || "").trim();
+    if (!t) return;
+    drawer.draft.push({ text: t, source: { kind: "manual" } });
+    renderDrawer();
+  }
+  function removeDraft(i: number) {
+    if (!drawer || i < 0 || i >= drawer.draft.length) return;
+    drawer.draft.splice(i, 1);
+    renderDrawer();
+  }
+
+  // Persist the draft via PUT /api/workstreams/:id/dod {criteria}, then refetch /api/rollups so the
+  // ring re-renders at the server's honest k-of-n. The criteria carry STRUCTURED source.kind the
+  // registry normalizer accepts; weights default to 1 server-side. No fabricated percent here — the
+  // ring updates only from the re-fetched ProgressSnapshot.
+  async function saveDoD() {
+    if (!drawer || !drawer.draft.length) return;
+    const { projectId, synthetic, sessionId } = drawer;
+    const wsId = drawer.workstreamId;
+    const wsName = drawer.wsName;
+    const criteria = drawer.draft.map((c) => ({
+      text: c.text,
+      source: c.source,
+      ...(c.gate ? { gate: true } : {}),
+      ...(c.source.kind === "manual" ? { met: false } : {}),
+    }));
+    try {
+      let res: Response;
+      if (synthetic) {
+        // No stored workstream behind the Unfiled bucket → create a REAL one under the project,
+        // carrying the criteria + the originating session so the next rollup folds it in. The
+        // registry normalizer applies the same DoD validation as the PUT path.
+        res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/workstreams`, {
+          method: "POST",
+          headers: api.headers(),
+          body: JSON.stringify({ name: wsName, sessionIds: [sessionId], dod: { criteria } }),
+        });
+      } else {
+        res = await fetch(`/api/workstreams/${encodeURIComponent(wsId)}/dod`, {
+          method: "PUT",
+          headers: api.headers(),
+          body: JSON.stringify({ criteria }),
+        });
+      }
+      if (!res.ok) {
+        showToast(`Couldn't save Definition of Done for <b>${escText(wsName)}</b> — ${escText(await res.text())}`);
+        return;
+      }
+      closeDodDrawer();
+      showToast(`Definition of Done saved for <b>${escText(wsName)}</b> — tracking honest k-of-n. Auto-evaluators re-check with zero upkeep.`);
+      await refetch();
+    } catch (error) {
+      showToast(`Couldn't save Definition of Done for <b>${escText(wsName)}</b> — ${escText(error instanceof Error ? error.message : String(error))}`);
+    }
+  }
+
   // ── quick-reply chip → POST /api/prompt (answering IS continuing) ──
   // The chip text becomes a steer message on the session; on the 202 we toast and open the REAL
   // conversation so the user sees their reply land. cfill (drawer-prefill) routes here too.
@@ -525,7 +746,11 @@ export function createDashboard(options: {
       event.preventDefault();
       event.stopPropagation();
       const id = openEl.getAttribute("data-open");
-      if (id) void openSessionFromCard(id);
+      // "Define done" — an unset session (no DoD) routes to the authoring drawer for its workstream
+      // (PUT /api/workstreams/:id/dod), NOT into the conversation. Every other status opens the
+      // real session as before.
+      if (id && view.SESS[id]?.s.status === "unset") openDodDrawer(id);
+      else if (id) void openSessionFromCard(id);
       return;
     }
 
@@ -604,6 +829,32 @@ export function createDashboard(options: {
     });
     // Delegated drill-in / continue / expand-collapse, scoped to the overlay.
     elements.dashboardWrap.addEventListener("click", handleClick);
+    // DoD authoring drawer — its own delegated click + Enter handler (the drawer is a sibling of
+    // .wrap, mounted lazily into #dashboardView, so it has its own listener wiring once).
+    const drawerHost = drawerEl();
+    drawerHost.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest("[data-dod-close]")) { closeDodDrawer(); return; }
+      const add = target.closest<HTMLElement>("[data-critadd]");
+      if (add) { addDraftEvaluator(add.getAttribute("data-critadd") || ""); return; }
+      if (target.closest("[data-critaddtext]")) {
+        const inp = drawerHost.querySelector<HTMLInputElement>("#dodCritText");
+        if (inp) addDraftManual(inp.value);
+        return;
+      }
+      const rm = target.closest<HTMLElement>("[data-critrm]");
+      if (rm) { removeDraft(Number.parseInt(rm.getAttribute("data-critrm") || "-1", 10)); return; }
+      if (target.closest("[data-critsave]")) { void saveDoD(); return; }
+    });
+    drawerHost.addEventListener("keydown", (event) => {
+      const ke = event as KeyboardEvent;
+      const target = ke.target as HTMLElement | null;
+      if (target && target.id === "dodCritText" && ke.key === "Enter") {
+        ke.preventDefault();
+        addDraftManual((target as HTMLInputElement).value);
+      }
+    });
     // Drill-in context band: dismiss (×) or expand/collapse the DoD criteria list.
     elements.rollupContextBand.addEventListener("click", (event) => {
       const target = event.target as HTMLElement | null;
