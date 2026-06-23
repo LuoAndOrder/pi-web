@@ -584,6 +584,9 @@
 #dashboardView .dodauthor .draft li .grow { flex: 1; }
 #dashboardView .dodauthor .draft li button { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; line-height: 1; padding: 2px 4px; }
 #dashboardView .dodauthor .draft li button:hover { color: var(--danger); }
+#dashboardView .dodauthor .draft li button.critgate { font-size: 10px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); border: 1px solid color-mix(in srgb, var(--border) 90%, transparent); border-radius: 4px; padding: 2px 6px; }
+#dashboardView .dodauthor .draft li button.critgate:hover { color: var(--st-sign); border-color: color-mix(in srgb, var(--st-sign) 40%, var(--border)); }
+#dashboardView .dodauthor .draft li button.critgate.on { color: var(--st-sign); border-color: color-mix(in srgb, var(--st-sign) 40%, var(--border)); background: color-mix(in srgb, var(--st-sign) 12%, transparent); }
 #dashboardView .dodauthor .saverow { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 #dashboardView .dodauthor .saverow .note { flex: 1; font-size: 11px; color: var(--muted); }
 

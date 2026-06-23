@@ -513,8 +513,16 @@ export function createDashboard(options: {
     const pick = (arr: typeof DOD_EVALUATORS) => arr
       .map((e) => `<button class="dodpick-b${e.auto ? " auto" : ""}" data-critadd="${e.key}"><span>+ ${escText(e.label)}</span><span class="ev">${escText(e.fam)}${e.auto ? " · auto" : ""}</span></button>`)
       .join("");
+    // A sign-off gate must be a manual boolean (data-model §5.2): only `manual`-source
+    // criteria offer the gate toggle. Toggling marks the criterion as the human sign-off —
+    // excluded from the percent and surfaced as the one-click sign-off the S7 path drives.
     const draftList = drawer.draft
-      .map((c, i) => `<li><span class="fam">${escText(famOf(c.source))}</span><span class="grow-txt">${escText(c.text)}</span>${c.gate ? `<span class="gatepill" title="excluded from %; the manual gate you sign off">gate</span>` : ""}<span class="grow"></span><button data-critrm="${i}" title="remove criterion">✕</button></li>`)
+      .map((c, i) => {
+        const gateToggle = c.source.kind === "manual"
+          ? `<button class="critgate${c.gate ? " on" : ""}" data-critgate="${i}" title="${c.gate ? "this manual boolean is the sign-off gate (excluded from %) — click to make it a plain criterion" : "make this the sign-off gate you approve (excluded from %)"}" aria-pressed="${c.gate ? "true" : "false"}">${c.gate ? "gate ✓" : "make gate"}</button>`
+          : "";
+        return `<li><span class="fam">${escText(famOf(c.source))}</span><span class="grow-txt">${escText(c.text)}</span>${c.gate ? `<span class="gatepill" title="excluded from %; the manual gate you sign off">gate</span>` : ""}<span class="grow"></span>${gateToggle}<button data-critrm="${i}" title="remove criterion">✕</button></li>`;
+      })
       .join("");
     const count = drawer.draft.length;
     const note = count
@@ -573,6 +581,16 @@ export function createDashboard(options: {
     drawer.draft.splice(i, 1);
     renderDrawer();
   }
+  // Flip a manual criterion into / out of the sign-off gate. Gates are manual-only
+  // (data-model §5.2) and excluded from the percent; this is the control that makes a
+  // fully user-authored DoD reach "done · awaiting sign-off" instead of auto-merging.
+  function toggleDraftGate(i: number) {
+    if (!drawer || i < 0 || i >= drawer.draft.length) return;
+    const c = drawer.draft[i];
+    if (c.source.kind !== "manual") return;
+    c.gate = !c.gate;
+    renderDrawer();
+  }
 
   // Persist the draft via PUT /api/workstreams/:id/dod {criteria}, then refetch /api/rollups so the
   // ring re-renders at the server's honest k-of-n. The criteria carry STRUCTURED source.kind the
@@ -583,7 +601,15 @@ export function createDashboard(options: {
     const { projectId, synthetic, sessionId } = drawer;
     const wsId = drawer.workstreamId;
     const wsName = drawer.wsName;
-    const criteria = drawer.draft.map((c) => ({
+    // Auto-pair: a DoD made only of auto/command criteria (no manual sign-off gate) would
+    // reach 100% and flip straight to "merged", skipping human sign-off entirely. Mirror the
+    // mockup fixtures (index.html L1019) by appending a manual "you review & sign off" gate so
+    // the workstream lands at "done · awaiting sign-off" and the S7 sign-off path is reachable.
+    const draft = [...drawer.draft];
+    if (!draft.some((c) => c.gate)) {
+      draft.push({ text: "You review & sign off", source: { kind: "manual" }, gate: true });
+    }
+    const criteria = draft.map((c) => ({
       text: c.text,
       source: c.source,
       ...(c.gate ? { gate: true } : {}),
@@ -843,6 +869,8 @@ export function createDashboard(options: {
         if (inp) addDraftManual(inp.value);
         return;
       }
+      const gate = target.closest<HTMLElement>("[data-critgate]");
+      if (gate) { toggleDraftGate(Number.parseInt(gate.getAttribute("data-critgate") || "-1", 10)); return; }
       const rm = target.closest<HTMLElement>("[data-critrm]");
       if (rm) { removeDraft(Number.parseInt(rm.getAttribute("data-critrm") || "-1", 10)); return; }
       if (target.closest("[data-critsave]")) { void saveDoD(); return; }

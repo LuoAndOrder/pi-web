@@ -183,10 +183,6 @@ export interface DashboardRenderer {
   // Tells whether a `sign`-status session still rests on stale/unrun evidence — used to decide
   // batch sign-off eligibility (only clean items flip).
   signPending: (sessionId: string) => boolean;
-  // Client-side OPTIMISTIC progress recompute — used ONLY after a manual sign-off / a recheck
-  // (HARD RULE: the client trusts the server ProgressSnapshot on every render; this recompute
-  // exists solely so the ring reconciles locally between the optimistic flip and the realtime echo).
-  computeProgress: (crit: VCrit[]) => VProg | null;
 }
 
 // Shared status ordering (lower rank = more urgent, surfaces first). Exported as the SINGLE
@@ -235,48 +231,12 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
   // a sign-status session resting on stale/unrun command evidence — can't be signed off yet (#5)
   function signPending(s: VSession) { return s.status === "sign" && !!s._prog && (s._prog.unrun > 0 || s._prog.stale > 0); }
 
-  // ── client-side OPTIMISTIC progress recompute (ported from the mockup L915-964) ──
-  // HARD RULE: the client trusts the server ProgressSnapshot on every render. This copy exists
-  // ONLY to recompute a ring locally after a manual toggle / recheck, between the optimistic flip
-  // and the realtime echo — so the gate flip + percent reconcile without a flicker. `git_clean` is
-  // root-scoped out of the per-session percent; never-run command crits are excluded from the
-  // denominator; a stale evaluable crit blocks `allMet`; a met `git_merged` is permanent.
-  function critUnrun(c: VCrit) { return c.src === "command" && (!c.at || /never/i.test(c.at)); }
-  function critGit(c: VCrit) { return c.src === "git_clean" || c.src === "git_ahead_zero" || c.src === "git_merged"; }
-  function critStale(c: VCrit) {
-    if (c.gate || critUnrun(c)) return false;
-    const a = (c.at || "").toLowerCase();
-    if (c.src === "command") {
-      if (a === "snapshot" || a.includes("manual review") || a.includes("folder")) return false;
-      return /(h ago|d ago|yesterday|day|week)/.test(a);
-    }
-    if (critGit(c)) {
-      if (c.src === "git_merged" && c.met) return false; // a merge is permanent — never stale
-      if (!a) return false;
-      return /(h ago|d ago|yesterday|day|week)/.test(a);
-    }
-    return false; // manual / session_idle booleans are truth-on-read, never clock-stale
-  }
-  function rootScoped(c: VCrit) { return c.src === "git_clean"; }
-  function computeProgress(crit: VCrit[]): VProg | null {
-    if (!crit || !crit.length) return null;
-    const evaluable = crit.filter((c) => !c.gate && !rootScoped(c));
-    if (!evaluable.length) return { met: 0, total: 0, percent: 0, allMet: false, unrun: 0, stale: 0 };
-    const run = evaluable.filter((c) => !critUnrun(c));
-    const unrun = evaluable.length - run.length;
-    const stale = run.filter(critStale).length;
-    let metW = 0, totW = 0, metN = 0;
-    run.forEach((c) => { const w = c.weight || 1; totW += w; if (c.met) { metW += w; metN++; } });
-    return {
-      met: metN, total: run.length,
-      percent: totW ? Math.round(metW / totW * 100) : 0,
-      allMet: run.length > 0 && metW === totW && unrun === 0 && stale === 0,
-      unrun, stale,
-    };
-  }
-
   // ─────────────────────────── small helpers ───────────────────────────
-  const esc = (t?: unknown) => String(t == null ? "" : t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
+  // Escape the FULL attribute-safe set (& < > " '), matching dashboard.ts escapeHtml — every
+// interpolation here can land in a double-quoted HTML attribute assigned via innerHTML, so a
+// bare & < > escaper would let a value containing a quote break out and inject an event handler
+// (stored DOM XSS via a project name/description/path or an agent-authored elicitation option).
+  const esc = (t?: unknown) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
   // S7 interactions (sign-off / quick-reply / recheck / batch sign-off / focus-triage) are now
   // LIVE — wired in dashboard.ts to the real REST surface (PATCH /api/dod/criterion/:id optimistic,
   // POST /api/prompt for chips, the /api/dod/evaluate recheck stub). These helpers used to render
@@ -1302,6 +1262,5 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     renderSignoff,
     renderGrid: () => renderGrid(fleetCounts()),
     signPending: (id: string) => { const ref = state.SESS[id]; return !!ref && signPending(ref.s); },
-    computeProgress,
   };
 }

@@ -16,7 +16,10 @@ import WebSocket from "ws";
 
 import type { ProjectRegistry } from "../../server/rollups/types.js";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+// The spawned server runs with cwd = repoRoot (see startServer below), so any
+// `?repo=` passed to git endpoints must resolve under it. Exported so suites that
+// exercise /api/git/* can place a temp repo under it and pass a RELATIVE path.
+export const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 export async function freePort(): Promise<number> {
   const server = createServer();

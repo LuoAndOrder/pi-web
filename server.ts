@@ -26,7 +26,7 @@ import { createSessionUiStateStore, defaultSessionUiState } from "./server/sessi
 import { createSettingsStore } from "./server/settings.js";
 import { createRepoStatusCache, gitIsAncestor as gitIsAncestorImpl } from "./server/rollups/gitDod.js";
 import { createProjectRegistryStore, RegistryError } from "./server/rollups/registry.js";
-import { assembleRollups, mapSessionsToProjects } from "./server/rollups/rollup.js";
+import { assembleRollups, mapSessionsToProjects, isCwdUnder } from "./server/rollups/rollup.js";
 import type { RollupSessionInput } from "./server/rollups/rollup.js";
 import type { PiWebFooter, PiWebHeaderAction, PiWebUi } from "./src/extensions.js";
 import type { PiWebSession } from "./server/types.js";
@@ -1680,19 +1680,59 @@ function markRollupDirtyForCwd(cwd: string) {
   enqueueDirty("", typeof cwd === "string" && cwd.trim() ? cwd : piCwd);
 }
 
+// Resolve a bare cwd (no session id) to the owning project by longest-prefix match —
+// matchCwd of a workstream OR a project root — mirroring mapSessionsToProjects steps 2/3.
+// Needed because mapSessionsToProjects short-circuits any falsy session id straight to
+// `unassigned` BEFORE the cwd-prefix match, so a cwd-only dirty mark (e.g. /api/git/sync)
+// would otherwise resolve to zero projects and emit no rollup_changed.
+function projectIdForCwd(registry: ProjectRegistry, cwd: string): string | undefined {
+  if (!cwd) return undefined;
+  const archived = new Set(registry.projects.filter((p) => p.archived).map((p) => p.id));
+  let bestProjectId: string | undefined;
+  let bestLen = -1;
+  for (const ws of registry.workstreams) {
+    if (!ws.matchCwd || archived.has(ws.projectId)) continue;
+    if (isCwdUnder(cwd, ws.matchCwd) && ws.matchCwd.length > bestLen) {
+      bestProjectId = ws.projectId;
+      bestLen = ws.matchCwd.length;
+    }
+  }
+  for (const project of registry.projects) {
+    if (project.archived) continue;
+    for (const root of project.roots) {
+      if (isCwdUnder(cwd, root) && root.length > bestLen) {
+        bestProjectId = project.id;
+        bestLen = root.length;
+      }
+    }
+  }
+  return bestProjectId;
+}
+
 async function flushRollupDirty() {
   rollupFlushTimer = undefined;
   if (pendingDirtySessions.size === 0 && pendingDirtyProjectIds.size === 0) return;
-  const sessions = [...pendingDirtySessions.values()];
+  const pending = [...pendingDirtySessions.values()];
   pendingDirtySessions.clear();
   const explicitProjectIds = [...pendingDirtyProjectIds];
   pendingDirtyProjectIds.clear();
   try {
     const dirtyProjectIds = new Set<string>(explicitProjectIds);
-    if (sessions.length) {
+    // id-bearing entries map by session membership / cwd; id-less (cwd-only) entries
+    // can't go through mapSessionsToProjects (it buckets falsy ids as unassigned),
+    // so resolve them by cwd-prefix here.
+    const sessions = pending.filter((p) => p.id);
+    const cwdOnly = pending.filter((p) => !p.id);
+    if (sessions.length || cwdOnly.length) {
       const registry = await projectRegistryStore.read();
-      const { assignments } = mapSessionsToProjects(registry, sessions);
-      for (const assignment of assignments.values()) dirtyProjectIds.add(assignment.projectId);
+      if (sessions.length) {
+        const { assignments } = mapSessionsToProjects(registry, sessions);
+        for (const assignment of assignments.values()) dirtyProjectIds.add(assignment.projectId);
+      }
+      for (const entry of cwdOnly) {
+        const projectId = projectIdForCwd(registry, entry.cwd);
+        if (projectId) dirtyProjectIds.add(projectId);
+      }
     }
     for (const projectId of dirtyProjectIds) broadcast({ type: "rollup_changed", projectId });
   } catch (error) {
