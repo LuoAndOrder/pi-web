@@ -194,6 +194,151 @@ export function createDashboard(options: {
     }, REFETCH_DEBOUNCE_MS);
   }
 
+  // ── undo toast (ported from the mockup showToast L2249-2256) ──
+  // Mounted INSIDE #dashboardView (the `.toast` CSS is scoped under it), so it rides above the
+  // overlay and disappears when the overlay closes. `undoFn` renders an Undo button that fires the
+  // inverse action (e.g. the inverse sign-off PATCH).
+  let toastTimer: number | undefined;
+  function showToast(msg: string, undoFn?: () => void) {
+    let toast = elements.dashboardView.querySelector<HTMLDivElement>("#dashboardToast");
+    if (!toast) {
+      toast = document.createElement("div");
+      toast.id = "dashboardToast";
+      toast.className = "toast";
+      elements.dashboardView.appendChild(toast);
+    }
+    toast.innerHTML = `<span>${msg}</span>` + (undoFn ? `<button class="undo" id="dashboardToastUndo">Undo</button>` : "");
+    toast.classList.add("show");
+    if (toastTimer !== undefined) window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => toast?.classList.remove("show"), 5200);
+    const undo = toast.querySelector<HTMLButtonElement>("#dashboardToastUndo");
+    if (undo) undo.onclick = () => { undoFn?.(); toast?.classList.remove("show"); };
+  }
+  // HTML-escape for toast copy (the renderer's `esc` is private to createRenderer).
+  function escText(value?: string) {
+    return String(value ?? "").replace(/[&<>"']/g, (c) =>
+      c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;");
+  }
+
+  // ── manual sign-off — OPTIMISTIC (impl-plan S7 + HARD RULE) ──
+  // Flip the gate locally + re-render immediately, THEN fire PATCH /api/dod/criterion/:id {met}.
+  // On failure: revert the local flip + error toast. Undo sends the INVERSE PATCH. Sign-off is
+  // NEVER fused with merge — the toast copy says so, and there is no merge call here.
+  async function patchCriterion(criterionId: string, met: boolean): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/dod/criterion/${encodeURIComponent(criterionId)}`, {
+        method: "PATCH",
+        headers: api.headers(),
+        body: JSON.stringify({ met }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+  function flipLocal(sessionId: string, met: boolean) {
+    const ref = view.SESS[sessionId];
+    if (!ref) return;
+    view.signed[sessionId] = met;
+    const gate = ref.s._gate;
+    if (gate) gate.met = met;
+  }
+  function signOff(sessionId: string) {
+    const ref = view.SESS[sessionId];
+    if (!ref) return;
+    const critId = ref.s._gate?.id;
+    if (!critId) return; // no manual gate to sign off (read-only evidence) — nothing to PATCH
+    flipLocal(sessionId, true);
+    renderer.renderSignoff();
+    showToast(`<b>${escText(ref.s.name)}</b> signed off — merge is a separate step.`, () => {
+      // Undo: inverse flip locally + inverse PATCH.
+      flipLocal(sessionId, false);
+      renderer.renderSignoff();
+      void patchCriterion(critId, false);
+    });
+    void patchCriterion(critId, true).then((ok) => {
+      if (!ok) {
+        // Server rejected — revert the optimistic flip and surface the failure.
+        flipLocal(sessionId, false);
+        renderer.renderSignoff();
+        showToast(`Couldn't sign off <b>${escText(ref.s.name)}</b> — try again.`);
+      }
+    });
+  }
+  function signOffAll() {
+    const flipped: Array<{ id: string; critId: string }> = [];
+    Object.values(view.SESS).forEach(({ s }) => {
+      if (s.status === "sign" && !renderer.signPending(s.id) && !view.signed[s.id] && s._gate?.id) {
+        flipLocal(s.id, true);
+        flipped.push({ id: s.id, critId: s._gate.id });
+      }
+    });
+    if (!flipped.length) return;
+    renderer.renderSignoff();
+    showToast(`<b>${flipped.length}</b> signed off — merges are separate steps.`, () => {
+      flipped.forEach(({ id }) => flipLocal(id, false));
+      renderer.renderSignoff();
+      flipped.forEach(({ critId }) => void patchCriterion(critId, false));
+    });
+    flipped.forEach(({ id, critId }) => {
+      void patchCriterion(critId, true).then((ok) => {
+        if (!ok) { flipLocal(id, false); renderer.renderSignoff(); }
+      });
+    });
+  }
+
+  // ── recheck (impl-plan S7 STUB) ──
+  // On-demand re-check of a stale/unrun command DoD. The full command runner is S10; here we POST
+  // the stub /api/dod/evaluate {criterionId}, show the neutral pulsing "_evaluating" ring, then let
+  // the realtime rollup_changed echo (or a refetch) clear it. Never spawns a command on render.
+  function recheckCard(sessionId: string) {
+    const ref = view.SESS[sessionId];
+    if (!ref) return;
+    const s = ref.s;
+    const critId = s.crit?.find((c) => c.src === "command" && !c.gate)?.id ?? s._gate?.id;
+    s._evaluating = true;
+    renderer.renderGrid();
+    showToast(`Re-checking <b>${escText(s.name)}</b>… (on-demand command DoD)`);
+    void fetch("/api/dod/evaluate", {
+      method: "POST",
+      headers: api.headers(),
+      body: JSON.stringify(critId ? { criterionId: critId } : { sessionId }),
+    }).catch(() => undefined).finally(() => {
+      // The eval endpoint lands in S10; until then clear the pulsing ring and re-render from the
+      // server snapshot (a fresh refetch reconciles any change the stub produced).
+      s._evaluating = false;
+      renderer.renderGrid();
+      void refetch();
+    });
+  }
+
+  // ── quick-reply chip → POST /api/prompt (answering IS continuing) ──
+  // The chip text becomes a steer message on the session; on the 202 we toast and open the REAL
+  // conversation so the user sees their reply land. cfill (drawer-prefill) routes here too.
+  async function replyChip(sessionId: string, text: string) {
+    const ref = view.SESS[sessionId];
+    const cwd = ref?.s.cwd ?? "";
+    let accepted = false;
+    try {
+      const res = await fetch("/api/prompt", {
+        method: "POST",
+        headers: api.headers(),
+        body: JSON.stringify({ sessionId, message: text }),
+      });
+      accepted = res.status === 202;
+    } catch {
+      accepted = false;
+    }
+    if (accepted) {
+      showToast(`Replied to <b>${escText(ref?.s.name)}</b> — your answer continues the conversation.`);
+      closeDashboard();
+      await sessions.openSession(sessionId, cwd);
+      showContextBand(sessionId);
+    } else {
+      showToast(`Couldn't send your reply — open the conversation to retry.`);
+    }
+  }
+
   // Find an overlay element by id WITHOUT touching the host document — keeps every
   // `data-jump` target scoped under #dashboardView (HARD RULE: nothing leaks out).
   function byId(id: string): HTMLElement | null {
@@ -247,6 +392,48 @@ export function createDashboard(options: {
     const target = event.target as HTMLElement | null;
     if (!target) return;
 
+    // Quick-reply chip → POST /api/prompt then open the session. Checked BEFORE data-open so a chip
+    // inside a `data-open` session row routes to the reply, not a bare open.
+    const reply = target.closest<HTMLElement>("[data-reply]");
+    if (reply) {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = reply.getAttribute("data-reply");
+      const text = reply.getAttribute("data-text") || "";
+      if (id) void replyChip(id, text);
+      return;
+    }
+
+    // Recheck a stale/unrun command DoD (S10 eval stub) — show the evaluating ring.
+    const recheck = target.closest<HTMLElement>("[data-recheckcard]");
+    if (recheck) {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = recheck.getAttribute("data-recheckcard");
+      if (id) recheckCard(id);
+      return;
+    }
+
+    // Manual sign-off (optimistic). data-signoff carries the GATE CRITERION id; we resolve the
+    // owning session via the SESS index so the optimistic flip + PATCH target the right criterion.
+    const so = target.closest<HTMLElement>("[data-signoff]");
+    if (so) {
+      event.preventDefault();
+      event.stopPropagation();
+      const critId = so.getAttribute("data-signoff") || "";
+      const sessionId = Object.values(view.SESS).find(({ s }) => s._gate?.id === critId)?.s.id;
+      if (sessionId) signOff(sessionId);
+      return;
+    }
+
+    // Batch sign-off — flip every clean (non-pending) item at once with a single undo.
+    if (target.closest("#signAll")) {
+      event.preventDefault();
+      event.stopPropagation();
+      signOffAll();
+      return;
+    }
+
     const openEl = target.closest<HTMLElement>("[data-open]");
     if (openEl) {
       event.preventDefault();
@@ -273,6 +460,20 @@ export function createDashboard(options: {
         }
         el.scrollIntoView({ behavior: "smooth", block: "start" });
       }
+      return;
+    }
+
+    // Triage-all in focus — open the highest-priority need (FAILs + elicited blocks, ordered by
+    // blast radius). Until a true multi-session focus queue lands, this drops into the first need's
+    // REAL conversation so the user can start answering immediately.
+    if (target.closest("#focusBtn")) {
+      event.preventDefault();
+      event.stopPropagation();
+      const needs = Object.values(view.SESS)
+        .map(({ s }) => s)
+        .filter((s) => s.status === "fail" || (s.status === "block" && s.elicited))
+        .sort((a, b) => (a.status === "block" ? 0 : 1) - (b.status === "block" ? 0 : 1) || String(a.id).localeCompare(String(b.id)));
+      if (needs[0]) void openSessionFromCard(needs[0].id);
       return;
     }
 

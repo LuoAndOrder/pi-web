@@ -154,6 +154,18 @@ export interface DashboardRenderer {
   // REAL conversation when a session is opened from a rollup, so the drill keeps its project /
   // workstream / DoD frame instead of dropping into a context-free full-view (review finding).
   contextBandHtml: (sessionId: string) => string | null;
+  // S7 partial re-renders — dashboard.ts calls these after an OPTIMISTIC local flip (sign-off /
+  // recheck) so the section repaints immediately without a network round-trip. They re-read the
+  // shared `state` (signed map, SESS, _evaluating), so the caller mutates state then re-renders.
+  renderSignoff: () => void;
+  renderGrid: () => void;
+  // Tells whether a `sign`-status session still rests on stale/unrun evidence — used to decide
+  // batch sign-off eligibility (only clean items flip).
+  signPending: (sessionId: string) => boolean;
+  // Client-side OPTIMISTIC progress recompute — used ONLY after a manual sign-off / a recheck
+  // (HARD RULE: the client trusts the server ProgressSnapshot on every render; this recompute
+  // exists solely so the ring reconciles locally between the optimistic flip and the realtime echo).
+  computeProgress: (crit: VCrit[]) => VProg | null;
 }
 
 // Shared status ordering (lower rank = more urgent, surfaces first). Exported as the SINGLE
@@ -183,18 +195,56 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
   // a sign-status session resting on stale/unrun command evidence — can't be signed off yet (#5)
   function signPending(s: VSession) { return s.status === "sign" && !!s._prog && (s._prog.unrun > 0 || s._prog.stale > 0); }
 
+  // ── client-side OPTIMISTIC progress recompute (ported from the mockup L915-964) ──
+  // HARD RULE: the client trusts the server ProgressSnapshot on every render. This copy exists
+  // ONLY to recompute a ring locally after a manual toggle / recheck, between the optimistic flip
+  // and the realtime echo — so the gate flip + percent reconcile without a flicker. `git_clean` is
+  // root-scoped out of the per-session percent; never-run command crits are excluded from the
+  // denominator; a stale evaluable crit blocks `allMet`; a met `git_merged` is permanent.
+  function critUnrun(c: VCrit) { return c.src === "command" && (!c.at || /never/i.test(c.at)); }
+  function critGit(c: VCrit) { return c.src === "git_clean" || c.src === "git_ahead_zero" || c.src === "git_merged"; }
+  function critStale(c: VCrit) {
+    if (c.gate || critUnrun(c)) return false;
+    const a = (c.at || "").toLowerCase();
+    if (c.src === "command") {
+      if (a === "snapshot" || a.includes("manual review") || a.includes("folder")) return false;
+      return /(h ago|d ago|yesterday|day|week)/.test(a);
+    }
+    if (critGit(c)) {
+      if (c.src === "git_merged" && c.met) return false; // a merge is permanent — never stale
+      if (!a) return false;
+      return /(h ago|d ago|yesterday|day|week)/.test(a);
+    }
+    return false; // manual / session_idle booleans are truth-on-read, never clock-stale
+  }
+  function rootScoped(c: VCrit) { return c.src === "git_clean"; }
+  function computeProgress(crit: VCrit[]): VProg | null {
+    if (!crit || !crit.length) return null;
+    const evaluable = crit.filter((c) => !c.gate && !rootScoped(c));
+    if (!evaluable.length) return { met: 0, total: 0, percent: 0, allMet: false, unrun: 0, stale: 0 };
+    const run = evaluable.filter((c) => !critUnrun(c));
+    const unrun = evaluable.length - run.length;
+    const stale = run.filter(critStale).length;
+    let metW = 0, totW = 0, metN = 0;
+    run.forEach((c) => { const w = c.weight || 1; totW += w; if (c.met) { metW += w; metN++; } });
+    return {
+      met: metN, total: run.length,
+      percent: totW ? Math.round(metW / totW * 100) : 0,
+      allMet: run.length > 0 && metW === totW && unrun === 0 && stale === 0,
+      unrun, stale,
+    };
+  }
+
   // ─────────────────────────── small helpers ───────────────────────────
   const esc = (t?: unknown) => String(t == null ? "" : t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
-  // S7 interactions (sign-off / quick-reply / recheck / batch sign-off / focus-triage) are NOT
-  // wired in this read-only slice (impl-plan S5: "Continue/sign-off buttons rendered disabled").
-  // Render them as real disabled affordances so they never read as live controls that silently
-  // no-op (review finding). Continue/Open (data-open) IS wired and stays enabled.
-  const DEFER = ' disabled aria-disabled="true"';
-  const deferTip = (what: string) => `${DEFER} title="${esc(what)} — coming in a later update"`;
-  // While manual sign-off (S7) is deferred, the sign-off CTAs must read as INTENTIONALLY not-yet-live
-  // — not as generic greyed/broken buttons the eye is pointed at (review finding). `.soon` gives them an
-  // explicit "coming soon" treatment + an inline tag, and the hero/strip copy drops its one-click promise.
-  const soonTag = `<span class="soon">soon</span>`;
+  // S7 interactions (sign-off / quick-reply / recheck / batch sign-off / focus-triage) are now
+  // LIVE — wired in dashboard.ts to the real REST surface (PATCH /api/dod/criterion/:id optimistic,
+  // POST /api/prompt for chips, the /api/dod/evaluate recheck stub). These helpers used to render
+  // the controls as `disabled`/`soon` placeholders for the read-only S5 slice; they're now no-ops
+  // so the buttons render as ordinary enabled affordances the delegated handler picks up.
+  const deferTip = (what: string) => ` title="${esc(what)}"`;
+  // The sign-off CTAs are live one-click controls again, so drop the "soon" treatment + tag.
+  const soonTag = ``;
   // a HARD need = a FAILURE or a STRUCTURALLY-ELICITED block; a non-elicited free-text stop can't be
   // PROVEN a blocker (spec §5.3), so it degrades to a quiet "may be waiting", never Needs-you.
   const isNeed = (s: VSession) => s.status === "fail" || (s.status === "block" && !!s.elicited);
@@ -643,8 +693,8 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
   function signoffSectionHtml(c: Counts) {
     if (!c.sign) return "";
     const batch = c.sign > 1
-      ? `<button class="hbtn sgn soon" id="signAll"${deferTip("Batch sign-off")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="13" height="13"><path d="M20 6 9 17l-5-5"/></svg> Sign off all ${c.sign} ${soonTag}</button>`
-      : `<span class="hint">review each below — one-click sign-off coming soon</span>`;
+      ? `<button class="hbtn sgn" id="signAll"${deferTip("Sign off every clean item — sign-off is NOT merge")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="13" height="13"><path d="M20 6 9 17l-5-5"/></svg> Sign off all ${c.sign}</button>`
+      : `<span class="hint">review each below — one-click sign-off, merge stays a separate step</span>`;
     const cnt = c.sign > 1 ? "" : `<span class="cnt">${c.sign} done</span>`;
     return `<div class="shead" id="sec-signoff"><h2>Awaiting your sign-off</h2>${cnt}${batch}</div>
       <section class="signoff" id="signoffHost" data-testid="signoff"></section>`;
@@ -672,11 +722,12 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
       const act = gone
         ? `<span style="color:var(--st-merge);font-weight:650">✓ Signed off</span>${mergeAffordance(s)}`
         : pending
-          ? `<button class="btn remedy sm" data-recheckcard="${s.id}" title="command DoD evidence is stale — re-run it on demand (coming in a later update)"${DEFER}>${recheckIcon()} Re-check</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`
-          // Review is the WIRED action this slice, so it carries the primary weight and leads —
-          // the eye lands on a control the user can actually press. Sign-off stays the honest
-          // dashed "soon" affordance, demoted to the trailing slot until S7 makes it live.
-          : `<button class="btn primary sm" data-open="${s.id}">Review</button><button class="btn sign soon" data-signoff="${esc(critId)}"${deferTip("Sign-off")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off ${soonTag}</button>`;
+          // Stale/unrun command evidence can't back a sign-off promotion — offer the on-demand
+          // re-check (the /api/dod/evaluate stub this slice) before the gate can flip.
+          ? `<button class="btn remedy sm" data-recheckcard="${s.id}" title="command DoD evidence is stale — re-run it on demand">${recheckIcon()} Re-check</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`
+          // Sign-off is now a LIVE one-click control (optimistic PATCH of the gate criterion);
+          // Review (the read action) stays beside it. Sign-off is NEVER fused with merge.
+          : `<button class="btn sign sm" data-signoff="${esc(critId)}"${deferTip("Sign off — merge stays a separate step")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`;
       return `<article class="soff ${gone ? "gone" : ""}">
         <div class="sleft">
           <div class="scrumb"><b>${esc(p.name)}</b>${lineage} › ${esc(w.name)} · <span class="sn">${esc(s.name)}</span></div>
@@ -980,7 +1031,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
       : s.status === "merge" ? "View" : (s.status === "run" || s.status === "loop") ? "Open" : s.status === "unset" ? "Define done" : "Continue";
     const primary = `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} ${verb}</button>`;
     let secondary = "";
-    if (s.status === "sign" && !navOnly) secondary = `<button class="btn sign sm soon" data-signoff="${esc(s._gate?.id ?? "")}"${deferTip("Sign-off")}>✓ Sign off ${soonTag}</button>`;
+    if (s.status === "sign" && !navOnly) secondary = `<button class="btn sign sm" data-signoff="${esc(s._gate?.id ?? "")}"${deferTip("Sign off — merge stays a separate step")}>✓ Sign off</button>`;
     else if (s.status === "fail") secondary = `<button class="btn ghost sm" data-open="${s.id}">${esc(s.failAction || "Re-run")}</button>`;
 
     const dodTxt = s.status === "unset" ? `<span style="color:var(--st-sign)">no criterion set — define what done means</span> ${srcTag(s.dodSrc)}`
@@ -1176,5 +1227,12 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
     </div>${crit}`;
   }
 
-  return { renderAll, contextBandHtml };
+  return {
+    renderAll,
+    contextBandHtml,
+    renderSignoff,
+    renderGrid: () => renderGrid(fleetCounts()),
+    signPending: (id: string) => { const ref = state.SESS[id]; return !!ref && signPending(ref.s); },
+    computeProgress,
+  };
 }
