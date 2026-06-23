@@ -859,7 +859,7 @@ const ST = {
 /* attention rank (#3) — block/fail first … merged last */
 const STATUS_RANK = { block:0, fail:0, unset:1, run:2, loop:2, sign:3, queued:4, planned:4, merge:5 };
 function statusRank(st){ return STATUS_RANK[st]!=null?STATUS_RANK[st]:9; }
-function byAttention(a,b){ return statusRank(a.status)-statusRank(b.status); }
+function byAttention(a,b){ return (statusRank(a.status)-statusRank(b.status)) || String(a.id||a.name||"").localeCompare(String(b.id||b.name||"")); } /* (#adv-fix C3-chaos) stable id tiebreaker so the CAP=6 fold is deterministic when status ties at scale */
 
 /* ── DoD freshness (#5): command criteria are evaluated ON-DEMAND and cached, never on rollup render.
    A never-run command criterion isn't evaluable yet; a stale one (ran, but not recently) can't back a
@@ -1431,6 +1431,14 @@ function genScale(){
   return active.concat(activeLoops, dormant);
 }
 const WORLD_SCALE = genScale();
+/* (#adv-fix C1-chaos) a cold-start project: registered, workstream auto-imported, no DoD authored yet —
+   total===0 with NO loop, the exact case that used to mis-light the cyan ∞. Now an honest "?" unset ring. */
+const WORLD_COLDSTART = [
+  { id:"newsvc", name:"newsvc", path:"~/workspace/newsvc", desc:"just registered · sessions roll up by cwd-prefix",
+    workstreams:[ { id:"newsvc-w1", name:"main", dod:"", dodSrc:"unset", status:"unset",
+      sessions:[ { id:"newsvc-s1", name:"first session", status:"unset", dod:"", dodSrc:"unset",
+        live:"Registered — set a Definition of Done to start tracking honest k-of-n progress.", crit:[] } ] } ] },
+];
 
 /* ─────────────────────────── scenario registry ─────────────────────────── */
 const SCENARIOS = {
@@ -1442,6 +1450,7 @@ const SCENARIOS = {
   blocked:{ label:"Five agents waiting · 6 blocked", data:WORLD_BLOCKED },
   loop:   { label:"Growing loop · ~17 queued", data:WORLD_LOOP },
   nogit:  { label:"Research · no repo, no git DoD", data:WORLD_NOGIT },
+  coldstart:{ label:"Registered · no DoD set yet", data:WORLD_COLDSTART },
   mixed:  { label:"Six definitions of done", data:WORLD_MIXED, openFirst:true },
   empty:  { label:"Cold start · first run", data:[], empty:true, candidates:3 },
 };
@@ -1820,7 +1829,7 @@ function loopMinutes(s,w){
   // string. (w is retained for signature compatibility with callers.)
   return s.elapsedMin!=null ? s.elapsedMin : 0;
 }
-function fmtMin(min){ if(min>=60){ const h=Math.floor(min/60), m=min%60; return m?`${h}h ${m}m`:`${h}h`; } return `${min}m`; }
+function fmtMin(min){ if(min>=1440){ const d=Math.floor(min/1440), h=Math.floor((min%1440)/60); return h?`${d}d ${h}h`:`${d}d`; } if(min>=60){ const h=Math.floor(min/60), m=min%60; return m?`${h}h ${m}m`:`${h}h`; } return `${min}m`; } /* (#adv-fix C2-chaos) day rollover so a multi-day loop reads "3d 2h", not "74h" */
 /* workstream-level grounded loop elapsed (round-3 adv-fix C1/C2): a loop workstream's badge derives its
    elapsed from the SAME stored loopStartedAt as everything else — take the max elapsedMin across the
    workstream's loop sessions. No free-text loopTime parse; an un-grounded loop workstream yields 0m, not
@@ -2302,8 +2311,16 @@ function renderCard(p){
   const pole = longPole(p);
   // a project whose only workstreams are open-ended loops has no terminal DoD to gauge (#9a) — show the
   // running ∞ instead of a meaningless "0 of 0", and skip the long-pole line entirely.
-  const allOpenEnded = g.total===0;
-  const gaugeItem = allOpenEnded ? { status:"loop", loop:true } : { status:"gauge", _sessGauge:{done:g.done, total:g.total, percent:g.percent} };
+  // (#adv-fix C1-chaos) g.total===0 means every workstream is UNSCORABLE — but that is an open-ended LOOP
+  // only if a loop actually exists. A cold-start project (just registered, workstreams auto-imported, no DoD
+  // authored yet) also hits total===0 and must NOT light the reserved cyan ∞ (invariant #2): show the honest
+  // "?" unset ring instead — the same face an unscorable workstream already uses.
+  const someLoop = p.workstreams.some(wsOpenEnded);
+  const allOpenEnded = g.total===0 && someLoop;
+  const noDod = g.total===0 && !someLoop;
+  const gaugeItem = allOpenEnded ? { status:"loop", loop:true }
+    : noDod ? { status:"unset" }
+    : { status:"gauge", _sessGauge:{done:g.done, total:g.total, percent:g.percent} };
   // #9a: when the long pole is itself surfaced in Needs-you, salience lives ONCE — mute its status to a
   // quiet "in Needs you ↑" jump instead of repeating an amber alarm on the otherwise-calm card face.
   const poleInNeeds = pole && (pole.status==="block"||pole.status==="fail");
@@ -2324,6 +2341,8 @@ function renderCard(p){
   const scopedWord = loopWs?`scoped workstream${g.total>1?"s":""}`:`workstream${g.total>1?"s":""}`;
   const poleLine = allOpenEnded
     ? `<div class="csum-pole"><span class="plbl">Continuous loop — no terminal Definition of Done.</span></div>`
+    : noDod
+      ? `<div class="csum-pole"><span class="plbl">No Definition of Done set — add one to track progress.</span></div>`
     : pole && !wsDone(pole)
       ? `<div class="csum-pole"><span class="plbl">Long pole:</span> <b>${esc(shortWs(pole.name))}</b> ${poleTag}</div>`
       // (#it5-p5a) all scoped workstreams met DoD: the gauge line already states this — drop the
@@ -2331,9 +2350,11 @@ function renderCard(p){
       : ``;
   const gaugeLine = allOpenEnded
     ? `<div class="csum-line"><b>∞ looping</b> · open-ended ${dotStrip(p)}</div>`
-    : `<div class="csum-line"><b>${g.done} of ${g.total}</b> ${scopedWord} met DoD${loopClause} ${dotStrip(p)}</div>`;
+    : noDod
+      ? `<div class="csum-line"><span class="muted">No Definition of Done set yet</span> ${dotStrip(p)}</div>`
+      : `<div class="csum-line"><b>${g.done} of ${g.total}</b> ${scopedWord} met DoD${loopClause} ${dotStrip(p)}</div>`;
   const ringsBlock = `<div class="csum">
-    <div class="csum-ring" title="${allOpenEnded?'an open-ended loop has no terminal DoD to be k-of-n against — shown as running ∞':'k of '+g.total+' workstreams have met their Definition of Done — an honest aggregate, not an authored percent'}">${ringSvg(gaugeItem, 50)}</div>
+    <div class="csum-ring" title="${allOpenEnded?'an open-ended loop has no terminal DoD to be k-of-n against — shown as running ∞':noDod?'no Definition of Done set on any workstream yet — nothing to gauge':'k of '+g.total+' workstreams have met their Definition of Done — an honest aggregate, not an authored percent'}">${ringSvg(gaugeItem, 50)}</div>
     <div class="csum-body">
       ${gaugeLine}
       ${poleLine}
