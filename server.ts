@@ -25,7 +25,7 @@ import { resolveBundledExtensionPaths, resolvePiWebExtensionPaths } from "./serv
 import { createSessionUiStateStore, defaultSessionUiState } from "./server/sessionUiState.js";
 import { createSettingsStore } from "./server/settings.js";
 import { createRepoStatusCache, gitIsAncestor as gitIsAncestorImpl } from "./server/rollups/gitDod.js";
-import { createProjectRegistryStore } from "./server/rollups/registry.js";
+import { createProjectRegistryStore, RegistryError } from "./server/rollups/registry.js";
 import type { PiWebFooter, PiWebHeaderAction, PiWebUi } from "./src/extensions.js";
 import type { PiWebSession } from "./server/types.js";
 // Pull the rollups types into the typecheck graph now; the registry store +
@@ -118,6 +118,22 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
   for await (const chunk of req) chunks.push(Buffer.from(chunk));
   const text = Buffer.concat(chunks).toString("utf-8");
   return text ? JSON.parse(text) : {};
+}
+
+// readBody bare-JSON.parses and throws on malformed input. Route handlers that
+// take a JSON body wrap it through here: on a parse failure it replies 400 and
+// returns { ok: false } so the caller can early-return without leaking a 500.
+async function parseJsonBody(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false }> {
+  try {
+    const body = await readBody(req);
+    return { ok: true, body: (body && typeof body === "object" ? body : {}) as Record<string, unknown> };
+  } catch {
+    sendJson(res, 400, { ok: false, error: "Invalid JSON body" });
+    return { ok: false };
+  }
 }
 
 function safeArtifactName(name: string) {
@@ -2450,6 +2466,139 @@ const server = createServer(async (req, res) => {
         const sessionUiState = await sessionUiStateStore.markRead(sessionId);
         broadcast({ type: "session_ui_state_changed", sessionUiState });
         return sendJson(res, 200, { ok: true, sessionUiState });
+      }
+
+      // ---- Project Rollups: registry CRUD (S2) ----------------------------
+      // Pure registry mutations only; no rollup compute, no DoD evaluation.
+      // Every mutating route emits exactly one project_registry_changed so open
+      // dashboards refetch /api/projects. `:id` segments are parsed by hand (the
+      // codebase has no path-param router); decodeURIComponent guards encoded ids.
+      const seg = url.pathname.split("/").filter(Boolean); // ["api", "projects", "<id>", ...]
+
+      if (method === "GET" && url.pathname === "/api/projects") {
+        return sendJson(res, 200, { ok: true, registry: await projectRegistryStore.read() });
+      }
+
+      if (method === "POST" && url.pathname === "/api/projects") {
+        const parsed = await parseJsonBody(req, res);
+        if (!parsed.ok) return;
+        const name = typeof parsed.body.name === "string" ? parsed.body.name.trim() : "";
+        const hasRoot = Array.isArray(parsed.body.roots)
+          && parsed.body.roots.some((root) => typeof root === "string" && root.trim());
+        if (!name) return sendJson(res, 400, { ok: false, error: "name is required" });
+        if (!hasRoot) return sendJson(res, 400, { ok: false, error: "roots must be a non-empty array of paths" });
+        const { project } = await projectRegistryStore.createProject(parsed.body);
+        broadcast({ type: "project_registry_changed" });
+        return sendJson(res, 201, { ok: true, project });
+      }
+
+      // /api/projects/:id  (PATCH update, DELETE)
+      if (seg[0] === "api" && seg[1] === "projects" && seg.length === 3) {
+        const projectId = decodeURIComponent(seg[2]);
+        if (method === "PATCH") {
+          const parsed = await parseJsonBody(req, res);
+          if (!parsed.ok) return;
+          const result = await projectRegistryStore.updateProject(projectId, parsed.body);
+          if (!result) return sendJson(res, 404, { ok: false, error: "Project not found" });
+          broadcast({ type: "project_registry_changed" });
+          return sendJson(res, 200, { ok: true, project: result.project });
+        }
+        if (method === "DELETE") {
+          const result = await projectRegistryStore.deleteProject(projectId);
+          if (!result) return sendJson(res, 404, { ok: false, error: "Project not found" });
+          broadcast({ type: "project_registry_changed" });
+          return sendJson(res, 200, { ok: true });
+        }
+      }
+
+      // /api/projects/:id/workstreams  (POST create)
+      if (
+        method === "POST"
+        && seg[0] === "api"
+        && seg[1] === "projects"
+        && seg.length === 4
+        && seg[3] === "workstreams"
+      ) {
+        const projectId = decodeURIComponent(seg[2]);
+        const parsed = await parseJsonBody(req, res);
+        if (!parsed.ok) return;
+        const result = await projectRegistryStore.createWorkstream(projectId, parsed.body);
+        if (!result) return sendJson(res, 404, { ok: false, error: "Project not found" });
+        broadcast({ type: "project_registry_changed" });
+        return sendJson(res, 201, { ok: true, workstream: result.workstream });
+      }
+
+      // /api/workstreams/:id  (PATCH update)
+      if (
+        method === "PATCH"
+        && seg[0] === "api"
+        && seg[1] === "workstreams"
+        && seg.length === 3
+      ) {
+        const workstreamId = decodeURIComponent(seg[2]);
+        const parsed = await parseJsonBody(req, res);
+        if (!parsed.ok) return;
+        const result = await projectRegistryStore.updateWorkstream(workstreamId, parsed.body);
+        if (!result) return sendJson(res, 404, { ok: false, error: "Workstream not found" });
+        broadcast({ type: "project_registry_changed" });
+        return sendJson(res, 200, { ok: true, workstream: result.workstream });
+      }
+
+      // /api/workstreams/:id/sessions  (PUT replace membership)
+      if (
+        method === "PUT"
+        && seg[0] === "api"
+        && seg[1] === "workstreams"
+        && seg.length === 4
+        && seg[3] === "sessions"
+      ) {
+        const workstreamId = decodeURIComponent(seg[2]);
+        const parsed = await parseJsonBody(req, res);
+        if (!parsed.ok) return;
+        const result = await projectRegistryStore.setWorkstreamSessions(workstreamId, parsed.body.sessionIds);
+        if (!result) return sendJson(res, 404, { ok: false, error: "Workstream not found" });
+        broadcast({ type: "project_registry_changed" });
+        return sendJson(res, 200, { ok: true, workstream: result.workstream });
+      }
+
+      // /api/workstreams/:id/dod  (PUT set criteria)
+      if (
+        method === "PUT"
+        && seg[0] === "api"
+        && seg[1] === "workstreams"
+        && seg.length === 4
+        && seg[3] === "dod"
+      ) {
+        const workstreamId = decodeURIComponent(seg[2]);
+        const parsed = await parseJsonBody(req, res);
+        if (!parsed.ok) return;
+        const result = await projectRegistryStore.setWorkstreamDoD(workstreamId, parsed.body.criteria);
+        if (!result) return sendJson(res, 404, { ok: false, error: "Workstream not found" });
+        broadcast({ type: "project_registry_changed" });
+        return sendJson(res, 200, { ok: true, workstream: result.workstream });
+      }
+
+      // /api/dod/criterion/:id  (PATCH toggle a manual sign-off gate)
+      if (
+        method === "PATCH"
+        && seg[0] === "api"
+        && seg[1] === "dod"
+        && seg[2] === "criterion"
+        && seg.length === 4
+      ) {
+        const criterionId = decodeURIComponent(seg[3]);
+        const parsed = await parseJsonBody(req, res);
+        if (!parsed.ok) return;
+        try {
+          const { criterion } = await projectRegistryStore.toggleManualCriterion(criterionId, parsed.body.met === true);
+          broadcast({ type: "project_registry_changed" });
+          return sendJson(res, 200, { ok: true, criterion });
+        } catch (error) {
+          if (error instanceof RegistryError) {
+            return sendJson(res, error.code === "not_found" ? 404 : 400, { ok: false, error: error.message });
+          }
+          throw error;
+        }
       }
 
       if (method === "POST" && url.pathname === "/api/sessions/delete") {
