@@ -102,6 +102,45 @@ describe("computeProgress (§5.2 exact formula)", () => {
     expect(p.allMet).toBe(false);
   });
 
+  it("a NOT-met weight-0 criterion stays visible — no fabricated 100% / allMet", () => {
+    // Repro of the honesty bug: weight 0 coalesces to 1 (mockup `c.weight||1`), so
+    // an unmet w=0 crit still lowers the percent AND blocks allMet — it must never
+    // become invisible and back a sign-off on unmet work.
+    const p = computeProgress([
+      ce({ met: true, weight: 3 }), // met
+      ce({ met: false, weight: 0 }), // unmet, weight 0 -> coalesced to 1
+    ])!;
+    expect(p.met).toBe(1);
+    expect(p.total).toBe(2);
+    expect(p.metWeight).toBe(3);
+    expect(p.totalWeight).toBe(4); // 3 + (0 -> 1)
+    expect(p.percent).toBe(75);
+    expect(p.allMet).toBe(false);
+  });
+
+  it("a MET weight-0 criterion still counts toward the denominator", () => {
+    const p = computeProgress([ce({ met: true, weight: 0 }), ce({ met: true, weight: 3 })])!;
+    expect(p.metWeight).toBe(4); // (0 -> 1) + 3
+    expect(p.totalWeight).toBe(4);
+    expect(p.percent).toBe(100);
+    expect(p.allMet).toBe(true);
+  });
+
+  it("session_idle measures liveness, not completion → EXCLUDED from the percent + allMet", () => {
+    // A card must never climb toward "done" because the agent went idle (§5.1).
+    const idleOnly = computeProgress([ce({ met: true, sourceKind: "session_idle" })])!;
+    expect(idleOnly).toMatchObject({ total: 0, percent: 0, allMet: false });
+    expect(idleOnly.criteria).toHaveLength(1); // still carried for render
+
+    const withWork = computeProgress([
+      ce({ met: true, sourceKind: "session_idle" }), // liveness-only, excluded
+      ce({ met: false, sourceKind: "manual" }), // the only evaluable crit
+    ])!;
+    expect(withWork.total).toBe(1);
+    expect(withWork.percent).toBe(0); // idle doesn't credit completion
+    expect(withWork.allMet).toBe(false);
+  });
+
   it("mixed met/unmet equal weights → rounded percent", () => {
     const p = computeProgress([
       ce({ met: true }),
@@ -143,10 +182,11 @@ describe("criterion classifiers", () => {
     expect(critStale(ce({ stale: true, sourceKind: "command" }))).toBe(true);
   });
 
-  it("weightOf defaults to 1 and clamps a stray negative", () => {
+  it("weightOf defaults to 1 and coalesces 0 / negative / undefined to 1", () => {
     expect(weightOf(ce({}))).toBe(1);
     expect(weightOf(ce({ weight: 3 }))).toBe(3);
     expect(weightOf(ce({ weight: -2 }))).toBe(1);
+    expect(weightOf(ce({ weight: 0 }))).toBe(1); // mockup `c.weight||1`: 0 -> 1
   });
 
   it("pendingGate returns the first unmet gate, else null", () => {

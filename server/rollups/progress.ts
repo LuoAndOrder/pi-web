@@ -8,8 +8,10 @@
 // in-process testable.
 //
 // The exact computation (DATA-MODEL §5.2, matches the mockup byte-for-byte):
-//   evaluable = criteria where !gate && !rootScoped   (sign-off gates + repo-root
-//                                                       git_clean excluded from %)
+//   evaluable = criteria where !gate && !rootScoped && !livenessOnly
+//                                                      (sign-off gates, repo-root
+//                                                       git_clean, and liveness-only
+//                                                       session_idle excluded from %)
 //   run       = evaluable where !unrun                (never-run command criteria
 //                                                       excluded from the denominator)
 //   percent   = sum(weight of met run) / sum(weight of run) * 100
@@ -21,6 +23,14 @@ import type { CriterionEval, ProgressSnapshot, WorkItemStatus } from "./types.js
  *  the per-session percent and rendered once at repo scope (mockup L944-950). */
 export function rootScoped(c: CriterionEval): boolean {
   return c.sourceKind === "git_clean";
+}
+
+/** session_idle measures LIVENESS, not completion (DATA-MODEL §5.1): "Use to
+ *  derive status, never percent." Scoped OUT of the percent + allMet like the
+ *  repo-root git_clean, so a card never climbs toward "done" merely because the
+ *  agent went idle. */
+export function livenessOnly(c: CriterionEval): boolean {
+  return c.sourceKind === "session_idle";
 }
 
 /** The git evaluator family (git_clean / git_ahead_zero / git_merged). */
@@ -47,9 +57,12 @@ export function critStale(c: CriterionEval): boolean {
   return c.stale === true;
 }
 
-/** Default weight 1; clamp a stray negative to 0 (registry already clamps). */
+/** Default weight 1, coalescing 0 / negative / NaN to 1 (mockup index.html:959
+ *  `const w = c.weight||1`). A weight-0 criterion must still count toward the
+ *  denominator and allMet — otherwise a NOT-met w=0 crit goes invisible and
+ *  fabricates a 100% ring + a sign-off on unmet work. */
 export function weightOf(c: CriterionEval): number {
-  return typeof c.weight === "number" && c.weight >= 0 ? c.weight : 1;
+  return typeof c.weight === "number" && c.weight > 0 ? c.weight : 1;
 }
 
 /** A WorkItemStatus derived from the criteria alone (runtime/git refine it in
@@ -86,7 +99,7 @@ export function computeProgress(
   criteria: CriterionEval[] | null | undefined,
 ): ProgressSnapshot | null {
   if (!criteria || !criteria.length) return null;
-  const evaluable = criteria.filter((c) => !c.gate && !rootScoped(c));
+  const evaluable = criteria.filter((c) => !c.gate && !rootScoped(c) && !livenessOnly(c));
   if (!evaluable.length) return emptyProgress(criteria);
 
   const run = evaluable.filter((c) => !critUnrun(c));
@@ -106,7 +119,10 @@ export function computeProgress(
   }
 
   const percent = totalWeight ? Math.round((metWeight / totalWeight) * 100) : 0;
-  const allMet = run.length > 0 && metWeight === totalWeight && unrun === 0 && stale === 0;
+  // Spec's literal "all run met" (DATA-MODEL §5.2) using the met COUNT, so the
+  // promotion gate is immune to any weighting scheme (a not-met crit can never be
+  // weighted out of allMet).
+  const allMet = run.length > 0 && met === run.length && unrun === 0 && stale === 0;
 
   return {
     met,

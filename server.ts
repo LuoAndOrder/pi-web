@@ -27,6 +27,7 @@ import { createSettingsStore } from "./server/settings.js";
 import { createRepoStatusCache, gitIsAncestor as gitIsAncestorImpl } from "./server/rollups/gitDod.js";
 import { createProjectRegistryStore, RegistryError } from "./server/rollups/registry.js";
 import { assembleRollups } from "./server/rollups/rollup.js";
+import type { RollupSessionInput } from "./server/rollups/rollup.js";
 import type { PiWebFooter, PiWebHeaderAction, PiWebUi } from "./src/extensions.js";
 import type { PiWebSession } from "./server/types.js";
 // Pull the rollups types into the typecheck graph now; the registry store +
@@ -2617,7 +2618,7 @@ const server = createServer(async (req, res) => {
           sessionUiStateStore.read(),
         ]);
         const sessionInfos = applySessionUnreadState(await listSessionInfos(), sessionUiState);
-        const rollups = await assembleRollups(registry, sessionInfos as any, {
+        const rollups = await assembleRollups(registry, sessionInfos as RollupSessionInput[], {
           gitStatusFor: (cwd) => cachedGitStatus(cwd).catch(() => undefined),
           // Mirror the gitStatusFor guard: gitIsAncestor RETHROWS on a non-1 git
           // exit (e.g. exit 128 when `into` does not resolve — a typo, or `main`

@@ -494,11 +494,36 @@ function collectRepoRoots(
   return [...roots];
 }
 
+/** Memoize the merge-base check for ONE assembleRollups pass. git_merged's
+ *  isAncestor bypasses the gitStatus TTL cache, so without this the same
+ *  (root, branch, into) re-spawns `git merge-base --is-ancestor` once per
+ *  workstream eval, once per co-located session in that workstream, and once at
+ *  project scope — the per-session git fan-out the cache exists to prevent. The
+ *  result is deterministic for the pass (a met git_merged is permanent), so it is
+ *  safe to share; caching the promise also collapses concurrent identical checks.
+ *  Keyed by resolved cwd + ancestor + into so distinct roots/branches stay distinct. */
+function memoizeIsAncestor(
+  isAncestor: AssembleContext["isAncestor"],
+): AssembleContext["isAncestor"] {
+  const cache = new Map<string, Promise<boolean>>();
+  return (ancestor, into, cwd) => {
+    const key = `${resolve(cwd)}\0${ancestor}\0${into}`;
+    const hit = cache.get(key);
+    if (hit) return hit;
+    const promise = isAncestor(ancestor, into, cwd);
+    cache.set(key, promise);
+    return promise;
+  };
+}
+
 export async function assembleRollups(
   registry: ProjectRegistry,
   sessions: RollupSessionInput[],
-  ctx: AssembleContext,
+  rawCtx: AssembleContext,
 ): Promise<ProjectRollup[]> {
+  // Per-pass merge-base memoization (see memoizeIsAncestor): every downstream eval
+  // goes through this wrapped ctx so each (root, branch, into) is checked once.
+  const ctx: AssembleContext = { ...rawCtx, isAncestor: memoizeIsAncestor(rawCtx.isAncestor) };
   const { assignments } = mapSessionsToProjects(registry, sessions);
   const sessionById = new Map<string, RollupSessionInput>();
   for (const s of sessions) if (typeof s.id === "string" && s.id) sessionById.set(s.id, s);
