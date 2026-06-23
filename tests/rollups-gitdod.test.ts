@@ -136,6 +136,25 @@ describe("evalGitCriterion (git-derived DoD)", () => {
       await rm(repo, { recursive: true, force: true });
     }
   }, 20_000);
+
+  it("git_merged: a missing `into` ref degrades to not-met instead of throwing (render path)", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "rollups-evalgit-noref-"));
+    try {
+      await initRepo(repo);
+      await commitFile(repo, "README.md", "base\n", "base");
+      await renameBranch(repo, "master"); // repo has NO `main` branch
+      // The real gitIsAncestor RETHROWS on exit 128 (bad `into` revision). The
+      // render path must catch it and degrade — not propagate (would 500 the feed).
+      const isAncestor = (ancestor: string, into: string) => gitIsAncestor(inject, ancestor, into, repo);
+      const c = crit({ kind: "git_merged", into: "main" });
+
+      const evaluated = await evalGitCriterion(c, { isRepo: true, branch: "master", files: [] }, isAncestor);
+      expect(evaluated.met).toBe(false);
+      expect(evaluated.evidence).toMatch(/could not verify|unavailable/i);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  }, 20_000);
 });
 
 describe("sessionGitInfo / gitConflicted", () => {

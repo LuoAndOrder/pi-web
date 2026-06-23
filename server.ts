@@ -2619,7 +2619,11 @@ const server = createServer(async (req, res) => {
         const sessionInfos = applySessionUnreadState(await listSessionInfos(), sessionUiState);
         const rollups = await assembleRollups(registry, sessionInfos as any, {
           gitStatusFor: (cwd) => cachedGitStatus(cwd).catch(() => undefined),
-          isAncestor: (ancestor, into, cwd) => gitIsAncestor(ancestor, into, cwd),
+          // Mirror the gitStatusFor guard: gitIsAncestor RETHROWS on a non-1 git
+          // exit (e.g. exit 128 when `into` does not resolve — a typo, or `main`
+          // on a `master` repo). On the render path a missing `into` ref honestly
+          // means "not merged" = false; it must never 500 the whole feed.
+          isAncestor: (ancestor, into, cwd) => gitIsAncestor(ancestor, into, cwd).catch(() => false),
         });
         if (seg.length === 3) {
           const projectId = decodeURIComponent(seg[2]);

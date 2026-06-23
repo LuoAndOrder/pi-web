@@ -238,6 +238,34 @@ describe("assembleRollups", () => {
     expect(await assembleRollups(registry, [], cleanStub)).toHaveLength(0);
   });
 
+  it("a git_merged whose `into` ref is missing degrades to not-met — the feed never 500s", async () => {
+    // gitIsAncestor RETHROWS on a non-1 exit (exit 128 when `into` does not
+    // resolve). The render path must degrade, not propagate, or the WHOLE
+    // multi-project feed returns 500 (S3: never throw on a messy session).
+    const throwingStub: AssembleContext = {
+      ...cleanStub,
+      isAncestor: async () => {
+        throw Object.assign(new Error("fatal: bad revision 'main'"), { code: 128 });
+      },
+    };
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["w1"] })],
+      workstreams: [
+        workstream({
+          id: "w1",
+          projectId: "A",
+          dod: { criteria: [{ id: "g", text: "merged", source: { kind: "git_merged", into: "main" } }] },
+        }),
+      ],
+    };
+    const rollups = await assembleRollups(registry, [], throwingStub);
+    const ws = rollups[0].workstreams.find((w) => w.workstream.id === "w1")!;
+    const merged = ws.progress?.criteria.find((c) => c.sourceKind === "git_merged")!;
+    expect(merged.met).toBe(false);
+    expect(merged.evidence).toMatch(/could not verify|unavailable/i);
+  });
+
   it("never throws on a messy session — every optional field defaults", async () => {
     const registry: ProjectRegistry = {
       version: 1,

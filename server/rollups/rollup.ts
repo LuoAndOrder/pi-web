@@ -24,6 +24,7 @@ import {
 } from "./progress.js";
 import { deriveUiStatus, toWorkItemStatus } from "./status.js";
 import {
+  evalBase,
   evalGitCriterion,
   gitConflicted,
   sessionGitInfo,
@@ -177,24 +178,14 @@ async function evalCriterion(
   const at = (ctx.now?.() ?? new Date()).toISOString();
   const source = criterion.source;
 
-  const base = (met: boolean, evidence: string, extra?: Partial<CriterionEval>): CriterionEval => {
-    const out: CriterionEval = {
-      id: criterion.id,
-      met,
-      evidence,
-      evaluatedAt: at,
-      sourceKind: source.kind,
-      ...extra,
-    };
-    if (criterion.gate === true) out.gate = true;
-    if (typeof criterion.weight === "number") out.weight = criterion.weight;
-    if (criterion.text) out.text = criterion.text;
-    return out;
-  };
-
   switch (source.kind) {
     case "manual":
-      return base(criterion.met === true, criterion.met === true ? "you checked it" : "not checked");
+      return evalBase(
+        criterion,
+        criterion.met === true,
+        criterion.met === true ? "you checked it" : "not checked",
+        at,
+      );
 
     case "git_clean":
     case "git_ahead_zero":
@@ -213,7 +204,7 @@ async function evalCriterion(
       // NEVER spawned on the render path — a cached on-demand eval (S10) or unrun.
       const cached = ctx.commandEvals?.get(criterion.id);
       if (cached) return { ...cached, gate: criterion.gate === true ? true : cached.gate };
-      return base(false, "command DoD not yet run", { unrun: true });
+      return evalBase(criterion, false, "command DoD not yet run", at, { unrun: true });
     }
 
     case "session_idle": {
@@ -222,11 +213,16 @@ async function evalCriterion(
         Boolean(target) &&
         !target!.runtime?.isRunning &&
         Number(target!.runtime?.pendingMessageCount || 0) === 0;
-      return base(idle, idle ? "agent idle (no pending work)" : "agent still active / pending");
+      return evalBase(
+        criterion,
+        idle,
+        idle ? "agent idle (no pending work)" : "agent still active / pending",
+        at,
+      );
     }
 
     default:
-      return base(false, "unknown criterion source");
+      return evalBase(criterion, false, "unknown criterion source", at);
   }
 }
 
@@ -459,6 +455,45 @@ function computeLineage(
   return { parentProjectName: parent.name, fullPath: project.roots[0] || "" };
 }
 
+/** Every distinct git cwd the assembly below will `gitStatusFor`, deduped by
+ *  resolved path. The route pre-warms these IN PARALLEL so distinct repo roots are
+ *  evaluated concurrently rather than once-per-project sequentially (Gate B
+ *  latency budget). The per-root TTL cache de-dups, so each distinct root still
+ *  loads exactly once; the per-project loop then reads from the warm cache. */
+function collectRepoRoots(
+  registry: ProjectRegistry,
+  byProject: Map<string, Map<string, RollupSessionInput[]>>,
+): string[] {
+  const roots = new Set<string>();
+  const add = (p: string | undefined): void => {
+    if (typeof p === "string" && p.trim()) roots.add(resolve(p));
+  };
+  const addCriteriaRepos = (dod: DoD | undefined): void => {
+    for (const c of dod?.criteria ?? []) {
+      const repo = (c.source as { repo?: string }).repo;
+      if (typeof repo === "string") add(repo);
+    }
+  };
+  const projectById = new Map(registry.projects.map((p) => [p.id, p]));
+  for (const project of registry.projects) {
+    if (project.archived) continue;
+    add(project.roots[0]);
+    addCriteriaRepos(project.dod);
+  }
+  for (const ws of registry.workstreams) {
+    const project = projectById.get(ws.projectId);
+    if (!project || project.archived) continue;
+    add(ws.matchCwd || project.roots[0]);
+    addCriteriaRepos(ws.dod);
+  }
+  for (const buckets of byProject.values()) {
+    for (const list of buckets.values()) {
+      for (const s of list) add(s.cwd);
+    }
+  }
+  return [...roots];
+}
+
 export async function assembleRollups(
   registry: ProjectRegistry,
   sessions: RollupSessionInput[],
@@ -483,6 +518,16 @@ export async function assembleRollups(
     if (bucket) bucket.push(session);
     else wsBuckets.set(key, [session]);
   }
+
+  // Pre-warm every distinct repo root in parallel BEFORE the per-project loop, so
+  // N distinct repos cost ~max(one git fan-out) instead of the sum. gitStatusFor
+  // is guarded by the caller (never rejects); the extra catch keeps a single bad
+  // root from failing the whole warm-up (S3: never throw on a messy session).
+  await Promise.all(
+    collectRepoRoots(registry, byProject).map((root) =>
+      ctx.gitStatusFor(root).catch(() => undefined),
+    ),
+  );
 
   const rollups: ProjectRollup[] = [];
 

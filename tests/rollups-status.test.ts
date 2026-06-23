@@ -115,6 +115,15 @@ describe("need vs soft-wait split (block honesty)", () => {
     expect(isHardNeed("block", false)).toBe(false);
     expect(isSoftWait("block", false)).toBe(true);
   });
+
+  it("a git-conflict block is a hard need, not a soft wait (§5.3 hard blocker)", () => {
+    // git conflict + no elicitation: still a real obligation, must enter Needs-you.
+    expect(isHardNeed("block", false, true)).toBe(true);
+    expect(isSoftWait("block", false, true)).toBe(false);
+    // an elicited git-conflict block is likewise a hard need.
+    expect(isHardNeed("block", true, true)).toBe(true);
+    expect(isSoftWait("block", true, true)).toBe(false);
+  });
 });
 
 describe("deriveStatus + signPending", () => {

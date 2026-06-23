@@ -155,11 +155,18 @@ export function sessionGitInfo(status: GitStatusLite | undefined): SessionGitInf
   };
 }
 
-function evalBase(
+/**
+ * Build a CriterionEval record (id/met/evidence/evaluatedAt/sourceKind + the
+ * gate/weight/text copy). Shared by every evaluator family so the record shape
+ * stays in one place — git criteria here, manual/command/session_idle in
+ * rollup.ts via this same helper. `extra` carries flags like `{ unrun: true }`.
+ */
+export function evalBase(
   criterion: DoDCriterion,
   met: boolean,
   evidence: string,
   evaluatedAt: string,
+  extra?: Partial<CriterionEval>,
 ): CriterionEval {
   const out: CriterionEval = {
     id: criterion.id,
@@ -167,6 +174,7 @@ function evalBase(
     evidence,
     evaluatedAt,
     sourceKind: criterion.source.kind,
+    ...extra,
   };
   if (criterion.gate === true) out.gate = true;
   if (typeof criterion.weight === "number") out.weight = criterion.weight;
@@ -218,7 +226,24 @@ export async function evalGitCriterion(
     case "git_merged": {
       const branch = status.branch || "";
       if (!branch) return evalBase(criterion, false, "no current branch", at);
-      const merged = await isAncestor(branch, source.into);
+      // `isAncestor` (git merge-base --is-ancestor) RETHROWS on a non-1 exit —
+      // e.g. exit 128 when `into` does not resolve (a typo, a `main` default on a
+      // `master` repo, a deleted branch). On the /api/rollups render path that
+      // must NOT bubble up and 500 the whole feed (S3: never throw on a messy
+      // session). A missing `into` ref honestly means "not merged" → degrade to
+      // not-met with evidence. The rethrow stays intact for callers that want the
+      // real error (the on-demand /api/dod/evaluate path).
+      let merged = false;
+      try {
+        merged = await isAncestor(branch, source.into);
+      } catch {
+        return evalBase(
+          criterion,
+          false,
+          `could not verify merge into ${source.into} (ref unavailable)`,
+          at,
+        );
+      }
       return evalBase(
         criterion,
         merged,

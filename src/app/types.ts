@@ -214,7 +214,16 @@ export type SessionInfo = {
     startedAt?: string;
     lastActivityAt?: string;
     pendingMessageCount: number;
-    model?: string;
+    // The wire shape `runtimeForPath` sends via `simplifyModel` — an object, not a
+    // string (mirrors the server's ModelSummary in server/rollups/types.ts).
+    model?: {
+      provider?: string;
+      id?: string;
+      name?: string;
+      reasoning?: boolean;
+      contextWindow?: number;
+      maxTokens?: number;
+    };
   };
   unread?: boolean;
   unreadAt?: string;

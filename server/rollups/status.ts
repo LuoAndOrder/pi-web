@@ -12,8 +12,9 @@
 //     `isSoftWait`, never a fabricated amber alarm.
 //   - `fail` arises ONLY from a tool error / abnormal agent_end / git conflicted —
 //     never from a dashboard-initiated command-DoD eval.
-//   - a hard "need" (enters Needs-you) is a `fail` OR an ELICITED `block`
-//     (`isHardNeed`); a non-elicited `block` is a soft wait (`isSoftWait`).
+//   - a hard "need" (enters Needs-you) is a `fail`, an ELICITED `block`, OR a
+//     git-conflict `block` (`isHardNeed`); a non-elicited, non-git-conflict
+//     `block` is a soft wait (`isSoftWait`).
 
 import type {
   ProgressSnapshot,
@@ -85,16 +86,29 @@ export function deriveStatus(input: UiStatusInput): WorkItemStatus {
   return toWorkItemStatus(deriveUiStatus(input));
 }
 
-/** A HARD need (enters Needs-you / the hero obligation count): a failure or an
- *  ELICITED block. Mirrors the mockup `isNeed` (L1546). */
-export function isHardNeed(uiStatus: UiStatus, elicitation?: boolean): boolean {
-  return uiStatus === "fail" || (uiStatus === "block" && !!elicitation);
+/** A HARD need (enters Needs-you / the hero obligation count): a failure, an
+ *  ELICITED block (a structured ask), OR a git-conflict block (§5.3 lists git
+ *  `conflicted` as a hard blocker). A `block` render-state collapses git conflicts
+ *  and non-elicited idle stops together, so `gitBlocked` is what tells a genuine
+ *  obligation apart from a quiet "maybe waiting". Mirrors the mockup `isNeed`
+ *  (L1546). */
+export function isHardNeed(
+  uiStatus: UiStatus,
+  elicitation?: boolean,
+  gitBlocked?: boolean,
+): boolean {
+  return uiStatus === "fail" || (uiStatus === "block" && (!!elicitation || !!gitBlocked));
 }
 
-/** A SOFT wait ("Idle · may be waiting") — a non-elicited block. Never amber.
- *  Mirrors the mockup `isSoftWait` (L1547). */
-export function isSoftWait(uiStatus: UiStatus, elicitation?: boolean): boolean {
-  return uiStatus === "block" && !elicitation;
+/** A SOFT wait ("Idle · may be waiting") — a non-elicited, non-git-conflict block.
+ *  The inverse of `isHardNeed` for blocks; never amber. Mirrors the mockup
+ *  `isSoftWait` (L1547). */
+export function isSoftWait(
+  uiStatus: UiStatus,
+  elicitation?: boolean,
+  gitBlocked?: boolean,
+): boolean {
+  return uiStatus === "block" && !elicitation && !gitBlocked;
 }
 
 /** A "sign" status resting on unrun / stale evidence can't be signed off yet
