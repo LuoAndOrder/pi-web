@@ -558,7 +558,10 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const id = esc(p.id);
     const item = (action: string, label: string, danger?: boolean) =>
       `<button class="projmenu-item${danger ? " danger" : ""}" type="button" data-projaction="${action}" data-projid="${id}" role="menuitem">${esc(label)}</button>`;
-    const items = item("rename", "Rename…") + item("archive", "Archive") + item("delete", "Delete…", true);
+    // "New workstream…" gives every project — including a freshly-registered zero-session
+    // folder — a session-independent path to create a workstream and author its DoD from the
+    // UI (operability lens). Without it, a project with no sessions has no create affordance.
+    const items = item("newws", "New workstream…") + item("rename", "Rename…") + item("archive", "Archive") + item("delete", "Delete…", true);
     return `<div class="projmenu" data-projmenu="${id}">
       <button class="projkebab" type="button" data-projmenu-toggle="${id}" aria-haspopup="menu" aria-expanded="false" title="Project actions" aria-label="Project actions">${kebabIcon()}</button>
       <div class="projmenu-pop" role="menu" hidden>${items}</div>
@@ -573,7 +576,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const counts = fleetCounts();
     state._pingId = (function () {
       let best: string | null = null, rk = 99;
-      Object.values(state.SESS).forEach(({ s }) => { if (s.status === "run" || s.status === "loop") { const r = statusRank(s.status); if (r < rk) { rk = r; best = s.id; } } });
+      activeSess().forEach(({ s }) => { if (s.status === "run" || s.status === "loop") { const r = statusRank(s.status); if (r < rk) { rk = r; best = s.id; } } });
       return best;
     })();
     wrap.innerHTML = `
@@ -650,13 +653,28 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       </div>`;
   }
 
+  // FLEET-LEVEL session iteration must exclude sessions inside archived/abandoned
+  // workstreams. The adapter deliberately indexes BOTH active and archived workstreams'
+  // sessions into state.SESS so archived rows stay reachable for restore/delete, but the
+  // server keeps each shelved session's derived per-session status (sign/block/fail/merge)
+  // — only the workstream's counts.abandoned is re-tallied. Without this filter a 'sign'
+  // session inside a Cancelled workstream still inflates the hero "N need you", the Sign-off
+  // list, Needs-you triage, the Merged delta and the running/loop pings, even though its
+  // card correctly left the active grid. Per-PROJECT functions are safe because they iterate
+  // the pre-filtered p.workstreams; only these SESS-iterating fleet functions need the guard.
+  // renderArchived / contextBand / recheck lookups that legitimately need archived rows keep
+  // reading state.SESS directly.
+  function activeSess(): Array<{ s: VSession; w: VWorkstream; p: VProject }> {
+    return Object.values(state.SESS).filter(({ w }) => !w._inactive);
+  }
+
   function dormantIds() { return new Set(state.data.filter((p) => pClass(p) === "calm").map((p) => p.id)); }
   function setupIds() { return new Set(state.data.filter((p) => pClass(p) === "needsSetup").map((p) => p.id)); }
 
   function fleetCounts(): Counts {
     const c: Counts = { run: 0, loop: 0, block: 0, softwait: 0, sign: 0, plan: 0, merge: 0, fail: 0, unset: 0, total: 0, projects: state.data.length, active: 0, needs: 0, healthy: 0, setup: 0 };
     const dorm = dormantIds();
-    Object.values(state.SESS).forEach(({ s, p }) => {
+    activeSess().forEach(({ s, p }) => {
       c.total++;
       const inDorm = dorm.has(p.id);
       if (s.status === "run") c.run++;
@@ -679,7 +697,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
   function needsOverflow(c: Counts): { n: number; dominant: { cause: string; n: number } | null } | null {
     if (c.needs < NEEDS_LOUD) return null;
     const tally: Record<string, number> = {};
-    Object.values(state.SESS).forEach(({ s }) => {
+    activeSess().forEach(({ s }) => {
       if (!isNeed(s)) return;
       const cause = (s.failAction || "").trim();
       if (cause) { tally[cause] = (tally[cause] || 0) + 1; }
@@ -695,7 +713,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     let merges = 0, add = 0, del = 0, blocked = 0;
     const visitMin = agoToMin(state.lastVisit || "");
     const sinceVisit = (ago?: string) => { const m = agoToMin(ago); return m < 1e9 && m <= visitMin; };
-    Object.values(state.SESS).forEach(({ s, w }) => {
+    activeSess().forEach(({ s, w }) => {
       if (s.status === "merge" && sinceVisit((s.artifact && s.artifact.mergedAgo) || (w && w.mergedAgo) || "")) {
         merges++; if (s.artifact) { add += s.artifact.add || 0; del += s.artifact.del || 0; }
       }
@@ -725,7 +743,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
   function wsLoopMinutes(w: VWorkstream) { let best = 0; (w.sessions || []).forEach((s) => { if (s.loop) { const m = loopMinutes(s); if (m > best) best = m; } }); return best; }
   function longestLoop(): { min: number; label: string } | null {
     let best: { min: number; label: string } | null = null;
-    Object.values(state.SESS).forEach(({ s }) => { if (s.loop) { const min = loopMinutes(s); if (!best || min > best.min) best = { min, label: fmtMin(min) }; } });
+    activeSess().forEach(({ s }) => { if (s.loop) { const min = loopMinutes(s); if (!best || min > best.min) best = { min, label: fmtMin(min) }; } });
     return best;
   }
   const CLOSE_TAB_LOOP_MIN = 45;
@@ -816,7 +834,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
   function renderNeeds() {
     const host = document.getElementById("needs"); if (!host) return;
     const items: Array<{ s: VSession; w: VWorkstream; p: VProject }> = [];
-    Object.values(state.SESS).forEach(({ s, w, p }) => { if (isNeed(s)) items.push({ s, w, p }); });
+    activeSess().forEach(({ s, w, p }) => { if (isNeed(s)) items.push({ s, w, p }); });
     items.sort((a, b) => blastRank(blastRadius(a.s)) - blastRank(blastRadius(b.s))
       || (agoToMin(b.s.meta) - agoToMin(a.s.meta))
       || ((a.s.status === "block" ? 0 : 1) - (b.s.status === "block" ? 0 : 1))
@@ -935,7 +953,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
   function renderSignoff() {
     const host = document.getElementById("signoffHost"); if (!host) return;
     const items: Array<{ s: VSession; w: VWorkstream; p: VProject }> = [];
-    Object.values(state.SESS).forEach(({ s, w, p }) => { if (s.status === "sign") items.push({ s, w, p }); });
+    activeSess().forEach(({ s, w, p }) => { if (s.status === "sign") items.push({ s, w, p }); });
     const CAP = 3, shown = items.slice(0, CAP), rest = items.slice(CAP);
     const rowHtml = ({ s, w, p }: { s: VSession; w: VWorkstream; p: VProject }) => {
       const gate = s._gate, gone = !!state.signed[s.id], pending = signPending(s);
@@ -1183,8 +1201,14 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const ppCls = o.live ? "pp" : "pp mono";
     const ppTitle = (o.live && lv) ? esc(lv.txt) : esc(p.path);
     const ws = renderWsList(p, { navOnly: o.navOnly });
-    const setupAct = (o.setup && unset)
-      ? `<button class="btn ghost sm setup-cta" data-open="${firstSessId(p, ["unset"]) || ""}">${continueIcon()} Set a Definition of Done</button>`
+    // The setup CTA routes to the DoD drawer for the first UNSET session. `unset` already
+    // requires ≥1 session (allUnset is false for an empty project), so this id is non-null in
+    // practice — but guard the empty-string fallback so we never render a dead `data-open=""`
+    // button. A zero-session project reaches workstream creation via the project kebab's
+    // "New workstream…" instead.
+    const setupSessId = (o.setup && unset) ? firstSessId(p, ["unset"]) : null;
+    const setupAct = setupSessId
+      ? `<button class="btn ghost sm setup-cta" data-open="${esc(setupSessId)}">${continueIcon()} Set a Definition of Done</button>`
       : "";
     return `<div class="prow" id="card-${p.id}" data-toggle="prow" data-rowp="${p.id}" data-project-id="${p.id}">
         ${dotStrip(p)}
@@ -1380,7 +1404,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const host = document.getElementById("sec-planned"); if (!host) return;
     const dorm = dormantIds();
     const items: Array<{ s: VSession; w: VWorkstream; p: VProject }> = [];
-    Object.values(state.SESS).forEach(({ s, w, p }) => { if ((s.status === "queued" || s.status === "planned") && !dorm.has(p.id)) items.push({ s, w, p }); });
+    activeSess().forEach(({ s, w, p }) => { if ((s.status === "queued" || s.status === "planned") && !dorm.has(p.id)) items.push({ s, w, p }); });
     const row = ({ s, w, p }: { s: VSession; w: VWorkstream; p: VProject }) => {
       const total = s.queueTotal || (s.queue ? s.queue.length : 0); const shown = (s.queue || []).slice(0, 3); const more = total - shown.length;
       const plan = s.queue && s.queue.length ? `<div class="qnext"><span class="qsrc" title="pi has no TodoWrite/plan primitive — best-effort parsed from notes (~).">~ parsed from notes →</span>` + shown.map((q) => `<span class="qchip">${esc(q)}</span>`).join("") + (more > 0 ? `<span class="qmore">~${more} more planned</span>` : "") + `<span class="infg" title="Best-effort, parsed from the agent's notes (~).">i</span></div>` : "";
@@ -1418,7 +1442,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const host = document.getElementById("sec-done"); if (!host) return;
     const dorm = dormantIds();
     const mergeToday: Array<{ s: VSession; w: VWorkstream; p: VProject }> = [], mergeEarlier: Array<{ s: VSession; w: VWorkstream; p: VProject }> = [];
-    Object.values(state.SESS).forEach(({ s, w, p }) => {
+    activeSess().forEach(({ s, w, p }) => {
       if (s.status === "merge") {
         if (dorm.has(p.id)) return;
         const ago = (s.artifact && s.artifact.mergedAgo) || w.mergedAgo || "";

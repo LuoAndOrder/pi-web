@@ -3050,6 +3050,12 @@ const server = createServer(async (req, res) => {
         if (!parsed.ok) return;
         const result = await projectRegistryStore.updateWorkstream(workstreamId, parsed.body);
         if (!result) return sendJson(res, 404, { ok: false, error: "Workstream not found" });
+        if ("inactive" in result) {
+          // PATCH tried to set sessionIds into an archived/abandoned workstream — same
+          // invariant the PUT /sessions path enforces. Reject so live sessions can't be
+          // silently re-tagged `abandoned` and dropped from the active grid.
+          return sendJson(res, 409, { ok: false, error: "Workstream is archived or cancelled — restore it before moving sessions into it" });
+        }
         broadcast({ type: "project_registry_changed" });
         // A status/archived transition changes what the gauge & active counts read, so
         // mark the owning project dirty for one debounced rollup_changed (M1).

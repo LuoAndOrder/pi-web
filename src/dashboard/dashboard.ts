@@ -554,7 +554,11 @@ export function createDashboard(options: {
   }
   function signOffAll() {
     const flipped: Array<{ id: string; critId: string }> = [];
-    Object.values(view.SESS).forEach(({ s }) => {
+    // Skip sessions inside archived/abandoned workstreams: the user explicitly shelved them,
+    // so a fleet-wide batch sign-off must not PATCH a manual gate on shelved work. Mirrors
+    // the render-side activeSess() filter so counts and actions stay consistent.
+    Object.values(view.SESS).forEach(({ s, w }) => {
+      if (w._inactive) return;
       if (s.status === "sign" && !renderer.signPending(s.id) && !view.signed[s.id] && s._gate?.id) {
         flipLocal(s.id, true);
         flipped.push({ id: s.id, critId: s._gate.id });
@@ -1051,6 +1055,57 @@ export function createDashboard(options: {
     }
   }
 
+  // "New workstream…" from a project's kebab — a SESSION-INDEPENDENT create path (operability
+  // lens 1): a freshly registered folder with zero sessions still needs a way to spin up a
+  // workstream and author its Definition of Done from the UI, not just via the API. We POST an
+  // empty workstream (the registry accepts an empty/absent sessionIds), refetch so the new row
+  // appears, then open the DoD drawer on it so the user lands straight in authoring. cwd defaults
+  // to the project's first root so git/command criteria have a sensible base.
+  async function newWorkstreamForProject(projectId: string) {
+    const ctx = findProjectContext(projectId);
+    const name = (window.prompt("Name the new workstream:", "") || "").trim();
+    if (!name) return; // cancelled / empty → no-op (no fabricated default)
+    let createdId: string | null = null;
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/workstreams`, {
+        method: "POST",
+        headers: api.headers(),
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok || res.status === 201) {
+        const body = await res.json().catch(() => null) as { workstream?: { id?: string } } | null;
+        createdId = body?.workstream?.id || null;
+      }
+    } catch {
+      createdId = null;
+    }
+    if (!createdId) { showToast(`Couldn't create <b>${escText(name)}</b> — try again.`); return; }
+    showToast(`Created <b>${escText(name)}</b> — set its Definition of Done to start tracking.`);
+    await refetch();
+    // Open the DoD drawer directly on the new (empty) workstream. No session backs it, so the
+    // draft starts blank and saveDoD takes the non-synthetic PUT /dod path against this id.
+    openDodDrawerForWorkstream(createdId, name, projectId, (ctx?.roots || [])[0] || "");
+  }
+
+  // Session-independent DoD-drawer open: used for an empty workstream that no session backs.
+  // Mirrors openDodDrawer but seeds an empty draft, an empty sessionId (the session_idle auto
+  // evaluator simply won't have a target — it stays an opt-in chip), and the project root as cwd
+  // so command/git criteria default sensibly. saveDoD's non-synthetic branch PUTs /dod by id.
+  async function openDodDrawerForWorkstream(workstreamId: string, wsName: string, projectId: string, cwd: string) {
+    const defaultBranch = DEFAULT_MERGE_TARGET;
+    drawer = {
+      workstreamId,
+      projectId,
+      synthetic: false,
+      wsName,
+      cwd,
+      sessionId: "",
+      defaultBranch,
+      draft: [],
+    };
+    renderDrawer();
+  }
+
   // "Move to existing workstream" — attach the selected sessions to the picked workstream. The
   // PUT /api/workstreams/:id/sessions REPLACES the membership, so we UNION the target's current
   // sessionIds with the selection (else moving 1 session would detach the rest). Targets and
@@ -1390,6 +1445,7 @@ export function createDashboard(options: {
     closeProjMenus();
     switch (action) {
       case "new": void newProjectFromGrid(); break;
+      case "newws": void newWorkstreamForProject(projectId); break;
       case "rename": void renameProject(projectId); break;
       case "archive": void archiveProject(projectId); break;
       case "delete": void deleteProject(projectId); break;
@@ -1664,6 +1720,9 @@ export function createDashboard(options: {
       event.preventDefault();
       event.stopPropagation();
       const needs = Object.values(view.SESS)
+        // Exclude sessions inside archived/abandoned workstreams — shelved work is out of the
+        // active surfaces, so "Triage all in focus" must not open it as the top need.
+        .filter(({ w }) => !w._inactive)
         .map(({ s }) => s)
         // A hard need = fail, an elicited block, OR a git-conflict block (matches render.ts isHardNeedV).
         .filter((s) => s.status === "fail" || (s.status === "block" && (s.elicited || s.gitBlocked)))

@@ -351,6 +351,12 @@ test.describe("Project Rollups dashboard", () => {
       await expect(archived.locator(`.archrow[data-ws-id="${workstreamId}"]`)).toBeVisible();
       // The archived workstream is OUT of the active grid (no active .ws row for it).
       await expect(pcard.locator(`.ws[data-ws-id="${workstreamId}"]`)).toHaveCount(0);
+      // ...AND its `sign` session leaves the FLEET sign-off rail too. The adapter still indexes
+      // archived sessions into SESS (so the Archived row's controls resolve), but the fleet
+      // sign-off list must filter inactive workstreams out — otherwise a shelved session keeps
+      // inflating "N to sign off" and the rail. (Regression guard for the render-side _inactive
+      // filter; the session card already left the grid above.)
+      await expect(view.locator('[data-testid="signoff"] [data-open="mock-current"]')).toHaveCount(0);
 
       // ── Restore then Cancel ── restore from the Archived row, then cancel (abandon) it.
       await archived.locator(`.archrow[data-ws-id="${workstreamId}"] [data-wsaction="restore"]`).click();

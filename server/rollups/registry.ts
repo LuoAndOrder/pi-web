@@ -490,7 +490,7 @@ export function createProjectRegistryStore(file: string) {
   async function updateWorkstream(
     id: string,
     patchValue: unknown,
-  ): Promise<{ registry: ProjectRegistry; workstream: Workstream } | undefined> {
+  ): Promise<{ registry: ProjectRegistry; workstream: Workstream } | { inactive: true } | undefined> {
     const source = isRecord(patchValue) ? patchValue : {};
     return serializeWrite(async () => {
       const current = await read();
@@ -506,7 +506,22 @@ export function createProjectRegistryStore(file: string) {
         }
       }
       if ("status" in source) updated.status = normalizeStatus(source.status);
-      if ("sessionIds" in source) updated.sessionIds = normalizeStringArray(source.sessionIds);
+      if ("archived" in source) {
+        if (source.archived === true) updated.archived = true;
+        else delete updated.archived;
+      }
+      if ("sessionIds" in source) {
+        // Mirror setWorkstreamSessions' guard on the PATCH path: never re-tag live
+        // sessions into a workstream that is (after this same patch) archived/abandoned —
+        // that silently flips them to `abandoned` in the rollup and drops them out of the
+        // active grid. We evaluate the RESULTING state so a patch that un-archives and
+        // re-attaches in one call is allowed, while attaching into a shelved workstream is
+        // rejected via the { inactive: true } sentinel -> 409 in the route.
+        if (updated.archived === true || updated.status === "abandoned") {
+          return { inactive: true } as const;
+        }
+        updated.sessionIds = normalizeStringArray(source.sessionIds);
+      }
       if ("matchCwd" in source) {
         if (typeof source.matchCwd === "string" && source.matchCwd.trim()) {
           updated.matchCwd = resolve(source.matchCwd.trim());
@@ -548,10 +563,8 @@ export function createProjectRegistryStore(file: string) {
         if (source.paused === true) updated.paused = true;
         else delete updated.paused;
       }
-      if ("archived" in source) {
-        if (source.archived === true) updated.archived = true;
-        else delete updated.archived;
-      }
+      // `archived` is handled earlier (before sessionIds) so the inactive guard can read
+      // the resulting state.
       updated.updatedAt = new Date().toISOString();
       // Default `loopStartedAt` to now() whenever the workstream is (now) a loop but has
       // no start stamp — covers both `isLoop` flipping true on this patch and a loop that

@@ -230,6 +230,53 @@ describe("rollups registry CRUD routes", () => {
     await server.api("DELETE", `/api/projects/${projectId}`);
   }, 20_000);
 
+  it("M1: PATCH sessionIds into an archived/abandoned workstream is 409 (mirrors the PUT guard)", async () => {
+    const created = await server.api("POST", "/api/projects", { name: "M1-patch-guard", roots: [process.cwd()] });
+    const projectId: string = created.body.project.id;
+    // An ACTIVE workstream seeded with a live session — PATCH sessionIds must work normally here.
+    const live = await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "live", sessionIds: ["s1"] });
+    const liveId: string = live.body.workstream.id;
+    const a = await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "shelved" });
+    const b = await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "killed" });
+    const archivedId: string = a.body.workstream.id;
+    const cancelledId: string = b.body.workstream.id;
+    await server.api("PATCH", `/api/workstreams/${archivedId}`, { archived: true });
+    await server.api("PATCH", `/api/workstreams/${cancelledId}`, { status: "abandoned" });
+
+    // PATCH that tries to re-tag live sessions into a shelved workstream is rejected — without
+    // this the sessions would silently flip to `abandoned` in the rollup and leave the grid.
+    const intoArchived = await server.api("PATCH", `/api/workstreams/${archivedId}`, { sessionIds: ["s1"] });
+    expect(intoArchived.status).toBe(409);
+    expect(intoArchived.body.ok).toBe(false);
+    const intoCancelled = await server.api("PATCH", `/api/workstreams/${cancelledId}`, { sessionIds: ["s2"] });
+    expect(intoCancelled.status).toBe(409);
+
+    // Membership of BOTH the shelved targets stayed empty (no partial write).
+    let state = await server.api("GET", "/api/projects");
+    let ws = state.body.registry.workstreams;
+    expect(ws.find((w: any) => w.id === archivedId).sessionIds).toEqual([]);
+    expect(ws.find((w: any) => w.id === cancelledId).sessionIds).toEqual([]);
+
+    // A non-sessionIds PATCH on a shelved workstream still applies (e.g. rename).
+    const rename = await server.api("PATCH", `/api/workstreams/${archivedId}`, { name: "shelved-renamed" });
+    expect(rename.status).toBe(200);
+    expect(rename.body.workstream.name).toBe("shelved-renamed");
+
+    // PATCH sessionIds on an ACTIVE workstream works (the guard is scoped to shelved targets).
+    const active = await server.api("PATCH", `/api/workstreams/${liveId}`, { sessionIds: ["s1", "s9"] });
+    expect(active.status).toBe(200);
+    expect(active.body.workstream.sessionIds).toEqual(["s1", "s9"]);
+
+    // Un-archiving AND attaching sessions in ONE patch is allowed — the guard reads the
+    // RESULTING (no-longer-archived) state, not the pre-patch flag.
+    const revive = await server.api("PATCH", `/api/workstreams/${archivedId}`, { archived: false, sessionIds: ["s3"] });
+    expect(revive.status).toBe(200);
+    expect(revive.body.workstream.archived).toBeUndefined();
+    expect(revive.body.workstream.sessionIds).toEqual(["s3"]);
+
+    await server.api("DELETE", `/api/projects/${projectId}`);
+  }, 20_000);
+
   it("returns 404 for unknown project PATCH/DELETE and unknown workstream PATCH", async () => {
     const patch = await server.api("PATCH", "/api/projects/missing", { name: "x" });
     expect(patch.status).toBe(404);
