@@ -60,7 +60,6 @@ export type AppElements = {
   emptyCwdButton: HTMLButtonElement;
   dashboardButton: HTMLButtonElement;
   dashboardView: HTMLElement;
-  dashboardBackdrop: HTMLDivElement;
   dashboardWrap: HTMLDivElement;
   dashboardCloseButton: HTMLButtonElement;
 };
@@ -134,7 +133,6 @@ export function getAppElements(): AppElements {
     emptyCwdButton: requiredElement<HTMLButtonElement>("#emptyCwdChooser .emptyCwdButton"),
     dashboardButton: requiredElement<HTMLButtonElement>("#dashboardButton"),
     dashboardView: requiredElement<HTMLElement>("#dashboardView"),
-    dashboardBackdrop: requiredElement<HTMLDivElement>("#dashboardBackdrop"),
     dashboardWrap: requiredElement<HTMLDivElement>("#dashboardWrap"),
     dashboardCloseButton: requiredElement<HTMLButtonElement>("#dashboardCloseButton"),
   };

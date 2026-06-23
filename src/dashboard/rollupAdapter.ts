@@ -30,6 +30,7 @@ import type {
 } from "./types.js";
 import type {
   RenderState,
+  VArtifact,
   VCrit,
   VProg,
   VProject,
@@ -80,6 +81,23 @@ function critAt(ce: CriterionEval): string | undefined {
   if (!kind || kind === "manual" || kind === "session_idle") return undefined;
   if (ce.unrun) return "never run";
   return relTime(ce.evaluatedAt);
+}
+
+/** A relative "merged X ago" label from a REAL server signal: the time the `git_merged`
+ *  criterion was evaluated met (the closest merge-time proxy the server exposes today).
+ *  Without it the renderer's Done today/earlier split, mergeRecency sort, and the hero
+ *  "since you last looked: +N merged" delta were all permanently dead (review finding). */
+function mergedAgoFromCriteria(criteria: CriterionEval[] | undefined): string | undefined {
+  const merged = (criteria ?? []).find((c) => c.sourceKind === "git_merged" && c.met);
+  return relTime(merged?.evaluatedAt);
+}
+
+/** Pass the server artifact through, attaching a `mergedAgo` the receipt structurally lacks:
+ *  the git_merged eval time, falling back to the session's last-modified time as a proxy. */
+function toArtifact(sr: SessionRollup): VArtifact | null {
+  if (!sr.artifact) return null;
+  const mergedAgo = mergedAgoFromCriteria(sr.progress?.criteria ?? sr.dod?.criteria) ?? relTime(sr.modified);
+  return { ...sr.artifact, mergedAgo };
 }
 
 function toCrit(ce: CriterionEval): VCrit {
@@ -166,7 +184,7 @@ function toSession(sr: SessionRollup): VSession {
     budget: sr.loop?.budget,
     queue: sr.plannedQueue?.items,
     queueTotal: sr.plannedQueue?.total,
-    artifact: sr.artifact ?? null,
+    artifact: toArtifact(sr),
     unread: sr.unread,
     messageCount: sr.messageCount,
     modified: sr.modified,
@@ -188,6 +206,8 @@ function toWorkstream(wr: WorkstreamRollup): VWorkstream {
     _mixed: !!wr.mixed,
     _sessGauge: wr.sessionGauge,
     loop: !!wr.workstream.isLoop,
+    // Renderer fallback for a merge-status session whose receipt carries no mergedAgo.
+    mergedAgo: mergedAgoFromCriteria(wr.progress?.criteria),
   };
 }
 

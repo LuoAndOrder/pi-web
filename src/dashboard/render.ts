@@ -721,10 +721,13 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
       const activeOverflow = active.slice(activeFull.length);
       const full = attnFull.concat(activeFull).concat(fullSign);
       // Center the lone card ONLY in the pure-calm state. When a full-width sign-off band
-      // (c.sign) and/or a Needs-setup section (setup) sits beside it, keep the default
-      // left-aligned grid so the card's left edge lines up with the heading + sibling bands.
+      // (c.sign) and/or a Needs-setup section (setup) sits beside it, keep the card's LEFT
+      // edge lined up with the heading + sibling bands — but let it span the FULL row width
+      // (`.solo`) so it matches those full-width bands instead of stranding an empty right
+      // gutter at min-width (review finding). The two states are mutually exclusive.
       const single = full.length === 1 && !signoff.length && !dormant.length && !activeOverflow.length && !attnOverflow.length && !setup.length && c.sign === 0;
-      if (full.length) out += `<div class="grid ${single ? "single" : ""}">` + full.map((p) => renderCard(p)).join("") + `</div>`;
+      const soloFull = full.length === 1 && (c.sign > 0 || setup.length > 0);
+      if (full.length) out += `<div class="grid ${single ? "single" : soloFull ? "solo" : ""}">` + full.map((p) => renderCard(p)).join("") + `</div>`;
       if (attnOverflow.length) {
         const AOC = 6, aoShown = attnOverflow.slice(0, AOC), aoExtra = attnOverflow.slice(AOC);
         out += `<div class="grpcard" id="sec-attn-more"><div class="grp-h" data-toggle="grp"><span class="gt">Needs attention</span> <span class="gc">${attnOverflow.length} more need attention · answer in Needs you above</span><button class="jump" data-jump="sec-needs">answer ↑</button><span class="chev">${chevIcon()}</span></div>

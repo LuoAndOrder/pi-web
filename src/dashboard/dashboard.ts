@@ -125,14 +125,12 @@ export function createDashboard(options: {
 
   function reveal() {
     open = true;
-    elements.dashboardBackdrop.hidden = false;
     elements.dashboardView.hidden = false;
   }
 
   function hide() {
     open = false;
     elements.dashboardView.hidden = true;
-    elements.dashboardBackdrop.hidden = true;
   }
 
   function openDashboard() {
@@ -257,8 +255,8 @@ export function createDashboard(options: {
 
   function init() {
     elements.dashboardCloseButton.addEventListener("click", () => closeDashboard());
-    elements.dashboardBackdrop.addEventListener("click", () => closeDashboard());
-    // Click on the overlay scroll surface (outside the centered .wrap) closes.
+    // The opaque full-screen #dashboardView is the click target; clicking its scroll
+    // surface (outside the centered .wrap) closes — no separate backdrop node needed.
     elements.dashboardView.addEventListener("click", (event) => {
       if (event.target === elements.dashboardView) closeDashboard();
     });

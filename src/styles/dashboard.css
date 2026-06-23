@@ -9,14 +9,6 @@
    pi-web statusBar + conversation are the surrounding surfaces. */
 
 /* ───────────── overlay shell (new — pi-web integration) ───────────── */
-.dashboardBackdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 49;
-  background: rgba(0, 0, 0, 0.55);
-}
-.dashboardBackdrop[hidden] { display: none; }
-
 #dashboardView {
   /* design tokens — SCOPED here (not :root) so the dashboard's indigo --accent
      and state palette never override pi-web's global cyan --accent. */
@@ -253,6 +245,9 @@
 #dashboardView .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; align-items: start; }
 #dashboardView .grid.single { grid-template-columns: minmax(360px, 560px); justify-content: center; }
 #dashboardView .grid.single:has(.pcard.open) { grid-template-columns: 1fr; justify-content: stretch; }
+/* lone card beside a full-width sign-off strip / needs-setup band → span the full row so it
+   matches their width (left edge stays aligned) instead of stranding an empty right gutter. */
+#dashboardView .grid.solo { grid-template-columns: 1fr; }
 #dashboardView .pcard { border: 1px solid var(--border); border-radius: 16px; background: var(--panel); overflow: hidden; transition: border-color .15s ease; }
 #dashboardView .pcard:hover { border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
 #dashboardView .pcard.open { border-color: color-mix(in srgb, var(--accent) 36%, var(--border)); }
