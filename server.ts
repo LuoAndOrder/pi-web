@@ -24,8 +24,12 @@ import { createMockHarness } from "./server/mock.js";
 import { resolveBundledExtensionPaths, resolvePiWebExtensionPaths } from "./server/extensions.js";
 import { createSessionUiStateStore, defaultSessionUiState } from "./server/sessionUiState.js";
 import { createSettingsStore } from "./server/settings.js";
+import { createRepoStatusCache, gitIsAncestor as gitIsAncestorImpl } from "./server/rollups/gitDod.js";
 import type { PiWebFooter, PiWebHeaderAction, PiWebUi } from "./src/extensions.js";
 import type { PiWebSession } from "./server/types.js";
+// Pull the rollups types into the typecheck graph now; the registry store +
+// routes (S1-S3) consume them. Type-only, erased at emit.
+import type { ProjectRegistry, ProjectRollup } from "./server/rollups/types.js";
 
 const appDir = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const distDir = join(appDir, "dist");
@@ -450,6 +454,26 @@ async function gitCommitDetails(hash: string, cwd = piCwd) {
     return { path, status, ...(stats.get(path) || {}) };
   });
   return { ok: true, commit: parseCommit(commitOut.trim()), files, diff };
+}
+
+// True when `ancestor` is merged into `into` (the `git_merged` DoD signal).
+// Returns false (never throws) when the merge-base check exits 1.
+async function gitIsAncestor(ancestor: string, into: string, cwd = piCwd) {
+  return gitIsAncestorImpl((args, runCwd) => git(args, 15_000, runCwd), ancestor, into, cwd);
+}
+
+// Per-repo-root TTL cache over gitStatus so /api/rollups evaluates each distinct
+// root once instead of once per session. Invalidated on git/sync + agent_end.
+const repoStatusCache = createRepoStatusCache<Awaited<ReturnType<typeof gitStatus>>>(
+  (cwd) => gitStatus(cwd),
+  {
+    defaultTtlMs: () => Number(process.env.PI_WEB_GIT_CACHE_TTL_MS) || 3000,
+    resolveKey: (cwd) => resolve(cwd),
+  },
+);
+
+async function cachedGitStatus(cwd = piCwd, ttlMs?: number) {
+  return ttlMs == null ? repoStatusCache.get(cwd) : repoStatusCache.get(cwd, ttlMs);
 }
 
 // Models confirmed broken with this Copilot integration — tracked at runtime.
@@ -1933,6 +1957,9 @@ function registerLiveSession(value: any) {
       eventForClient = { ...e, startedAt };
     } else if (e?.type === "agent_end" || e?.type === "compaction_end") {
       clearRuntimeStartedAt(value, eventSessionFile);
+      // The working tree may have changed while the agent ran; drop the cached
+      // git status for this session's repo so the next rollup re-evaluates.
+      if (e?.type === "agent_end") repoStatusCache.invalidate(sessionCwd(value));
     }
 
     if (e?.type === "tool_execution_start") {
@@ -2278,6 +2305,7 @@ const server = createServer(async (req, res) => {
           if (!branch) return sendJson(res, 400, { ok: false, error: "Cannot sync detached HEAD" });
           const fetchResult = await git(["fetch", "--prune", "origin"], 60_000, cwd);
           const pullResult = await git(["pull", "--rebase", "--autostash", "origin", branch], 120_000, cwd);
+          repoStatusCache.invalidate(cwd);
           return sendJson(res, 200, { ok: true, output: `${fetchResult.stdout}${fetchResult.stderr}${pullResult.stdout}${pullResult.stderr}`, status: await gitStatus(cwd) });
         } catch (error) {
           return sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });

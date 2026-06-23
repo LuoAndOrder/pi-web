@@ -214,6 +214,7 @@ export type SessionInfo = {
     startedAt?: string;
     lastActivityAt?: string;
     pendingMessageCount: number;
+    model?: string;
   };
   unread?: boolean;
   unreadAt?: string;
