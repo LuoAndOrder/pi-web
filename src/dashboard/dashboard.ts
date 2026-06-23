@@ -188,7 +188,8 @@ export function createDashboard(options: {
   // Ported from the mockup click delegation (index.html L3166-3213), scoped to
   // #dashboardView. S6 wires: data-open (overridden → real session), data-jump
   // (scroll + auto-expand), and the data-toggle expand/collapse family. Quick-reply
-  // chips, sign-off, recheck, focus-triage land in S7 (left as no-ops here).
+  // chips, sign-off, recheck, batch sign-off and focus-triage land in S7 — until then
+  // render.ts ships them as `disabled` affordances, so they never reach here as live no-ops.
   function handleClick(event: MouseEvent) {
     const target = event.target as HTMLElement | null;
     if (!target) return;

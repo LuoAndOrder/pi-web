@@ -161,6 +161,12 @@ export interface DashboardRenderer {
   renderAll: (sc?: { empty?: boolean; candidates?: number }) => void;
 }
 
+// Shared status ordering (lower rank = more urgent, surfaces first). Exported as the SINGLE
+// source of truth so the adapter's `workstreamStatus` reuses it instead of keeping a second
+// 9-key copy that can drift (review finding). The renderer's `byAttention` reads it too.
+export const STATUS_RANK: Record<string, number> = { block: 0, fail: 0, unset: 1, run: 2, loop: 2, sign: 3, queued: 4, planned: 4, merge: 5 };
+export function statusRank(st: string) { return STATUS_RANK[st] != null ? STATUS_RANK[st] : 9; }
+
 export function createRenderer(options: { wrap: HTMLElement; state: RenderState }): DashboardRenderer {
   const { wrap, state } = options;
 
@@ -175,8 +181,6 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
     planned: { label: "Planned · not started", cls: "idle", color: "var(--st-idle)" },
     unset: { label: "Set criterion", cls: "unset", color: "var(--st-sign)" },
   };
-  const STATUS_RANK: Record<string, number> = { block: 0, fail: 0, unset: 1, run: 2, loop: 2, sign: 3, queued: 4, planned: 4, merge: 5 };
-  function statusRank(st: string) { return STATUS_RANK[st] != null ? STATUS_RANK[st] : 9; }
   function byAttention(a: { status: string; id?: string; name?: string }, b: { status: string; id?: string; name?: string }) {
     return (statusRank(a.status) - statusRank(b.status)) || String(a.id || a.name || "").localeCompare(String(b.id || b.name || ""));
   }
@@ -186,6 +190,12 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
 
   // ─────────────────────────── small helpers ───────────────────────────
   const esc = (t?: unknown) => String(t == null ? "" : t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
+  // S7 interactions (sign-off / quick-reply / recheck / batch sign-off / focus-triage) are NOT
+  // wired in this read-only slice (impl-plan S5: "Continue/sign-off buttons rendered disabled").
+  // Render them as real disabled affordances so they never read as live controls that silently
+  // no-op (review finding). Continue/Open (data-open) IS wired and stays enabled.
+  const DEFER = ' disabled aria-disabled="true"';
+  const deferTip = (what: string) => `${DEFER} title="${esc(what)} — coming in a later update"`;
   // a HARD need = a FAILURE or a STRUCTURALLY-ELICITED block; a non-elicited free-text stop can't be
   // PROVEN a blocker (spec §5.3), so it degrades to a quiet "may be waiting", never Needs-you.
   const isNeed = (s: VSession) => s.status === "fail" || (s.status === "block" && !!s.elicited);
@@ -360,7 +370,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
     renderRail(counts);
     renderNeeds();
     renderSignoff();
-    renderGrid();
+    renderGrid(counts);
     renderPlanned();
     renderDone();
   }
@@ -444,7 +454,8 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
 
   // ─────────────────────────── hero ───────────────────────────
   function heroHtml(c: Counts) {
-    const day = "Project Rollups";
+    const now = new Date();
+    const day = `${now.toLocaleDateString(undefined, { weekday: "long" })} · ${now.getDate()} ${now.toLocaleDateString(undefined, { month: "short" })}`;
     const maybe = c.softwait ? `<span class="maybe" title="non-elicited idle stops — pi can't PROVE these are blocked, so they're a quiet tally, never inside the 'things need you' count."><b>${c.softwait}</b> may be waiting</span>` : "";
     const softLine = c.softwait ? `<div class="softline"><span class="dot"></span>${maybe} — pi can't prove these are blocked (free-text stops, not structured asks)<button class="swjump" data-jump="sec-proj">review idle work →</button></div>` : "";
     if (c.needs === 0) {
@@ -520,7 +531,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
   // ─────────────────────────── needs you (4 bands, #14) ───────────────────────────
   function needsSectionHtml(c: Counts) {
     if (c.needs === 0) return "";
-    const focusBtn = c.needs > 2 ? `<button class="hbtn" id="focusBtn">${focusIcon()} Triage all in focus</button>` : `<span class="hint">answer inline — your reply continues the conversation</span>`;
+    const focusBtn = c.needs > 2 ? `<button class="hbtn" id="focusBtn"${deferTip("Triage-all")}>${focusIcon()} Triage all in focus</button>` : `<span class="hint">answer inline — your reply continues the conversation</span>`;
     return `<div class="shead" id="sec-needs"><h2>Needs you</h2>${focusBtn}</div>
       <section class="needs${c.needs === 1 ? " single" : ""}" id="needs" data-testid="needs-you"></section>`;
   }
@@ -545,7 +556,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
       const headTag = `${statusBadge} ${blastTag} ${waitTag}`;
       let chips = "";
       if (s.elicited && s.chips && s.chips.length) {
-        chips = `<div class="qreply"><span class="qlbl">quick reply →</span>` + s.chips.map((q) => `<button data-reply="${s.id}" data-text="${esc(q)}">${esc(q)}</button>`).join("") + `</div>`;
+        chips = `<div class="qreply"><span class="qlbl">quick reply →</span>` + s.chips.map((q) => `<button data-reply="${s.id}" data-text="${esc(q)}"${deferTip("Quick reply")}>${esc(q)}</button>`).join("") + `</div>`;
       }
       const askHtml = soft
         ? `<span style="color:var(--muted)">No structured question — pi went idle (${esc(s.meta || "a while ago")}), unread. It may be waiting on you, or may simply have finished. Open to read its last message.</span>`
@@ -554,7 +565,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
       if (s.status === "fail") {
         const remedy = esc(s.failAction || "Re-run");
         if (!chips) {
-          chips = `<div class="qreply"><span class="qlbl">quick reply →</span><button data-reply="${s.id}" data-text="${remedy}">${remedy}</button></div>`;
+          chips = `<div class="qreply"><span class="qlbl">quick reply →</span><button data-reply="${s.id}" data-text="${remedy}"${deferTip("Quick reply")}>${remedy}</button></div>`;
         }
         actions = `<button class="btn primary" data-open="${s.id}">${continueIcon()} Continue the conversation</button>`;
       } else {
@@ -576,11 +587,11 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
         const blastTag = (blast === "hi" || blast === "md") ? `<span class="blast ${s.status === "fail" ? "fail" : "block"}" title="Blast radius is a HEURISTIC triage hint. It only orders Needs-you; it gates nothing.">${blast === "hi" ? "high" : "elevated"}</span>` : "";
         const wait = waitLabel(s); const waitTag = wait ? `<span class="waitage">waiting ${wait}</span>` : "";
         let rowChips = (s.elicited && s.chips && s.chips.length)
-          ? `<div class="qreply rowqreply"><span class="qlbl">quick reply →</span>` + s.chips.map((q) => `<button data-reply="${s.id}" data-text="${esc(q)}">${esc(q)}</button>`).join("") + `</div>`
+          ? `<div class="qreply rowqreply"><span class="qlbl">quick reply →</span>` + s.chips.map((q) => `<button data-reply="${s.id}" data-text="${esc(q)}"${deferTip("Quick reply")}>${esc(q)}</button>`).join("") + `</div>`
           : "";
         if (s.status === "fail" && !rowChips) {
           const rRemedy = esc(s.failAction || "Re-run");
-          rowChips = `<div class="qreply rowqreply"><span class="qlbl">quick reply →</span><button data-reply="${s.id}" data-text="${rRemedy}">${rRemedy}</button></div>`;
+          rowChips = `<div class="qreply rowqreply"><span class="qlbl">quick reply →</span><button data-reply="${s.id}" data-text="${rRemedy}"${deferTip("Quick reply")}>${rRemedy}</button></div>`;
         }
         const rowBtn = `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} Continue</button>`;
         const hay = esc(`${p.name} ${w.name} ${s.name} ${s.live || ""}`.toLowerCase());
@@ -627,7 +638,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
   function signoffSectionHtml(c: Counts) {
     if (!c.sign) return "";
     const batch = c.sign > 1
-      ? `<button class="hbtn sgn" id="signAll"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="13" height="13"><path d="M20 6 9 17l-5-5"/></svg> Sign off all ${c.sign}</button>`
+      ? `<button class="hbtn sgn" id="signAll"${deferTip("Batch sign-off")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="13" height="13"><path d="M20 6 9 17l-5-5"/></svg> Sign off all ${c.sign}</button>`
       : `<span class="hint">one click — no reply needed</span>`;
     const cnt = c.sign > 1 ? "" : `<span class="cnt">${c.sign} done</span>`;
     return `<div class="shead" id="sec-signoff"><h2>Awaiting your sign-off</h2>${cnt}${batch}</div>
@@ -652,8 +663,8 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
       const act = gone
         ? `<span style="color:var(--st-merge);font-weight:650">✓ Signed off</span>${mergeAffordance(s)}`
         : pending
-          ? `<button class="btn remedy sm" data-recheckcard="${s.id}" title="command DoD evidence is stale — re-run it on demand">${recheckIcon()} Re-check</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`
-          : `<button class="btn sign" data-signoff="${s.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`;
+          ? `<button class="btn remedy sm" data-recheckcard="${s.id}" title="command DoD evidence is stale — re-run it on demand (coming in a later update)"${DEFER}>${recheckIcon()} Re-check</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`
+          : `<button class="btn sign" data-signoff="${s.id}"${deferTip("Sign-off")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off</button><button class="btn ghost sm" data-open="${s.id}">Review</button>`;
       return `<article class="soff ${gone ? "gone" : ""}">
         <div class="sleft">
           <div class="scrumb"><b>${esc(p.name)}</b>${lineage} › ${esc(w.name)} · <span class="sn">${esc(s.name)}</span></div>
@@ -690,7 +701,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
   }
   function mergeRecency(p: VProject) { let best = 1e9; p.workstreams.forEach((w) => w.sessions.forEach((s) => { const a = (s.artifact && s.artifact.mergedAgo) || w.mergedAgo; if (a) { const n = agoToMin(a); if (n < best) best = n; } })); return best; }
 
-  function renderGrid() {
+  function renderGrid(c: Counts) {
     const host = document.getElementById("projectsHost"); if (!host) return;
     const attn = state.data.filter((p) => pClass(p) === "attn");
     const active = state.data.filter((p) => pClass(p) === "active");
@@ -720,7 +731,10 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
       const activeFull = active.slice(0, ACTIVE_CAP);
       const activeOverflow = active.slice(activeFull.length);
       const full = attnFull.concat(activeFull).concat(fullSign);
-      const single = full.length === 1 && !signoff.length && !dormant.length && !activeOverflow.length && !attnOverflow.length;
+      // Center the lone card ONLY in the pure-calm state. When a full-width sign-off band
+      // (c.sign) and/or a Needs-setup section (setup) sits beside it, keep the default
+      // left-aligned grid so the card's left edge lines up with the heading + sibling bands.
+      const single = full.length === 1 && !signoff.length && !dormant.length && !activeOverflow.length && !attnOverflow.length && !setup.length && c.sign === 0;
       if (full.length) out += `<div class="grid ${single ? "single" : ""}">` + full.map((p) => renderCard(p)).join("") + `</div>`;
       if (attnOverflow.length) {
         const AOC = 6, aoShown = attnOverflow.slice(0, AOC), aoExtra = attnOverflow.slice(AOC);
@@ -951,7 +965,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState 
       : s.status === "merge" ? "View" : (s.status === "run" || s.status === "loop") ? "Open" : s.status === "unset" ? "Define done" : "Continue";
     const primary = `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} ${verb}</button>`;
     let secondary = "";
-    if (s.status === "sign" && !navOnly) secondary = `<button class="btn sign sm" data-signoff="${s.id}">✓ Sign off</button>`;
+    if (s.status === "sign" && !navOnly) secondary = `<button class="btn sign sm" data-signoff="${s.id}"${deferTip("Sign-off")}>✓ Sign off</button>`;
     else if (s.status === "fail") secondary = `<button class="btn ghost sm" data-open="${s.id}">${esc(s.failAction || "Re-run")}</button>`;
 
     const dodTxt = s.status === "unset" ? `<span style="color:var(--st-sign)">no criterion set — define what done means</span> ${srcTag(s.dodSrc)}`

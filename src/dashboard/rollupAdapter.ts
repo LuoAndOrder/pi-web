@@ -36,6 +36,7 @@ import type {
   VSession,
   VWorkstream,
 } from "./render.js";
+import { statusRank } from "./render.js";
 
 export interface ViewModel {
   data: VProject[];
@@ -119,21 +120,15 @@ function sessionStatus(sr: SessionRollup): string {
   return (sr.uiStatus as UiStatus) ?? "unset";
 }
 
-const STATUS_RANK: Record<string, number> = { block: 0, fail: 0, unset: 1, run: 2, loop: 2, sign: 3, queued: 4, planned: 4, merge: 5 };
-
 /** Derive the workstream's render-status (the mockup's hand-set `ws.status`) from its
  *  sessions: an autonomous loop renders ∞; otherwise the highest-attention session's
  *  render status (so a blocked session surfaces the workstream as blocked, a sign as
- *  awaiting-sign-off, etc.). An empty workstream falls back to its WorkItemStatus. */
+ *  awaiting-sign-off, etc.). An empty workstream falls back to its WorkItemStatus.
+ *  Reuses render.ts's shared `statusRank` — no second ordering copy to drift. */
 function workstreamStatus(wr: WorkstreamRollup, sessions: VSession[]): string {
   if (wr.workstream.isLoop) return "loop";
   if (sessions.length) {
-    let best = sessions[0].status, rank = STATUS_RANK[best] ?? 9;
-    for (const s of sessions) {
-      const r = STATUS_RANK[s.status] ?? 9;
-      if (r < rank) { rank = r; best = s.status; }
-    }
-    return best;
+    return sessions.reduce((best, s) => (statusRank(s.status) < statusRank(best.status) ? s : best)).status;
   }
   switch (wr.workstream.status) {
     case "in_progress": return "run";

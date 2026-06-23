@@ -228,6 +228,14 @@
 #dashboardView .btn.sm { height: 29px; padding: 0 10px; font-size: 12px; }
 #dashboardView .btn:disabled { opacity: .55; cursor: default; }
 #dashboardView .btn:disabled:hover { border-color: var(--border); }
+/* S7-deferred controls render disabled this slice — neutralize the hover affordance on the
+   styled variants + the non-.btn controls (.hbtn, quick-reply chips) so none read as live. */
+#dashboardView .btn.sign:disabled:hover { background: color-mix(in srgb, var(--st-sign) 18%, transparent); border-color: color-mix(in srgb, var(--st-sign) 45%, var(--border)); }
+#dashboardView .btn.remedy:disabled:hover { border-color: color-mix(in srgb, var(--border) 96%, var(--text)); color: var(--text); }
+#dashboardView .shead .hbtn:disabled, #dashboardView .qreply button:disabled { opacity: .5; cursor: default; }
+#dashboardView .shead .hbtn:disabled:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+#dashboardView .shead .hbtn.sgn:disabled:hover { background: color-mix(in srgb, var(--st-sign) 10%, transparent); border-color: color-mix(in srgb, var(--st-sign) 42%, var(--border)); }
+#dashboardView .qreply button:disabled:hover { border-color: var(--border); color: var(--text); }
 
 /* dot-strip (colourblind-safe via SHAPE channel) */
 #dashboardView .dotstrip { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; }
