@@ -471,11 +471,24 @@ function aggregateSessionCriteria(sessions: SessionRollup[]): CriterionEval[] {
   return sessions.flatMap((s) => s.progress?.criteria ?? s.dod?.criteria ?? []);
 }
 
+/** Archived OR abandoned: excluded from the active gauge/counts/long-pole and
+ *  surfaced in a separate collapsed bucket (M1). A "done" status is NOT inactive —
+ *  it counts as a completed workstream toward the project ring. */
+export function workstreamInactive(workstream: Workstream): boolean {
+  return Boolean(workstream.archived) || workstream.status === "abandoned";
+}
+
 export function buildWorkstreamRollup(
   workstream: Workstream,
   sessions: SessionRollup[],
 ): WorkstreamRollup {
-  const counts = countStatuses(sessions);
+  const inactive = workstreamInactive(workstream);
+  // An inactive (archived / abandoned) workstream's sessions are tallied as
+  // `abandoned` so they NEVER inflate the active in_progress/blocked/done counts —
+  // the per-session derived status is irrelevant once the human shelved the work.
+  const counts = inactive
+    ? { ...zeroCounts(), abandoned: sessions.length }
+    : countStatuses(sessions);
   const aggregate = aggregateSessionCriteria(sessions);
   // Mixed-source = the workstream's SESSIONS span >1 evaluator family
   // (types.ts:221 / DATA-MODEL §5.5). Each session collapses to ONE family via
@@ -500,6 +513,7 @@ export function buildWorkstreamRollup(
   }
 
   const out: WorkstreamRollup = { workstream, sessions, progress, counts };
+  if (inactive) out.inactive = true;
   if (mixed) {
     out.mixed = true;
     out.sessionGauge = sessionGauge;
@@ -557,6 +571,9 @@ function workstreamDone(w: WorkstreamRollup): boolean {
  *  loop nor an empty-DoD/zero-session workstream poisons "X of N met DoD"
  *  (mockup wsUnscorable / wsEmptyDod L1735-1742). */
 function wsUnscorable(w: WorkstreamRollup): boolean {
+  // Archived / abandoned: shelved by the human, never "k of n" against the active
+  // project ring — excluded from BOTH the gauge numerator and denominator (M1).
+  if (w.inactive) return true;
   if (wsOpenEnded(w)) return true;
   if (w.workstream.status === "done") return false; // terminal status is its own "done"
   if (w.mixed) return false; // mixed ws use the session-gauge, not crit %
@@ -778,14 +795,26 @@ export async function assembleRollups(
       workstreamRollups.push(buildWorkstreamRollup(ws, sessionRollups));
     }
 
-    const allSessions = workstreamRollups.flatMap((w) => w.sessions);
+    // Archived / abandoned workstreams are surfaced in a separate collapsed surface
+    // and excluded from the active gauge/counts/long-pole. The project ring already
+    // skips them (wsUnscorable); here we keep the active vs. inactive split so the
+    // active-session tally and the project counts never include shelved work.
+    const activeWorkstreams = workstreamRollups.filter((w) => !w.inactive);
+    const activeSessions = activeWorkstreams.flatMap((w) => w.sessions);
 
     // Project ring = k-of-n scorable WORKSTREAMS done (projGauge), not a blend of
     // every workstream's root-evaluated criteria.
     const progress = projectProgress(workstreamRollups);
 
-    const counts = sumCounts(workstreamRollups.map((w) => w.counts));
-    const activeSessionCount = allSessions.filter((s) => s.runtime.isRunning).length;
+    // Active counts exclude inactive workstreams; the abandoned tally surfaces the
+    // shelved sessions separately so the UI can show "+N abandoned" without inflating
+    // the in_progress/blocked/done counts the gauge and hero read from.
+    const counts = sumCounts(activeWorkstreams.map((w) => w.counts));
+    counts.abandoned = sumCounts(workstreamRollups.map((w) => w.counts)).abandoned;
+    const activeSessionCount = activeSessions.filter((s) => s.runtime.isRunning).length;
+    const archivedSessionCount = workstreamRollups
+      .filter((w) => w.inactive)
+      .reduce((sum, w) => sum + w.sessions.length, 0);
     const lineage = computeLineage(project, registry.projects);
 
     const rollup: ProjectRollup = {
@@ -795,6 +824,7 @@ export async function assembleRollups(
       counts,
       activeSessionCount,
     };
+    if (archivedSessionCount > 0) rollup.archivedSessionCount = archivedSessionCount;
     if (lineage) rollup.lineage = lineage;
     rollups.push(rollup);
   }

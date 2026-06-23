@@ -72,6 +72,10 @@ export interface Workstream {
   order: number;
   createdAt: string;
   updatedAt: string;
+  // Archived OR status==="abandoned" workstreams are excluded from active
+  // counts/gauge/long-pole and surfaced in a separate collapsed bucket; the
+  // workstream stays in the registry (retrievable) — normalized like project.archived.
+  archived?: boolean;
 
   // ---- loop telemetry: net-new, STORED, never inferred ----
   isLoop?: boolean;
@@ -225,6 +229,11 @@ export interface WorkstreamRollup {
   sessionGauge?: { done: number; total: number; percent: number }; // used when mixed
   counts: StatusCounts;
   loop?: SessionRollup["loop"];
+  // True when the workstream is archived OR its status is "abandoned": the UI groups
+  // these into a separate collapsed surface and the project ring/gauge/long-pole and
+  // active counts EXCLUDE them. Its sessions count toward `counts.abandoned` only, so
+  // an abandoned workstream never inflates the active in_progress/blocked tallies.
+  inactive?: boolean;
 }
 
 export interface ProjectRollup {
@@ -232,6 +241,9 @@ export interface ProjectRollup {
   workstreams: WorkstreamRollup[];
   progress: ProgressSnapshot;
   counts: StatusCounts;
-  activeSessionCount: number; // runtime.isRunning across the project
+  activeSessionCount: number; // runtime.isRunning across ACTIVE workstreams
+  // Sessions in archived/abandoned workstreams (the separate collapsed surface).
+  // Absent when zero — excluded from activeSessionCount and the gauge.
+  archivedSessionCount?: number;
   lineage?: { parentProjectName: string; fullPath: string }; // nested-root badge
 }

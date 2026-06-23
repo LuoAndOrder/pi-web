@@ -158,6 +158,53 @@ describe("rollups registry CRUD routes", () => {
     expect(finalState.body.registry.workstreams).toHaveLength(0);
   }, 20_000);
 
+  it("M1: DELETE a workstream removes it + dereferences its id; PATCH round-trips status/archived", async () => {
+    realtime.clear();
+    const created = await server.api("POST", "/api/projects", { name: "M1", roots: [process.cwd()] });
+    const projectId: string = created.body.project.id;
+
+    const a = await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "keep" });
+    const b = await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "drop" });
+    const keepId: string = a.body.workstream.id;
+    const dropId: string = b.body.workstream.id;
+
+    // PATCH status -> done, then abandoned; PATCH archived -> true round-trips.
+    const done = await server.api("PATCH", `/api/workstreams/${keepId}`, { status: "done" });
+    expect(done.status).toBe(200);
+    expect(done.body.workstream.status).toBe("done");
+    const abandoned = await server.api("PATCH", `/api/workstreams/${keepId}`, { status: "abandoned" });
+    expect(abandoned.body.workstream.status).toBe("abandoned");
+    const archived = await server.api("PATCH", `/api/workstreams/${keepId}`, { archived: true });
+    expect(archived.body.workstream.archived).toBe(true);
+
+    // DELETE the other workstream -> gone + dereferenced from the project.
+    const del = await server.api("DELETE", `/api/workstreams/${dropId}`);
+    expect(del.status).toBe(200);
+    // A repeat DELETE is now 404.
+    expect((await server.api("DELETE", `/api/workstreams/${dropId}`)).status).toBe(404);
+
+    const state = await server.api("GET", "/api/projects");
+    const proj = state.body.registry.projects.find((p: any) => p.id === projectId);
+    expect(proj.workstreamIds).toEqual([keepId]); // dropId dereferenced
+    expect(state.body.registry.workstreams.map((w: any) => w.id)).toEqual([keepId]);
+    // The archived workstream is still retrievable.
+    expect(state.body.registry.workstreams[0].archived).toBe(true);
+
+    // Each mutation emitted exactly one project_registry_changed: POST project,
+    // POST keep, POST drop, PATCH done, PATCH abandoned, PATCH archived, DELETE drop
+    // = 7 (the repeated 404 DELETE broadcasts nothing).
+    await realtime.waitForType("project_registry_changed", 7);
+    expect(realtime.typeCount("project_registry_changed")).toBe(7);
+
+    // The archived workstream is excluded from the active gauge but kept retrievable.
+    const rollupRes = await server.api("GET", `/api/rollups/${projectId}`);
+    expect(rollupRes.status).toBe(200);
+    const rolledWs = rollupRes.body.rollup.workstreams.find((w: any) => w.workstream.id === keepId);
+    expect(rolledWs.inactive).toBe(true);
+
+    await server.api("DELETE", `/api/projects/${projectId}`);
+  }, 20_000);
+
   it("returns 404 for unknown project PATCH/DELETE and unknown workstream PATCH", async () => {
     const patch = await server.api("PATCH", "/api/projects/missing", { name: "x" });
     expect(patch.status).toBe(404);
@@ -167,6 +214,9 @@ describe("rollups registry CRUD routes", () => {
 
     const ws = await server.api("PATCH", "/api/workstreams/missing", { name: "x" });
     expect(ws.status).toBe(404);
+
+    const wsDelete = await server.api("DELETE", "/api/workstreams/missing");
+    expect(wsDelete.status).toBe(404);
 
     const wsSessions = await server.api("PUT", "/api/workstreams/missing/sessions", { sessionIds: [] });
     expect(wsSessions.status).toBe(404);

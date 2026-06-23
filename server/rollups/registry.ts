@@ -254,6 +254,11 @@ export function normalizeWorkstream(value: unknown): Workstream | undefined {
   const budget = normalizeBudget(value.budget);
   if (budget) workstream.budget = budget;
   if (value.paused === true) workstream.paused = true;
+  // Normalize `archived` exactly like project.archived: keep it ONLY when true so a
+  // cleared flag is dropped rather than persisted as `archived:false`. An archived
+  // workstream stays in the registry (retrievable) but is excluded from active
+  // counts / the gauge / the long-pole and surfaced in a separate collapsed bucket.
+  if (value.archived === true) workstream.archived = true;
   return workstream;
 }
 
@@ -543,6 +548,10 @@ export function createProjectRegistryStore(file: string) {
         if (source.paused === true) updated.paused = true;
         else delete updated.paused;
       }
+      if ("archived" in source) {
+        if (source.archived === true) updated.archived = true;
+        else delete updated.archived;
+      }
       updated.updatedAt = new Date().toISOString();
       // Default `loopStartedAt` to now() whenever the workstream is (now) a loop but has
       // no start stamp — covers both `isLoop` flipping true on this patch and a loop that
@@ -576,6 +585,35 @@ export function createProjectRegistryStore(file: string) {
       workstreams[index] = updated;
       const registry = await writeState({ ...current, workstreams });
       return { registry, workstream: registry.workstreams.find((item) => item.id === id)! };
+    });
+  }
+
+  // Remove a workstream entirely: drop it from the workstreams list AND dereference
+  // its id from the owning project's `workstreamIds` (writeState re-derives the list,
+  // but we stamp the owner's updatedAt so the change is observable). Returns undefined
+  // for an unknown id (the route maps that to 404) so the registry is left untouched.
+  async function deleteWorkstream(
+    id: string,
+  ): Promise<{ registry: ProjectRegistry; projectId: string } | undefined> {
+    return serializeWrite(async () => {
+      const current = await read();
+      const target = current.workstreams.find((item) => item.id === id);
+      if (!target) return undefined;
+      const projects = current.projects.map((project) =>
+        project.workstreamIds.includes(id)
+          ? {
+              ...project,
+              workstreamIds: project.workstreamIds.filter((wsId) => wsId !== id),
+              updatedAt: new Date().toISOString(),
+            }
+          : project,
+      );
+      const registry = await writeState({
+        ...current,
+        projects,
+        workstreams: current.workstreams.filter((item) => item.id !== id),
+      });
+      return { registry, projectId: target.projectId };
     });
   }
 
@@ -635,6 +673,7 @@ export function createProjectRegistryStore(file: string) {
     updateWorkstream,
     setWorkstreamSessions,
     setWorkstreamDoD,
+    deleteWorkstream,
     toggleManualCriterion,
   };
 }

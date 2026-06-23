@@ -236,6 +236,61 @@ describe("domain mutators", () => {
     expect(await store.deleteProject("ghost")).toBeUndefined();
   });
 
+  it("deletes a workstream, dereferences its id from the project, and 404s an unknown id", async () => {
+    const store = createProjectRegistryStore(file);
+    const { project } = await store.createProject({ name: "Alpha", roots: [dir] });
+    const a = (await store.createWorkstream(project.id, { name: "auth" }))!.workstream;
+    const b = (await store.createWorkstream(project.id, { name: "billing" }))!.workstream;
+
+    let registry = await store.read();
+    expect(registry.projects[0].workstreamIds).toEqual([a.id, b.id]);
+
+    const result = await store.deleteWorkstream(a.id);
+    expect(result).toBeDefined();
+    expect(result!.projectId).toBe(project.id);
+    registry = result!.registry;
+    // The workstream is gone AND its id is dereferenced from the project.
+    expect(registry.workstreams.map((w) => w.id)).toEqual([b.id]);
+    expect(registry.projects[0].workstreamIds).toEqual([b.id]);
+
+    // Unknown id → undefined (route maps to 404), registry untouched.
+    const before = await store.read();
+    expect(await store.deleteWorkstream("ghost")).toBeUndefined();
+    expect(await store.read()).toEqual(before);
+  });
+
+  it("archives a workstream via update, keeps it retrievable, and clears the flag", async () => {
+    const store = createProjectRegistryStore(file);
+    const { project } = await store.createProject({ name: "Alpha", roots: [dir] });
+    const ws = (await store.createWorkstream(project.id, { name: "auth" }))!.workstream;
+    expect(ws.archived).toBeUndefined();
+
+    const archived = (await store.updateWorkstream(ws.id, { archived: true }))!.workstream;
+    expect(archived.archived).toBe(true);
+
+    // Still in the registry (retrievable) after a fresh open from disk.
+    const reopened = createProjectRegistryStore(file);
+    const persisted = (await reopened.read()).workstreams.find((w) => w.id === ws.id);
+    expect(persisted?.archived).toBe(true);
+
+    // Clearing the flag drops it (never persisted as archived:false).
+    const cleared = (await store.updateWorkstream(ws.id, { archived: false }))!.workstream;
+    expect(cleared.archived).toBeUndefined();
+  });
+
+  it("round-trips a status transition to done / abandoned via update", async () => {
+    const store = createProjectRegistryStore(file);
+    const { project } = await store.createProject({ name: "Alpha", roots: [dir] });
+    const ws = (await store.createWorkstream(project.id, { name: "auth" }))!.workstream;
+    expect(ws.status).toBe("planned");
+
+    expect((await store.updateWorkstream(ws.id, { status: "done" }))!.workstream.status).toBe("done");
+    expect((await store.updateWorkstream(ws.id, { status: "abandoned" }))!.workstream.status).toBe("abandoned");
+
+    const persisted = (await createProjectRegistryStore(file).read()).workstreams[0];
+    expect(persisted.status).toBe("abandoned");
+  });
+
   it("creates workstreams, links them to the project, and assigns sequential order", async () => {
     const store = createProjectRegistryStore(file);
     const { project } = await store.createProject({ name: "Alpha", roots: [dir] });

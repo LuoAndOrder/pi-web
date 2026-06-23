@@ -496,6 +496,91 @@ describe("assembleRollups", () => {
     const s = rollups[0].workstreams.flatMap((w) => w.sessions).find((x) => x.id === "s1")!;
     expect(s.artifact).toBeUndefined();
   });
+
+  // ---- M1: archived / abandoned workstreams excluded from active surfaces -----
+
+  it("an ARCHIVED workstream is excluded from active counts, the gauge, and activeSessionCount", async () => {
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["live", "shelf"] })],
+      workstreams: [
+        // An active workstream with a running session.
+        workstream({ id: "live", projectId: "A", sessionIds: ["s-live"] }),
+        // An archived workstream with a running session — must NOT inflate active.
+        workstream({ id: "shelf", projectId: "A", sessionIds: ["s-old"], archived: true }),
+      ],
+    };
+    const running = { isRunning: true };
+    const rollups = await assembleRollups(
+      registry,
+      [
+        session({ id: "s-live", cwd: "/a", runtime: running }),
+        session({ id: "s-old", cwd: "/a", runtime: running }),
+      ],
+      cleanStub,
+    );
+    const p = rollups[0];
+    // Only the active workstream's running session is counted.
+    expect(p.activeSessionCount).toBe(1);
+    // The archived session is tallied as abandoned, NOT in_progress.
+    expect(p.counts.in_progress).toBe(1);
+    expect(p.counts.abandoned).toBe(1);
+    // It is surfaced in the separate collapsed bucket.
+    expect(p.archivedSessionCount).toBe(1);
+    // The archived workstream is flagged inactive for the UI to group on.
+    expect(p.workstreams.find((w) => w.workstream.id === "shelf")!.inactive).toBe(true);
+    expect(p.workstreams.find((w) => w.workstream.id === "live")!.inactive).toBeUndefined();
+  });
+
+  it("an ABANDONED-status workstream is excluded from the project gauge denominator", async () => {
+    // One active workstream whose DoD is met (so it is done) + one abandoned workstream
+    // whose DoD is NOT met. The gauge must read 100% (1 of 1 scorable), not 50%.
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["done", "dead"] })],
+      workstreams: [
+        workstream({
+          id: "done",
+          projectId: "A",
+          sessionIds: ["s1"],
+          dod: { criteria: [{ id: "m1", text: "ok", source: { kind: "manual" }, met: true }] },
+        }),
+        workstream({
+          id: "dead",
+          projectId: "A",
+          status: "abandoned",
+          sessionIds: ["s2"],
+          dod: { criteria: [{ id: "m2", text: "never", source: { kind: "manual" }, met: false }] },
+        }),
+      ],
+    };
+    const rollups = await assembleRollups(
+      registry,
+      [session({ id: "s1", cwd: "/a" }), session({ id: "s2", cwd: "/a" })],
+      cleanStub,
+    );
+    const p = rollups[0];
+    // 1 of 1 SCORABLE workstreams done → 100% (the abandoned ws is out of the gauge).
+    expect(p.progress.percent).toBe(100);
+    expect(p.progress.total).toBe(1);
+    expect(p.progress.allMet).toBe(true);
+    expect(p.workstreams.find((w) => w.workstream.id === "dead")!.inactive).toBe(true);
+  });
+
+  it("a DONE-status workstream still counts toward the gauge as done (not inactive)", async () => {
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["w1"] })],
+      workstreams: [
+        workstream({ id: "w1", projectId: "A", status: "done", sessionIds: ["s1"] }),
+      ],
+    };
+    const rollups = await assembleRollups(registry, [session({ id: "s1", cwd: "/a" })], cleanStub);
+    const p = rollups[0];
+    expect(p.workstreams[0].inactive).toBeUndefined();
+    expect(p.progress.percent).toBe(100); // a "done" ws is its own done
+    expect(p.archivedSessionCount).toBeUndefined();
+  });
 });
 
 describe("isMixed", () => {

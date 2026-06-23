@@ -3051,7 +3051,28 @@ const server = createServer(async (req, res) => {
         const result = await projectRegistryStore.updateWorkstream(workstreamId, parsed.body);
         if (!result) return sendJson(res, 404, { ok: false, error: "Workstream not found" });
         broadcast({ type: "project_registry_changed" });
+        // A status/archived transition changes what the gauge & active counts read, so
+        // mark the owning project dirty for one debounced rollup_changed (M1).
+        enqueueDirtyProject(result.workstream.projectId);
         return sendJson(res, 200, { ok: true, workstream: result.workstream });
+      }
+
+      // /api/workstreams/:id  (DELETE — remove the workstream + dereference its id)
+      if (
+        method === "DELETE"
+        && seg[0] === "api"
+        && seg[1] === "workstreams"
+        && seg.length === 3
+      ) {
+        const workstreamId = safeDecode(seg[2]);
+        const result = await projectRegistryStore.deleteWorkstream(workstreamId);
+        if (!result) return sendJson(res, 404, { ok: false, error: "Workstream not found" });
+        // Deleting a workstream drops its criteria — evict any cached command evals for
+        // criteria that just disappeared so they can't surface a stale exit code.
+        pruneCommandEvalCache(await projectRegistryStore.read());
+        broadcast({ type: "project_registry_changed" });
+        enqueueDirtyProject(result.projectId);
+        return sendJson(res, 200, { ok: true });
       }
 
       // /api/workstreams/:id/sessions  (PUT replace membership)
