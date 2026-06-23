@@ -301,6 +301,7 @@ button{font:inherit;cursor:pointer;color:inherit;}
 /* ───────────── project grid ───────────── */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px;align-items:start;}
 .grid.single{grid-template-columns:minmax(360px,560px);justify-content:center;}
+.grid.single:has(.pcard.open){grid-template-columns:1fr;justify-content:stretch;} /* (#vis-fix VIS-3) an auto-expanded lone project goes full-bleed to match the sections above, not a centered 560px inset */
 .pcard{
   border:1px solid var(--border);border-radius:16px;background:var(--panel);
   overflow:hidden;transition:border-color .15s ease;
@@ -1568,6 +1569,16 @@ function waitLabel(s){ if(!s.meta) return ""; const m=agoToMin(s.meta); return (
 function sessionDone(s){ return s.status==="merge" || s.status==="sign" || !!(s._prog && s._prog.allMet); }
 /* evaluator family of a SESSION's DoD source label (for the mixed-source check) */
 function sessFamily(s){
+  // (#adv-fix C1) key the evaluator family off the STRUCTURED criterion src kind (what production reads from
+  // DoDSource.kind), not a free-text label regex — a real non-keyword label must never silently collapse
+  // git+command into one family and re-blend the ring. Fall back to the label only if a session carries no
+  // structured criteria.
+  const kinds=[...new Set((s.crit||[]).map(c=>c.src).filter(Boolean))];
+  if(kinds.length){
+    const fam=k=>k.indexOf("git")===0?"git":k==="command"?"cmd":(k==="manual"||k==="user"||k==="sign"||k==="session_idle")?"user":k;
+    const fams=new Set(kinds.map(fam));
+    return fams.size===1?[...fams][0]:"mixed";
+  }
   const sl=(s.dodSrc||"").toLowerCase();
   if(sl.includes("merge")||sl.includes("branch")||sl.includes("clean")||sl.includes("ahead")) return "git";
   if(sl.includes("rule")||sl.includes("command")||sl.includes("test")||sl.includes("exit")) return "cmd";
