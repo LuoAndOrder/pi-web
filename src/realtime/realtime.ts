@@ -10,6 +10,7 @@ import type { SettingsController } from "../settings/settings.js";
 import type { StatusBar } from "../status/statusBar.js";
 import type { ToolCards } from "../tools/toolCards.js";
 import type { ConversationTreeController } from "../tree/conversationTree.js";
+import type { DashboardController } from "../dashboard/dashboard.js";
 import { renderWebFooters } from "../extensions/webFooter.js";
 
 export type RealtimeController = {
@@ -29,13 +30,14 @@ export function createRealtime(options: {
   status: StatusBar;
   tools: ToolCards;
   conversationTree?: ConversationTreeController;
+  dashboard?: DashboardController;
   updateMeta: (data: any) => void;
   updateSessionStats: (stats: any) => void;
   refreshMessages: () => Promise<void>;
   refreshState: () => Promise<void>;
   addMessage: (role: "system", text: string, extraClass?: string) => HTMLDivElement;
 }): RealtimeController {
-  const { state, elements, api, composer, messages, models, sessions, settings, status, tools, conversationTree, updateMeta, updateSessionStats, refreshMessages, refreshState, addMessage } = options;
+  const { state, elements, api, composer, messages, models, sessions, settings, status, tools, conversationTree, dashboard, updateMeta, updateSessionStats, refreshMessages, refreshState, addMessage } = options;
   let compactionMessage: HTMLDivElement | null = null;
   let sessionRefreshTimer: number | undefined;
   let sessionRefreshInFlight = false;
@@ -394,6 +396,20 @@ export function createRealtime(options: {
       }
       if (data.type === "extension_ui_request") {
         handleExtensionUiRequest(data);
+        return;
+      }
+      // Project Rollups realtime (S8). The server coalesces a chatty session's
+      // interim pi_events into at most one debounced, project-scoped rollup_changed
+      // per terminal event; the client just forwards it to the dashboard, which
+      // self-debounces and refetches /api/rollups ONLY when open. A registry edit
+      // arrives immediately as project_registry_changed (no debounce server-side).
+      // The dashboard never consumes message_update/tool_execution_update.
+      if (data.type === "rollup_changed") {
+        dashboard?.applyRollupChange(typeof data.projectId === "string" ? data.projectId : undefined);
+        return;
+      }
+      if (data.type === "project_registry_changed") {
+        dashboard?.applyRollupChange();
         return;
       }
       if (data.type === "web_footer_changed") {

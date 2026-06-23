@@ -26,7 +26,7 @@ import { createSessionUiStateStore, defaultSessionUiState } from "./server/sessi
 import { createSettingsStore } from "./server/settings.js";
 import { createRepoStatusCache, gitIsAncestor as gitIsAncestorImpl } from "./server/rollups/gitDod.js";
 import { createProjectRegistryStore, RegistryError } from "./server/rollups/registry.js";
-import { assembleRollups } from "./server/rollups/rollup.js";
+import { assembleRollups, mapSessionsToProjects } from "./server/rollups/rollup.js";
 import type { RollupSessionInput } from "./server/rollups/rollup.js";
 import type { PiWebFooter, PiWebHeaderAction, PiWebUi } from "./src/extensions.js";
 import type { PiWebSession } from "./server/types.js";
@@ -1390,6 +1390,101 @@ function broadcast(value: unknown) {
     if (client.readyState === client.OPEN) client.send(data);
   }
   queueUnreadStateFromBroadcast(value);
+  noteRollupDirtyFromBroadcast(value);
+}
+
+// ── Debounced, dirty-project-scoped rollup_changed realtime (S8) ──────────────
+// A streaming session fires dozens of interim pi_event envelopes; recomputing the
+// dashboard on every one would repaint the grid continuously. Instead we mark the
+// session's project(s) dirty only on TERMINAL events, coalesce them in a single
+// debounce window, then emit at most one id-only `rollup_changed{projectId}` per
+// dirty project. The client refetches /api/rollups (idempotent, replay-safe).
+//
+// HARD RULES honored here:
+//   - Marked ONLY on durable/terminal events (agent_start/end, compaction_end,
+//     tool_execution_end, message_end) — NEVER message_update/tool_execution_update.
+//   - Mapping is dirty-PROJECT-scoped (mapSessionsToProjects against the cached
+//     registry); a session matched to no project marks nothing.
+//   - Marking also invalidates the repo-status TTL cache for that session's root so
+//     the next /api/rollups re-evaluates git after the working tree may have moved.
+const ROLLUP_TERMINAL_EVENTS = new Set([
+  "agent_start",
+  "agent_end",
+  "compaction_end",
+  "tool_execution_end",
+  "message_end",
+]);
+// Pending sessions accumulated since the last flush, keyed by sessionId so repeated
+// terminal events for one session collapse to a single resolve. We resolve them to
+// project ids at FLUSH time (one cached registry read) rather than per-event.
+const pendingDirtySessions = new Map<string, { id: string; cwd: string }>();
+let rollupFlushTimer: ReturnType<typeof setTimeout> | undefined;
+
+function rollupDebounceMs(): number {
+  const raw = Number(process.env.PI_WEB_ROLLUP_DEBOUNCE_MS || 500);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 500;
+}
+
+// Best-effort cwd for an event's session: a live session's working dir, else the
+// matching mock session, else the process cwd. mapSessionsToProjects matches by
+// explicit sessionIds first (cwd-independent), so a stale cwd never mis-assigns an
+// explicitly-attached session.
+function rollupCwdForEvent(sessionFile: string, sessionId: string): string {
+  const live = sessionFile ? liveSessions.get(sessionFile)?.session : undefined;
+  if (live) return sessionCwd(live);
+  if (mockMode) {
+    const info = mockSessions.find((s) => s.id === sessionId || s.path === sessionFile);
+    if (info?.cwd) return info.cwd;
+  }
+  return piCwd;
+}
+
+function enqueueDirty(id: string, cwd: string) {
+  // The working tree may have changed; drop the cached git status for this repo so
+  // the post-debounce refetch re-evaluates git-derived DoD.
+  if (cwd) repoStatusCache.invalidate(knownRepoRoot(cwd));
+  pendingDirtySessions.set(id || cwd, { id, cwd });
+  if (rollupFlushTimer !== undefined) return;
+  rollupFlushTimer = setTimeout(flushRollupDirty, rollupDebounceMs());
+  rollupFlushTimer.unref?.();
+}
+
+function markRollupDirty(sessionFile: string, sessionId: string) {
+  const id = typeof sessionId === "string" ? sessionId : "";
+  enqueueDirty(id, rollupCwdForEvent(sessionFile, id));
+}
+
+// Mark whatever project owns a bare cwd dirty (no session id) — used by /api/git/sync
+// where the trigger is a working-tree change, not a session lifecycle event.
+function markRollupDirtyForCwd(cwd: string) {
+  enqueueDirty("", typeof cwd === "string" && cwd.trim() ? cwd : piCwd);
+}
+
+async function flushRollupDirty() {
+  rollupFlushTimer = undefined;
+  if (pendingDirtySessions.size === 0) return;
+  const sessions = [...pendingDirtySessions.values()];
+  pendingDirtySessions.clear();
+  try {
+    const registry = await projectRegistryStore.read();
+    const { assignments } = mapSessionsToProjects(registry, sessions);
+    const dirtyProjectIds = new Set<string>();
+    for (const assignment of assignments.values()) dirtyProjectIds.add(assignment.projectId);
+    for (const projectId of dirtyProjectIds) broadcast({ type: "rollup_changed", projectId });
+  } catch (error) {
+    console.warn("Could not flush rollup dirty set:", error);
+  }
+}
+
+// Mark a session's project(s) dirty from any pi_event broadcast (mock OR real —
+// both funnel through broadcast()), gated to terminal events only. Marking from a
+// non-pi_event (e.g. project_registry_changed itself) is a no-op.
+function noteRollupDirtyFromBroadcast(value: unknown) {
+  if (!value || typeof value !== "object") return;
+  const data = value as Record<string, any>;
+  if (data.type !== "pi_event") return;
+  if (!ROLLUP_TERMINAL_EVENTS.has(data.event?.type)) return;
+  markRollupDirty(String(data.sessionFile || ""), String(data.sessionId || ""));
 }
 
 function checkRealtimeHeartbeats() {
@@ -2380,6 +2475,9 @@ const server = createServer(async (req, res) => {
           const fetchResult = await git(["fetch", "--prune", "origin"], 60_000, cwd);
           const pullResult = await git(["pull", "--rebase", "--autostash", "origin", branch], 120_000, cwd);
           repoStatusCache.invalidate(knownRepoRoot(cwd));
+          // The working tree just moved; nudge any open dashboard to re-evaluate the
+          // git-derived DoD for whatever project owns this cwd.
+          markRollupDirtyForCwd(cwd);
           return sendJson(res, 200, { ok: true, output: `${fetchResult.stdout}${fetchResult.stderr}${pullResult.stdout}${pullResult.stderr}`, status: await gitStatus(cwd) });
         } catch (error) {
           return sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });
@@ -2842,6 +2940,10 @@ const server = createServer(async (req, res) => {
               sessionFile: targetSession.sessionFile,
               runtime: runtimeForPath(targetSession.sessionFile),
             });
+            // The agent finished; the terminal pi_event normally marks the project
+            // dirty, but this finally is a safety net for a missed/late agent_end so
+            // an open dashboard still refetches. Coalesced with any terminal-event mark.
+            markRollupDirty(targetSession.sessionFile, targetSession.sessionId);
             releaseWorkLease();
           });
 

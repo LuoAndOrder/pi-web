@@ -228,6 +228,7 @@ const realtime = createRealtime({
   tools,
   settings,
   conversationTree,
+  dashboard,
   updateMeta,
   updateSessionStats,
   refreshMessages,
