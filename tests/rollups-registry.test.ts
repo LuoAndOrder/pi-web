@@ -248,6 +248,47 @@ describe("domain mutators", () => {
     expect(await store.createWorkstream("ghost", { name: "x" })).toBeUndefined();
   });
 
+  it("stamps loopStartedAt when a workstream is created as a loop (so S11 elapsed has its field)", async () => {
+    const store = createProjectRegistryStore(file);
+    const { project } = await store.createProject({ name: "Alpha", roots: [dir] });
+
+    // A loop created with no explicit start → loopStartedAt defaulted to now().
+    const loop = (await store.createWorkstream(project.id, { name: "nightly", isLoop: true }))!.workstream;
+    expect(loop.isLoop).toBe(true);
+    expect(typeof loop.loopStartedAt).toBe("string");
+    expect(Number.isNaN(Date.parse(loop.loopStartedAt!))).toBe(false);
+
+    // A non-loop workstream gets no stamp.
+    const plain = (await store.createWorkstream(project.id, { name: "auth" }))!.workstream;
+    expect(plain.loopStartedAt).toBeUndefined();
+
+    // An explicit loopStartedAt is honored, not overwritten.
+    const explicit = (await store.createWorkstream(project.id, { name: "explicit", isLoop: true, loopStartedAt: "2020-01-01T00:00:00.000Z" }))!.workstream;
+    expect(explicit.loopStartedAt).toBe("2020-01-01T00:00:00.000Z");
+  });
+
+  it("stamps loopStartedAt when isLoop flips true via update, and drops it when isLoop is cleared", async () => {
+    const store = createProjectRegistryStore(file);
+    const { project } = await store.createProject({ name: "Alpha", roots: [dir] });
+    const ws = (await store.createWorkstream(project.id, { name: "auth" }))!.workstream;
+    expect(ws.loopStartedAt).toBeUndefined();
+
+    // isLoop flips true with no explicit start → stamped now().
+    const looped = (await store.updateWorkstream(ws.id, { isLoop: true }))!.workstream;
+    expect(looped.isLoop).toBe(true);
+    expect(typeof looped.loopStartedAt).toBe("string");
+    expect(Number.isNaN(Date.parse(looped.loopStartedAt!))).toBe(false);
+
+    // An unrelated update keeps the existing stamp (not re-stamped).
+    const renamed = (await store.updateWorkstream(ws.id, { name: "auth2" }))!.workstream;
+    expect(renamed.loopStartedAt).toBe(looped.loopStartedAt);
+
+    // Clearing isLoop drops the stamp.
+    const cleared = (await store.updateWorkstream(ws.id, { isLoop: false }))!.workstream;
+    expect(cleared.isLoop).toBeUndefined();
+    expect(cleared.loopStartedAt).toBeUndefined();
+  });
+
   it("attaches sessions and sets a workstream DoD (stripping non-manual met)", async () => {
     const store = createProjectRegistryStore(file);
     const { project } = await store.createProject({ name: "Alpha", roots: [dir] });

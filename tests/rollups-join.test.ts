@@ -441,6 +441,61 @@ describe("assembleRollups", () => {
     const s = rollups[0].workstreams.flatMap((w) => w.sessions).find((x) => x.id === "chatty")!;
     expect(s.live).toBe("Refactored the auth flow.");
   });
+
+  it("a git-derived artifact carries the real branch (lights up the merge affordance) without fabricating numstat/sha", async () => {
+    // Review finding: SessionRollup.artifact was never populated, so hasGitBranch/
+    // mergeAffordance/Done receipts were latent dead UI. gitArtifact now derives a
+    // minimal receipt from the git facts already on the render path.
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["w1"] })],
+      workstreams: [workstream({ id: "w1", projectId: "A", sessionIds: ["s1"] })],
+    };
+    const rollups = await assembleRollups(registry, [session({ id: "s1", cwd: "/a" })], cleanStub);
+    const s = rollups[0].workstreams.flatMap((w) => w.sessions).find((x) => x.id === "s1")!;
+    expect(s.artifact).toBeDefined();
+    expect(s.artifact!.kind).toBe("diff");
+    expect(s.artifact!.branch).toBe("feat/x"); // the real checked-out branch
+    expect(s.artifact!.merged).toBeUndefined(); // cleanStub.isAncestor → false
+    // numstat + sha intentionally UNSET (gitStatus exposes neither) — no fabricated signal.
+    expect(s.artifact!.add).toBeUndefined();
+    expect(s.artifact!.del).toBeUndefined();
+    expect(s.artifact!.sha).toBeUndefined();
+  });
+
+  it("the artifact's `merged` flag follows a met git_merged criterion", async () => {
+    const mergedStub: AssembleContext = { ...cleanStub, isAncestor: async () => true };
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["w1"] })],
+      workstreams: [
+        workstream({
+          id: "w1",
+          projectId: "A",
+          sessionIds: ["s1"],
+          dod: { criteria: [{ id: "g", text: "merged", source: { kind: "git_merged", into: "main" } }] },
+        }),
+      ],
+    };
+    const rollups = await assembleRollups(registry, [session({ id: "s1", cwd: "/a" })], mergedStub);
+    const s = rollups[0].workstreams.flatMap((w) => w.sessions).find((x) => x.id === "s1")!;
+    expect(s.artifact!.merged).toBe(true);
+  });
+
+  it("no artifact off-repo (a branchless / non-git session)", async () => {
+    const offRepoStub: AssembleContext = {
+      ...cleanStub,
+      gitStatusFor: async () => ({ ok: true, isRepo: false }),
+    };
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["w1"] })],
+      workstreams: [workstream({ id: "w1", projectId: "A", sessionIds: ["s1"] })],
+    };
+    const rollups = await assembleRollups(registry, [session({ id: "s1", cwd: "/a" })], offRepoStub);
+    const s = rollups[0].workstreams.flatMap((w) => w.sessions).find((x) => x.id === "s1")!;
+    expect(s.artifact).toBeUndefined();
+  });
 });
 
 describe("isMixed", () => {

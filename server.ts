@@ -1693,17 +1693,20 @@ function rollupDebounceMs(): number {
 }
 
 // Best-effort cwd for an event's session: a live session's working dir, else the
-// matching mock session, else the process cwd. mapSessionsToProjects matches by
-// explicit sessionIds first (cwd-independent), so a stale cwd never mis-assigns an
-// explicitly-attached session.
-function rollupCwdForEvent(sessionFile: string, sessionId: string): string {
+// matching mock session. Returns `undefined` when the session is neither live nor a
+// known mock (e.g. a real session pi disposed after 60s idle) so the caller defers
+// the cwd resolve to flush time via the session id — NEVER falling back to `piCwd`,
+// which would mis-attribute the dirty mark to piCwd's project for a session that is
+// not explicitly attached (review finding). mapSessionsToProjects matches by explicit
+// sessionIds first (cwd-independent), so an attached session maps regardless.
+function rollupCwdForEvent(sessionFile: string, sessionId: string): string | undefined {
   const live = sessionFile ? liveSessions.get(sessionFile)?.session : undefined;
   if (live) return sessionCwd(live);
   if (mockMode) {
     const info = mockSessions.find((s) => s.id === sessionId || s.path === sessionFile);
     if (info?.cwd) return info.cwd;
   }
-  return piCwd;
+  return undefined;
 }
 
 function scheduleRollupFlush() {
@@ -1712,11 +1715,13 @@ function scheduleRollupFlush() {
   rollupFlushTimer.unref?.();
 }
 
-function enqueueDirty(id: string, cwd: string) {
+function enqueueDirty(id: string, cwd: string | undefined) {
   // The working tree may have changed; drop the cached git status for this repo so
-  // the post-debounce refetch re-evaluates git-derived DoD.
+  // the post-debounce refetch re-evaluates git-derived DoD. When the cwd is unknown
+  // (a disposed real session) we defer both the invalidation and the project resolve
+  // to flush time, where the session id resolves the real cwd.
   if (cwd) repoStatusCache.invalidate(knownRepoRoot(cwd));
-  pendingDirtySessions.set(id || cwd, { id, cwd });
+  pendingDirtySessions.set(id || cwd || "", { id, cwd: cwd ?? "" });
   scheduleRollupFlush();
 }
 
@@ -1731,7 +1736,11 @@ function enqueueDirtyProject(projectId: string, cwd?: string) {
 
 function markRollupDirty(sessionFile: string, sessionId: string) {
   const id = typeof sessionId === "string" ? sessionId : "";
-  enqueueDirty(id, rollupCwdForEvent(sessionFile, id));
+  const cwd = rollupCwdForEvent(sessionFile, id);
+  // No session id AND no resolvable cwd → nothing to attribute; skip rather than enqueue
+  // a junk entry that would later resolve to piCwd's project (review finding).
+  if (!id && !cwd) return;
+  enqueueDirty(id, cwd);
 }
 
 // Mark whatever project owns a bare cwd dirty (no session id) — used by /api/git/sync
@@ -1786,6 +1795,27 @@ async function flushRollupDirty() {
     if (sessions.length || cwdOnly.length) {
       const registry = await projectRegistryStore.read();
       if (sessions.length) {
+        // A disposed real session enqueued an empty cwd (rollupCwdForEvent couldn't
+        // resolve it live). Backfill the real cwd from the session file by id so the
+        // cwd-prefix fallback (mapSessionsToProjects steps 2/3) targets the session's
+        // OWN project instead of the fabricated piCwd default (review finding). Explicit
+        // membership (step 1) is cwd-independent, so attached sessions never need this.
+        await Promise.all(
+          sessions.map(async (entry) => {
+            if (entry.cwd) return;
+            try {
+              const info = await findSessionInfoById(entry.id);
+              if (info?.cwd) {
+                entry.cwd = info.cwd;
+                // Drop the cached git status for the now-known root so the post-flush
+                // /api/rollups re-evaluates git (the enqueue couldn't invalidate it).
+                repoStatusCache.invalidate(knownRepoRoot(info.cwd));
+              }
+            } catch {
+              /* unresolvable → leave cwd empty so it only maps via explicit membership */
+            }
+          }),
+        );
         const { assignments } = mapSessionsToProjects(registry, sessions);
         for (const assignment of assignments.values()) dirtyProjectIds.add(assignment.projectId);
       }

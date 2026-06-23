@@ -467,6 +467,13 @@ export function createProjectRegistryStore(file: string) {
       if (finiteNumber(source.order) == null) {
         workstream.order = current.workstreams.filter((item) => item.projectId === projectId).length;
       }
+      // Stamp `loopStartedAt` the moment a workstream is first marked `isLoop` with no
+      // explicit start supplied, so the S11 "elapsed from loopStartedAt" badge has the
+      // stored field its formula depends on (else every loop renders "∞ looping 0m" and
+      // the CLOSE_TAB_LOOP_MIN threshold can never trip). Honors an explicit value.
+      if (workstream.isLoop && !workstream.loopStartedAt) {
+        workstream.loopStartedAt = now;
+      }
       const registry = await writeState({
         ...current,
         workstreams: [...current.workstreams, workstream],
@@ -510,8 +517,15 @@ export function createProjectRegistryStore(file: string) {
       const order = finiteNumber(source.order);
       if (order != null) updated.order = order;
       if ("isLoop" in source) {
-        if (source.isLoop === true) updated.isLoop = true;
-        else delete updated.isLoop;
+        if (source.isLoop === true) {
+          updated.isLoop = true;
+        } else {
+          // Clearing the loop drops its start stamp too (unless the same patch sets one
+          // explicitly below) — a non-loop workstream carrying a stale loopStartedAt is an
+          // inconsistency the S11 elapsed badge would read as a phantom running loop.
+          delete updated.isLoop;
+          delete updated.loopStartedAt;
+        }
       }
       if ("loopStartedAt" in source) {
         if (typeof source.loopStartedAt === "string" && source.loopStartedAt.trim()) {
@@ -530,6 +544,14 @@ export function createProjectRegistryStore(file: string) {
         else delete updated.paused;
       }
       updated.updatedAt = new Date().toISOString();
+      // Default `loopStartedAt` to now() whenever the workstream is (now) a loop but has
+      // no start stamp — covers both `isLoop` flipping true on this patch and a loop that
+      // never had one. Without it `elapsedMinFromLoopStart('')` returns undefined and the
+      // S11 loop badge is permanently "∞ looping 0m" (review finding). An explicit
+      // loopStartedAt in the patch wins; clearing isLoop drops the stamp via its branch above.
+      if (updated.isLoop && !updated.loopStartedAt) {
+        updated.loopStartedAt = updated.updatedAt;
+      }
       const workstreams = [...current.workstreams];
       workstreams[index] = updated;
       const registry = await writeState({ ...current, workstreams });

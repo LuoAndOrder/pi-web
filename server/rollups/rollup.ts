@@ -395,8 +395,12 @@ export async function buildSessionRollup(
   //                     degrades to the quiet "may be waiting" soft wait, never amber.
   //   - `softWait`    : would need a durable "stopped, awaiting human" marker pi does
   //                     not write; left false so we never fabricate a "waiting" alarm.
-  //   - `artifact` / `blast` / `plannedQueue` : need durable receipts/notes pi does not
-  //                     emit; the renderer degrades gracefully when absent.
+  //   - `blast` / `plannedQueue` : need durable receipts/notes pi does not emit; the
+  //                     renderer degrades gracefully when absent.
+  //   - `artifact` : a DURABLE diff receipt (numstat/sha) is deferred (DATA-MODEL §6) —
+  //                     gitArtifact below populates only the git facts already on the
+  //                     render path (branch + a met git_merged), so the merge affordance
+  //                     and merged receipt light up WITHOUT fabricating numstat/sha.
   const fail = session.fail === true;
   const uiStatus = deriveUiStatus({
     runtime,
@@ -424,7 +428,33 @@ export async function buildSessionRollup(
   if (git) rollup.git = git;
   if (progress) rollup.progress = progress;
   if (inheritedDoD && inheritedDoD.criteria.length) rollup.dod = dodSummary(inheritedDoD, evals);
+  const artifact = gitArtifact(git, evals);
+  if (artifact) rollup.artifact = artifact;
   return rollup;
+}
+
+/** A minimal ArtifactReceipt derived ONLY from git facts already loaded on the render
+ *  path (sessionGitInfo + the evaluated criteria) — no durable receipt source exists yet
+ *  (DATA-MODEL §6 deferred). It lights up the merge affordance (`hasGitBranch`/`branchOf`)
+ *  and the Done-section merged receipt with REAL signal:
+ *    - `branch` : the session's checked-out branch (the merge button's target).
+ *    - `merged` : true iff a `git_merged` criterion evaluated met for this session.
+ *    - `ahead`  : commits ahead of upstream (an honest pushed/unpushed hint).
+ *  numstat (`add`/`del`) and `sha` are intentionally LEFT UNSET — gitStatus exposes
+ *  neither, and fabricating them would violate the no-fabricated-signal rule; the
+ *  renderer's artChip omits the diff when they're absent. Returns null off-repo or on a
+ *  detached/branchless HEAD so no empty chip renders. */
+function gitArtifact(
+  git: SessionRollup["git"] | undefined,
+  evals: CriterionEval[],
+): SessionRollup["artifact"] | undefined {
+  if (!git || !git.branch) return undefined;
+  const merged = evals.some((e) => e.sourceKind === "git_merged" && e.met);
+  const artifact: NonNullable<SessionRollup["artifact"]> = { kind: "diff", branch: git.branch };
+  if (merged) artifact.merged = true;
+  // numstat (`add`/`del`) and `sha` stay UNSET — gitStatus exposes neither; the renderer's
+  // artChip omits the diff segment when they're absent so nothing fabricated renders.
+  return artifact;
 }
 
 /** Aggregate the criteria a workstream ring is scored against: the concatenation

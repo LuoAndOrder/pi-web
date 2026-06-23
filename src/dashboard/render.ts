@@ -1029,9 +1029,15 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       return `<span class="artchip doc" title="Visual snapshot (rendered output) — verification is your review of the rendered chart, not a git diff.">🖼 ${esc(a.note || "visual")} · <span class="ok">✓ visual · reviewed</span></span>`;
     }
     const merged = a.merged;
-    const diff = `<span class="add">+${a.add}</span>/<span class="del">−${a.del}</span>`;
-    const head = merged ? `✓ merged · ${esc(a.sha)}` : esc(a.branch);
-    return `<span class="artchip ${merged ? "mg" : ""}">${esc(head)} · ${diff}</span>`;
+    // numstat is only shown when the server actually has it (a durable diff receipt) —
+    // the git-derived artifact (server gitArtifact) carries a real branch/merged flag but
+    // NO add/del/sha (gitStatus exposes neither), so we omit the `+N/−N` rather than render
+    // `+undefined/−undefined` (no-fabricated-signal rule; review finding).
+    const diff = a.add != null && a.del != null
+      ? ` · <span class="add">+${a.add}</span>/<span class="del">−${a.del}</span>`
+      : "";
+    const head = merged ? (a.sha ? `✓ merged · ${esc(a.sha)}` : "✓ merged") : esc(a.branch);
+    return `<span class="artchip ${merged ? "mg" : ""}">${esc(head)}${diff}</span>`;
   }
 
   function iterSparkHtml(arr: number[]) {

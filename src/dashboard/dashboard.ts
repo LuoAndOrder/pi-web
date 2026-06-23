@@ -101,23 +101,13 @@ export function createDashboard(options: {
     onboard: { onRegister: registerProject, onStartSession: startFirstSession },
   });
 
-  function escapeHtml(value: string) {
-    return value.replace(/[&<>"']/g, (char) =>
-      char === "&" ? "&amp;"
-        : char === "<" ? "&lt;"
-        : char === ">" ? "&gt;"
-        : char === '"' ? "&quot;"
-        : "&#39;",
-    );
-  }
-
   function renderLoadingOrError(): boolean {
     if (state.error) {
       elements.dashboardWrap.innerHTML = `
         <section class="hero">
           <div class="eyebrow">Project Rollups</div>
           <h1 class="headline">Couldn't load rollups</h1>
-          <p class="subline">${escapeHtml(state.error)}</p>
+          <p class="subline">${escText(state.error)}</p>
         </section>`;
       return true;
     }
@@ -224,8 +214,8 @@ export function createDashboard(options: {
 
   // Sessions with an optimistic sign-off PATCH still genuinely in flight — their local
   // flip must survive a refetch that lands before the server echo, so we don't prune them
-  // in the reconcile. (Counts outstanding PATCHes; the never-cleared `critChain` promise
-  // would read "pending" forever after the first sign-off.)
+  // in the reconcile. (Counts outstanding PATCHes via critInFlight, which — unlike a
+  // settled critChain promise — reads 0 the moment a criterion is quiescent.)
   function hasPendingFlip(sessionId: string): boolean {
     const critId = view.SESS[sessionId]?.s._gate?.id;
     return !!critId && (critInFlight.get(critId) ?? 0) > 0;
@@ -420,13 +410,16 @@ export function createDashboard(options: {
   // criterion's gen and serializes its PATCH after any in-flight one; a PATCH result whose
   // gen is stale is IGNORED (a newer intent already superseded it). The next /api/rollups
   // reconciles the truth regardless.
+  // critGen/critChain hold the serialization state for the CURRENTLY-active PATCHes of a
+  // criterion; both are EVICTED once the criterion goes quiescent (critInFlight → 0 and
+  // the settled promise is still the chain tail) so a long-lived dashboard that signs off
+  // many criteria leaves no residue (review finding — they used to grow unbounded).
   const critGen = new Map<string, number>();
   const critChain = new Map<string, Promise<boolean>>();
   // Count of genuinely outstanding PATCHes per criterion (incremented when an intent is
   // queued, decremented when it settles). `reconcileSigned` reads this to keep an
-  // optimistic flip across a refetch ONLY while its PATCH is actually in flight — the
-  // never-cleared `critChain` promise alone would read "pending" forever after the first
-  // sign-off and defeat the prune.
+  // optimistic flip across a refetch ONLY while its PATCH is actually in flight; it also
+  // drives the critChain/critGen eviction above so a quiescent criterion leaves nothing.
   const critInFlight = new Map<string, number>();
 
   // Serialize PATCHes for one criterion so they can't land out of order. Returns whether
@@ -455,10 +448,23 @@ export function createDashboard(options: {
       });
     // Decrement the in-flight counter once this PATCH settles (success or failure), so
     // `hasPendingFlip` stops protecting its optimistic entry from the next reconcile.
-    const next = settled.finally(() => {
+    // When a criterion goes fully quiescent (no more in-flight PATCHes) AND this settled
+    // promise is still the tail of its chain, evict its `critChain`/`critGen` residue too
+    // — otherwise every distinct criterion ever signed off leaks a resolved promise +
+    // a gen counter for the life of the dashboard (review finding). A newer intent that
+    // raced in already replaced `critChain` with its own promise, so the identity check
+    // keeps us from deleting a live chain.
+    const next: Promise<boolean> = settled.finally(() => {
       const remaining = (critInFlight.get(criterionId) ?? 1) - 1;
-      if (remaining > 0) critInFlight.set(criterionId, remaining);
-      else critInFlight.delete(criterionId);
+      if (remaining > 0) {
+        critInFlight.set(criterionId, remaining);
+      } else {
+        critInFlight.delete(criterionId);
+        if (critChain.get(criterionId) === next) {
+          critChain.delete(criterionId);
+          critGen.delete(criterionId);
+        }
+      }
     });
     critChain.set(criterionId, next);
     return next;
