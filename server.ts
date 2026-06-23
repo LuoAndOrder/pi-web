@@ -502,8 +502,49 @@ const repoStatusCache = createRepoStatusCache<Awaited<ReturnType<typeof gitStatu
   },
 );
 
+// Process-lifetime memo of cwd -> git toplevel. cachedGitStatus keys the status
+// cache by the resolved ROOT (not the raw cwd), so several sessions living in
+// DIFFERENT sub-directories or worktrees of ONE repo collapse onto a single
+// gitStatus fan-out instead of each spawning the full ~6-subprocess load (FOCUS:
+// distinct roots evaluated once, NOT per-session). A path's toplevel is stable,
+// so the positive memo is permanent; a miss costs one `rev-parse --show-toplevel`
+// (far cheaper than gitStatus). Negative results (off-repo) are NOT memoized so a
+// later `git init` resolves correctly.
+const repoRootByCwd = new Map<string, string>();
+const repoRootInflight = new Map<string, Promise<string>>();
+
+async function gitRepoRoot(cwd = piCwd): Promise<string> {
+  const key = resolve(cwd);
+  const known = repoRootByCwd.get(key);
+  if (known) return known;
+  const existing = repoRootInflight.get(key);
+  if (existing) return existing;
+  const promise = (async () => {
+    try {
+      const { stdout } = await git(["rev-parse", "--show-toplevel"], 15_000, key);
+      const root = stdout.trim() ? resolve(stdout.trim()) : key;
+      repoRootByCwd.set(key, root);
+      return root;
+    } catch {
+      return key; // off-repo / error: key by cwd; gitStatus will report not-a-repo
+    } finally {
+      repoRootInflight.delete(key);
+    }
+  })();
+  repoRootInflight.set(key, promise);
+  return promise;
+}
+
+// Sync read of an already-resolved root for the sync invalidate path. Falls back
+// to the resolved cwd when unseen — which is exactly the key gitStatus would have
+// used, so invalidation still matches the not-yet-loaded / off-repo case.
+function knownRepoRoot(cwd = piCwd): string {
+  const key = resolve(cwd);
+  return repoRootByCwd.get(key) ?? key;
+}
+
 async function cachedGitStatus(cwd = piCwd) {
-  return repoStatusCache.get(cwd);
+  return repoStatusCache.get(await gitRepoRoot(cwd));
 }
 
 // Models confirmed broken with this Copilot integration — tracked at runtime.
@@ -1992,7 +2033,7 @@ function registerLiveSession(value: any) {
       clearRuntimeStartedAt(value, eventSessionFile);
       // The working tree may have changed while the agent ran; drop the cached
       // git status for this session's repo so the next rollup re-evaluates.
-      if (e?.type === "agent_end") repoStatusCache.invalidate(sessionCwd(value));
+      if (e?.type === "agent_end") repoStatusCache.invalidate(knownRepoRoot(sessionCwd(value)));
     }
 
     if (e?.type === "tool_execution_start") {
@@ -2338,7 +2379,7 @@ const server = createServer(async (req, res) => {
           if (!branch) return sendJson(res, 400, { ok: false, error: "Cannot sync detached HEAD" });
           const fetchResult = await git(["fetch", "--prune", "origin"], 60_000, cwd);
           const pullResult = await git(["pull", "--rebase", "--autostash", "origin", branch], 120_000, cwd);
-          repoStatusCache.invalidate(cwd);
+          repoStatusCache.invalidate(knownRepoRoot(cwd));
           return sendJson(res, 200, { ok: true, output: `${fetchResult.stdout}${fetchResult.stderr}${pullResult.stdout}${pullResult.stderr}`, status: await gitStatus(cwd) });
         } catch (error) {
           return sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });

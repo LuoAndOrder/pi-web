@@ -26,7 +26,6 @@ import { deriveUiStatus, toWorkItemStatus } from "./status.js";
 import {
   evalBase,
   evalGitCriterion,
-  gitConflicted,
   sessionGitInfo,
   type GitStatusLite,
 } from "./gitDod.js";
@@ -636,10 +635,3 @@ export async function assembleRollups(
 
   return rollups;
 }
-
-/** Alias for symmetry with the plan's naming (registry × sessions → rollups). */
-export const joinRollups = assembleRollups;
-
-// Re-export so the route layer can build SessionGitInfo / detect conflicts without
-// reaching past this module.
-export { gitConflicted, sessionGitInfo };

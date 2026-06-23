@@ -59,8 +59,11 @@ export interface RepoStatusCacheOptions {
 
 /**
  * A TTL cache over a single-arg loader (the loader is `gitStatus` in server.ts).
- * Concurrent calls for the same key share one in-flight load, so a multi-session
- * project evaluates each distinct repo root exactly once.
+ * Concurrent calls for the same KEY share one in-flight load, so each distinct
+ * key is loaded once. The cache itself does not know about git roots — to make a
+ * multi-session project evaluate each distinct repo ROOT exactly once, the caller
+ * resolves each cwd to its git toplevel (`rev-parse --show-toplevel`) and keys on
+ * that root, so co-located / sub-cwd / worktree sessions collapse onto one entry.
  */
 export function createRepoStatusCache<T extends { root?: string }>(
   loader: (cwd: string) => Promise<T>,
