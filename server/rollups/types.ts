@@ -247,3 +247,18 @@ export interface ProjectRollup {
   archivedSessionCount?: number;
   lineage?: { parentProjectName: string; fullPath: string }; // nested-root badge
 }
+
+// Archived projects are dropped from the active `rollups[]` (their gauge/counts must not
+// pollute the fleet), but the dashboard still needs to LIST them so the user can Restore or
+// Delete from the UI — otherwise archiving a project from the UI is a one-way door (the
+// full-lifecycle real-use lens). `/api/rollups` returns these as a separate, read-only
+// summary list alongside `rollups`; restoring flips `archived:false` and the project
+// reappears in `rollups` on the next read.
+export interface ArchivedProjectSummary {
+  id: string;
+  name: string;
+  description?: string;
+  rootCount: number; // number of registered repo roots
+  workstreamCount: number; // stored workstreams that would come back on restore
+  updatedAt: string; // when it was last touched (incl. the archive flip)
+}

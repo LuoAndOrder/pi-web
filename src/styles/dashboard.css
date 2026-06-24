@@ -478,6 +478,12 @@
 #dashboardView .projmenu-item:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 #dashboardView .projmenu-item.danger { color: color-mix(in srgb, var(--st-fail) 88%, var(--text)); }
 #dashboardView .projmenu-item.danger:hover { background: color-mix(in srgb, var(--st-fail) 16%, transparent); color: var(--st-fail); }
+/* OPEN kebab popover — promoted to position:fixed by the controller (positionMenuPop) so it
+   ESCAPES the clipping `.pcard { overflow:hidden }` ancestor and is bounded only by the viewport.
+   The controller sets top/left inline (right-aligned to the kebab, flipped up when room is tight).
+   z-index sits above the overlay's own stacking (cards/hero/strips all live below this). */
+#dashboardView .wsmenu-pop.pop-fixed,
+#dashboardView .projmenu-pop.pop-fixed { position: fixed; right: auto; top: 0; z-index: 9000; }
 /* "+ New project" sits at the far right of the Projects header; the .hint before it already
    carries margin-left:auto, so a small left margin keeps them from colliding. */
 #dashboardView .shead .newproj { margin-left: 10px; }

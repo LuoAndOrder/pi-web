@@ -277,6 +277,40 @@ describe("rollups registry CRUD routes", () => {
     await server.api("DELETE", `/api/projects/${projectId}`);
   }, 20_000);
 
+  it("archiving a project drops it from rollups[] but surfaces it in archivedProjects[] for in-UI restore", async () => {
+    const created = await server.api("POST", "/api/projects", { name: "ArchMe", roots: [process.cwd()] });
+    const projectId: string = created.body.project.id;
+    await server.api("POST", `/api/projects/${projectId}/workstreams`, { name: "ws1" });
+
+    // Active: present in rollups[], absent from archivedProjects[].
+    let feed = await server.api("GET", "/api/rollups");
+    expect(feed.status).toBe(200);
+    expect(feed.body.rollups.some((r: any) => r.project.id === projectId)).toBe(true);
+    expect((feed.body.archivedProjects || []).some((p: any) => p.id === projectId)).toBe(false);
+
+    // Archive via the same PATCH the UI uses.
+    const arch = await server.api("PATCH", `/api/projects/${projectId}`, { archived: true });
+    expect(arch.status).toBe(200);
+
+    // Now: gone from rollups[], present in archivedProjects[] with its preserved-workstream count.
+    feed = await server.api("GET", "/api/rollups");
+    expect(feed.body.rollups.some((r: any) => r.project.id === projectId)).toBe(false);
+    const summary = (feed.body.archivedProjects || []).find((p: any) => p.id === projectId);
+    expect(summary).toBeTruthy();
+    expect(summary.name).toBe("ArchMe");
+    expect(summary.workstreamCount).toBe(1);
+    expect(summary.rootCount).toBe(1);
+
+    // Restore via PATCH archived:false → back in rollups[], out of archivedProjects[].
+    const restore = await server.api("PATCH", `/api/projects/${projectId}`, { archived: false });
+    expect(restore.status).toBe(200);
+    feed = await server.api("GET", "/api/rollups");
+    expect(feed.body.rollups.some((r: any) => r.project.id === projectId)).toBe(true);
+    expect((feed.body.archivedProjects || []).some((p: any) => p.id === projectId)).toBe(false);
+
+    await server.api("DELETE", `/api/projects/${projectId}`);
+  }, 20_000);
+
   it("returns 404 for unknown project PATCH/DELETE and unknown workstream PATCH", async () => {
     const patch = await server.api("PATCH", "/api/projects/missing", { name: "x" });
     expect(patch.status).toBe(404);

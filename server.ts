@@ -26,7 +26,7 @@ import { createSessionUiStateStore, defaultSessionUiState } from "./server/sessi
 import { createSettingsStore } from "./server/settings.js";
 import { createRepoStatusCache, gitIsAncestor as gitIsAncestorImpl } from "./server/rollups/gitDod.js";
 import { createProjectRegistryStore, RegistryError } from "./server/rollups/registry.js";
-import { assembleRollups, mapSessionsToProjects, isCwdUnder } from "./server/rollups/rollup.js";
+import { assembleRollups, collectArchivedProjects, mapSessionsToProjects, isCwdUnder } from "./server/rollups/rollup.js";
 import type { RollupSessionInput } from "./server/rollups/rollup.js";
 import type { PiWebFooter, PiWebHeaderAction, PiWebUi } from "./src/extensions.js";
 import type { PiWebSession } from "./server/types.js";
@@ -3275,7 +3275,11 @@ const server = createServer(async (req, res) => {
           if (!one) return sendJson(res, 404, { ok: false, error: "Project not found" });
           return sendJson(res, 200, { ok: true, rollup: one });
         }
-        return sendJson(res, 200, { ok: true, rollups });
+        // Archived projects ride alongside the active feed as a read-only summary list, so the
+        // dashboard can offer in-UI Restore/Delete (the full-lifecycle real-use lens) instead of
+        // archiving being a one-way door recoverable only via the raw API.
+        const archivedProjects = collectArchivedProjects(registry);
+        return sendJson(res, 200, { ok: true, rollups, archivedProjects });
       }
 
       if (method === "POST" && url.pathname === "/api/sessions/delete") {

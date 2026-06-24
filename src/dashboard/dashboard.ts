@@ -14,7 +14,7 @@ import type { AppElements } from "../app/elements.js";
 import type { SessionsController } from "../sessions/sessionDrawer.js";
 import { readDashboardViewFromUrl, writeDashboardViewToUrl } from "../app/types.js";
 import type { ProjectRollup } from "./types.js";
-import { createRenderer, type RenderState } from "./render.js";
+import { createRenderer, type RenderState, type VArchivedProject } from "./render.js";
 import { toViewModel } from "./rollupAdapter.js";
 
 // Open/close can be driven either by a user gesture (push `?view=dashboard` onto
@@ -38,6 +38,9 @@ export type DashboardController = {
 
 type DashboardState = {
   rollups: ProjectRollup[];
+  // Read-only summaries of ARCHIVED projects (the collapsed "Archived projects" surface).
+  // Filled from `/api/rollups`'s `archivedProjects[]`; absent from the per-project refetch.
+  archivedProjects: VArchivedProject[];
   loading: boolean;
   error: string | null;
 };
@@ -99,7 +102,7 @@ export function createDashboard(options: {
   // (project_registry_changed, no projectId) needs the whole set re-assembled.
   const dirtyProjectIds = new Set<string>();
   let fullRefetchPending = false;
-  const state: DashboardState = { rollups: [], loading: false, error: null };
+  const state: DashboardState = { rollups: [], archivedProjects: [], loading: false, error: null };
 
   // The mockup-shaped view model the ported render core reads. `toViewModel` (the
   // adapter seam) fills `data`/`SESS` from the server `ProjectRollup[]`; the client
@@ -220,6 +223,7 @@ export function createDashboard(options: {
     const vm = toViewModel(state.rollups);
     view.data = vm.data;
     view.SESS = vm.SESS;
+    view.archivedProjects = state.archivedProjects;
     reconcileSigned();
     pruneSelection();
   }
@@ -271,6 +275,31 @@ export function createDashboard(options: {
     view.signed = next;
   }
 
+  // Coerce the server `archivedProjects[]` into the strict VArchivedProject shape, dropping
+  // any malformed entry. The renderer escapes every string it prints, but we still guard the
+  // counts/ids here so an orphan/undefined field can never reach render as `NaN root(s)` or an
+  // empty action target (undefined/orphan render-guard lens).
+  function sanitizeArchivedProjects(raw: unknown): VArchivedProject[] {
+    if (!Array.isArray(raw)) return [];
+    const out: VArchivedProject[] = [];
+    for (const r of raw) {
+      if (!r || typeof r !== "object") continue;
+      const o = r as Record<string, unknown>;
+      const id = typeof o.id === "string" ? o.id : "";
+      const name = typeof o.name === "string" && o.name ? o.name : "";
+      if (!id || !name) continue; // no id → no Restore/Delete target; skip rather than render dead
+      out.push({
+        id,
+        name,
+        ...(typeof o.description === "string" && o.description ? { description: o.description } : {}),
+        rootCount: Number.isFinite(o.rootCount) ? Number(o.rootCount) : 0,
+        workstreamCount: Number.isFinite(o.workstreamCount) ? Number(o.workstreamCount) : 0,
+        updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : "",
+      });
+    }
+    return out;
+  }
+
   async function refetch() {
     const token = ++fetchToken;
     state.loading = true;
@@ -289,6 +318,10 @@ export function createDashboard(options: {
       const data = await res.json();
       if (token !== fetchToken) return;
       state.rollups = Array.isArray(data?.rollups) ? (data.rollups as ProjectRollup[]) : [];
+      // Archived projects ride alongside the active feed (read-only summaries) for the
+      // collapsed "Archived projects" surface. Guarded: a server that predates this field
+      // (or sends a non-array) just yields an empty surface — never a crash.
+      state.archivedProjects = sanitizeArchivedProjects(data?.archivedProjects);
       rebuildView();
       // Cold-start: an empty registry renders the first-run onboarding, which needs candidate
       // cwds derived from /api/sessions. Fetch them BEFORE the empty render so the card shows
@@ -1404,7 +1437,7 @@ export function createDashboard(options: {
   async function archiveProject(projectId: string) {
     const ctx = findProjectContext(projectId);
     const name = ctx?.name || "this project";
-    if (!window.confirm(`Archive "${name}"? Its rollup drops out of the dashboard. You can un-archive it later via the API or by re-registering its folder.`)) return;
+    if (!window.confirm(`Archive "${name}"? Its rollup drops out of the active dashboard. You can Restore it any time from the "Archived projects" section below.`)) return;
     const ok = await patchProject(projectId, { archived: true });
     if (ok) {
       showToast(`<b>${escText(name)}</b> archived — removed from the active dashboard.`, () => {
@@ -1414,10 +1447,26 @@ export function createDashboard(options: {
     } else showToast(`Couldn't archive <b>${escText(name)}</b> — try again.`);
   }
 
+  // Restore an ARCHIVED project from the collapsed surface: flip archived:false so it rejoins
+  // the active dashboard. No confirm (non-destructive); a refetch repopulates both the active
+  // feed and the now-shorter archivedProjects list. The project name comes from the archived
+  // summary (findProjectContext only sees ACTIVE rollups, so it can't resolve an archived id).
+  async function restoreProject(projectId: string) {
+    const name = state.archivedProjects.find((p) => p.id === projectId)?.name || "this project";
+    const ok = await patchProject(projectId, { archived: false });
+    if (ok) { showToast(`<b>${escText(name)}</b> restored — back in the active dashboard.`); await refetch(); }
+    else showToast(`Couldn't restore <b>${escText(name)}</b> — try again.`);
+  }
+
   async function deleteProject(projectId: string) {
     const ctx = findProjectContext(projectId);
-    const name = ctx?.name || "this project";
-    if (!window.confirm(`Delete "${name}"? This removes the project registration and its workstreams. Sessions are untouched (they revert to Unfiled). Undo re-registers it (a new id).`)) return;
+    const name = ctx?.name || state.archivedProjects.find((p) => p.id === projectId)?.name || "this project";
+    // We can only offer an Undo (re-register) when we still hold the project's roots — true for
+    // ACTIVE projects (in state.rollups) but not for an ARCHIVED one deleted from the collapsed
+    // surface (the summary carries no roots). Keep the confirm copy honest about that.
+    const canUndo = !!(ctx && ctx.roots.length);
+    const undoNote = canUndo ? " Undo re-registers it (a new id)." : " This cannot be undone.";
+    if (!window.confirm(`Delete "${name}"? This removes the project registration and its workstreams. Sessions are untouched (they revert to Unfiled).${undoNote}`)) return;
     let ok = false;
     try {
       const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE", headers: api.headers() });
@@ -1448,14 +1497,71 @@ export function createDashboard(options: {
       case "newws": void newWorkstreamForProject(projectId); break;
       case "rename": void renameProject(projectId); break;
       case "archive": void archiveProject(projectId); break;
+      case "restore": void restoreProject(projectId); break;
       case "delete": void deleteProject(projectId); break;
     }
+  }
+
+  // Open a kebab popover so it ESCAPES the card's `overflow:hidden` clip (HIGH finding): the
+  // popover lives inside `.pcard { overflow:hidden }`, so an absolutely-positioned menu on the
+  // bottom row is sliced off at the card edge. We promote the open popover to `position:fixed`
+  // (added via the `.pop-fixed` class) and pin it to the kebab's viewport rect — fixed elements
+  // are clipped by the viewport, not by any ancestor's overflow, so the menu always shows in
+  // full. We also flip it UPWARD when there isn't room below, and align its right edge to the
+  // kebab so it never runs off-screen. Cleared in the matching closer (class + inline coords).
+  // The currently-open menu's toggle+pop, so a scroll/resize can RE-PIN the fixed popover to its
+  // kebab (rather than dismissing — dismiss-on-scroll vanished the menu under Playwright's
+  // scroll-into-view-before-click on mobile, hiding the item mid-interaction).
+  let openMenuPair: { toggle: HTMLElement; pop: HTMLElement } | null = null;
+  function positionMenuPop(toggle: HTMLElement | null, pop: HTMLElement | null) {
+    if (!toggle || !pop) return;
+    pop.classList.add("pop-fixed");
+    // Measure after the class is applied so display:flex is live and the height is real.
+    pop.style.visibility = "hidden";
+    pop.style.top = "0px";
+    pop.style.left = "0px";
+    pop.style.bottom = "auto";
+    const kebab = toggle.getBoundingClientRect();
+    const pr = pop.getBoundingClientRect();
+    const gap = 5;
+    const vh = window.innerHeight, vw = window.innerWidth;
+    // Right-align the popover to the kebab, clamped into the viewport (8px inset).
+    let left = kebab.right - pr.width;
+    left = Math.max(8, Math.min(left, vw - pr.width - 8));
+    // Flip up when there isn't room below the kebab but there is room above; if neither side
+    // fits (a very short viewport), clamp the top into view so the menu is never off-screen.
+    const below = kebab.bottom + gap;
+    const wantUp = below + pr.height > vh - 8 && kebab.top - gap - pr.height > 8;
+    let top = wantUp ? kebab.top - gap - pr.height : below;
+    top = Math.max(8, Math.min(top, vh - pr.height - 8));
+    pop.style.left = `${Math.round(left)}px`;
+    pop.style.top = `${Math.round(top)}px`;
+    pop.style.visibility = "";
+    openMenuPair = { toggle, pop };
+  }
+  function clearMenuPop(pop: HTMLElement) {
+    pop.classList.remove("pop-fixed");
+    pop.style.left = pop.style.top = pop.style.bottom = pop.style.visibility = "";
+    if (openMenuPair && openMenuPair.pop === pop) openMenuPair = null;
+  }
+  // Keep the open fixed popover pinned to its kebab when the overlay scrolls or the window
+  // resizes. If the kebab has scrolled fully out of view, close the menu instead of pinning it
+  // to an off-screen anchor. Repositioning (not dismissing) is what keeps the menu present
+  // through the incidental scroll a click triggers.
+  function repositionOpenMenu() {
+    if (!openMenuPair) return;
+    const { toggle, pop } = openMenuPair;
+    if (pop.hidden || !toggle.isConnected) { closeWsMenus(); closeProjMenus(); return; }
+    const kr = toggle.getBoundingClientRect();
+    const offscreen = kr.bottom < 0 || kr.top > window.innerHeight || kr.right < 0 || kr.left > window.innerWidth;
+    if (offscreen) { closeWsMenus(); closeProjMenus(); return; }
+    positionMenuPop(toggle, pop);
   }
 
   // Project kebab popups mirror the workstream menu: only one open at a time, dismissed by a
   // click elsewhere (the document/overlay listener in init calls both closers).
   function closeProjMenus() {
-    elements.dashboardWrap.querySelectorAll<HTMLElement>(".projmenu-pop").forEach((pop) => { pop.hidden = true; });
+    elements.dashboardWrap.querySelectorAll<HTMLElement>(".projmenu-pop").forEach((pop) => { pop.hidden = true; clearMenuPop(pop); });
     elements.dashboardWrap.querySelectorAll<HTMLElement>("[data-projmenu-toggle]").forEach((b) => b.setAttribute("aria-expanded", "false"));
   }
   function toggleProjMenu(projectId: string) {
@@ -1464,14 +1570,15 @@ export function createDashboard(options: {
     const pop = menu.querySelector<HTMLElement>(".projmenu-pop");
     const toggle = menu.querySelector<HTMLElement>("[data-projmenu-toggle]");
     const wasOpen = pop ? !pop.hidden : false;
+    closeWsMenus();
     closeProjMenus();
-    if (pop && !wasOpen) { pop.hidden = false; toggle?.setAttribute("aria-expanded", "true"); }
+    if (pop && !wasOpen) { pop.hidden = false; positionMenuPop(toggle, pop); toggle?.setAttribute("aria-expanded", "true"); }
   }
 
   // Open/close the small kebab popup menus. Only one is open at a time; a click elsewhere
   // (handled by the document listener wired in init) closes them.
   function closeWsMenus() {
-    elements.dashboardWrap.querySelectorAll<HTMLElement>(".wsmenu-pop").forEach((pop) => { pop.hidden = true; });
+    elements.dashboardWrap.querySelectorAll<HTMLElement>(".wsmenu-pop").forEach((pop) => { pop.hidden = true; clearMenuPop(pop); });
     elements.dashboardWrap.querySelectorAll<HTMLElement>("[data-wsmenu-toggle]").forEach((b) => b.setAttribute("aria-expanded", "false"));
   }
   function toggleWsMenu(workstreamId: string) {
@@ -1480,8 +1587,9 @@ export function createDashboard(options: {
     const pop = menu.querySelector<HTMLElement>(".wsmenu-pop");
     const toggle = menu.querySelector<HTMLElement>("[data-wsmenu-toggle]");
     const wasOpen = pop ? !pop.hidden : false;
+    closeProjMenus();
     closeWsMenus();
-    if (pop && !wasOpen) { pop.hidden = false; toggle?.setAttribute("aria-expanded", "true"); }
+    if (pop && !wasOpen) { pop.hidden = false; positionMenuPop(toggle, pop); toggle?.setAttribute("aria-expanded", "true"); }
   }
 
   // Find an overlay element by id WITHOUT touching the host document — keeps every
@@ -1777,6 +1885,13 @@ export function createDashboard(options: {
       const anyOpen = !!elements.dashboardWrap.querySelector<HTMLElement>(".wsmenu-pop:not([hidden]), .projmenu-pop:not([hidden])");
       if (anyOpen) { event.stopPropagation(); closeWsMenus(); closeProjMenus(); }
     });
+    // An open kebab popover is `position:fixed`, pinned to the kebab's viewport rect at open
+    // time. Scrolling the overlay (or resizing the window) moves the kebab, so we RE-PIN the
+    // popover to it (rather than dismissing — a dismiss-on-scroll hid the menu under the
+    // incidental scroll-into-view a click triggers, on mobile). repositionOpenMenu closes the
+    // menu only if its kebab has scrolled fully out of view.
+    elements.dashboardView.addEventListener("scroll", repositionOpenMenu, { passive: true, capture: true });
+    window.addEventListener("resize", repositionOpenMenu);
     // Delegated drill-in / continue / expand-collapse, scoped to the overlay.
     elements.dashboardWrap.addEventListener("click", handleClick);
     // M4 — Unfiled multi-select: a delegated `change` on the bucket checkboxes toggles the

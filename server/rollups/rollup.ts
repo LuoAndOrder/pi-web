@@ -29,6 +29,7 @@ import {
   type GitStatusLite,
 } from "./gitDod.js";
 import type {
+  ArchivedProjectSummary,
   CriterionEval,
   DoD,
   DoDCriterion,
@@ -830,4 +831,24 @@ export async function assembleRollups(
   }
 
   return rollups;
+}
+
+// Read-only summaries of ARCHIVED projects, for the dashboard's collapsed
+// "Archived projects" surface. assembleRollups deliberately drops archived projects from the
+// active feed (so their gauge/counts never inflate the fleet); this lists them so the user can
+// Restore (PATCH archived:false) or Delete from the UI — closing the project lifecycle loop.
+// Pure registry read: no sessions, no git, no DoD eval. Stable order (most-recently-touched
+// first) keeps the surface from reshuffling between refetches.
+export function collectArchivedProjects(registry: ProjectRegistry): ArchivedProjectSummary[] {
+  return registry.projects
+    .filter((p) => p.archived)
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      ...(p.description ? { description: p.description } : {}),
+      rootCount: Array.isArray(p.roots) ? p.roots.length : 0,
+      workstreamCount: registry.workstreams.filter((ws) => ws.projectId === p.id).length,
+      updatedAt: p.updatedAt,
+    }))
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
 }

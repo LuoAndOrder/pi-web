@@ -146,12 +146,28 @@ export interface OnboardCandidate {
   display: string;
   sessions: number;
 }
+// A read-only summary of an ARCHIVED project, fed straight from `/api/rollups`'s
+// `archivedProjects[]`. The dashboard renders these in a collapsed surface with Restore /
+// Delete so archiving a project round-trips in the UI (full-lifecycle real-use lens), instead
+// of being a one-way door only the raw API can undo.
+export interface VArchivedProject {
+  id: string;
+  name: string;
+  description?: string;
+  rootCount: number;
+  workstreamCount: number;
+  updatedAt: string;
+}
+
 export interface RenderState {
   data: VProject[];
   SESS: Record<string, { s: VSession; w: VWorkstream; p: VProject }>;
   signed: Record<string, boolean>;
   lastVisit: string | null;
   _pingId: string | null;
+  // Archived projects (read-only summaries) for the collapsed "Archived projects" surface.
+  // Populated by the controller from `/api/rollups`. Absent/empty → the surface is omitted.
+  archivedProjects?: VArchivedProject[];
   // Cold-start onboarding candidates (S9). Populated by the controller before an empty render.
   candidates?: OnboardCandidate[];
   // M4 — Unfiled session multi-select. The set of session ids currently checked in the
@@ -571,7 +587,15 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
   // ═══════════════════════════ master render ═══════════════════════════
   function renderAll(sc?: { empty?: boolean; candidates?: number }) {
     const scn = sc || {};
-    if (scn.empty) { wrap.innerHTML = onboardHtml(scn.candidates || 0); bindOnboard(); return; }
+    if (scn.empty) {
+      // No ACTIVE projects → cold-start onboarding. But archived projects can still exist (the
+      // user archived their last one); keep them reachable by appending the Archived-projects
+      // surface below the onboarding card, so Restore is never a dead end (full-lifecycle lens).
+      wrap.innerHTML = onboardHtml(scn.candidates || 0) + (archivedProjectRows().length ? archivedProjectsSectionHtml() : "");
+      bindOnboard();
+      renderArchivedProjects();
+      return;
+    }
 
     const counts = fleetCounts();
     state._pingId = (function () {
@@ -587,6 +611,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       ${plannedSectionHtml(counts)}
       ${doneSectionHtml(counts)}
       ${archivedSectionHtml()}
+      ${archivedProjectsSectionHtml()}
       ${tailNoteHtml(counts)}
     `;
     renderRail(counts);
@@ -596,6 +621,52 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     renderPlanned();
     renderDone();
     renderArchived();
+    renderArchivedProjects();
+  }
+
+  // ─────────────────────── archived PROJECTS surface (full-lifecycle lens) ───────────────────────
+  // Archived projects are dropped from the active feed (their gauge/counts must not pollute the
+  // fleet), so without this they'd be UI-unreachable after the Undo toast expires — archiving a
+  // project would be a one-way door. This collapsed read-only strip mirrors the archived-workstreams
+  // surface: each row carries Restore (PATCH archived:false) + Delete, so the project lifecycle
+  // round-trips entirely in the UI. Fed from `state.archivedProjects` (the `/api/rollups` summary).
+  function archivedProjectRows(): VArchivedProject[] {
+    return Array.isArray(state.archivedProjects) ? state.archivedProjects : [];
+  }
+  function archivedProjectsSectionHtml(): string {
+    if (!archivedProjectRows().length) return "";
+    return `<section class="done archived" id="sec-archived-projects" data-testid="archived-projects" style="margin-top:24px"></section>`;
+  }
+  function renderArchivedProjects() {
+    const host = document.getElementById("sec-archived-projects"); if (!host) return;
+    const rows = archivedProjectRows();
+    if (!rows.length) { host.innerHTML = ""; return; }
+    const row = (ap: VArchivedProject) => {
+      const wsN = ap.workstreamCount, rN = ap.rootCount;
+      const meta = `${rN} root${rN === 1 ? "" : "s"} · ${wsN} workstream${wsN === 1 ? "" : "s"} preserved`;
+      return `<div class="drow archrow" data-archived-project-id="${esc(ap.id)}">
+        <div class="dleft">
+          <div class="dcrumb"><b>${esc(ap.name)}</b></div>
+          <div class="dname">${esc(ap.name)} <span class="badge idle"><span class="d"></span>Archived project</span></div>
+          <div class="dnote">${esc(meta)} · out of the active gauge &amp; counts${ap.description ? ` · ${esc(ap.description)}` : ""}</div>
+        </div>
+        <div class="sess-act">
+          <button class="btn ghost sm" type="button" data-projaction="restore" data-projid="${esc(ap.id)}" title="Bring this project back into the active dashboard">Restore</button>
+          <button class="btn ghost sm danger" type="button" data-projaction="delete" data-projid="${esc(ap.id)}" title="Permanently delete this project registration (sessions revert to Unfiled)">Delete</button>
+        </div>
+      </div>`;
+    };
+    const CAP = 6, shown = rows.slice(0, CAP), extra = rows.slice(CAP);
+    host.innerHTML = `
+      <div class="done-head" data-toggle="done">
+        <div class="done-title">⦸ Archived projects</div>
+        <div class="done-sum"><b>${rows.length} archived project${rows.length === 1 ? "" : "s"}</b> — restore to bring back into the dashboard · out of the active gauge &amp; counts</div>
+        <span class="chev">${chevIcon()}</span>
+      </div>
+      <div class="done-body">
+        <div class="done-grp"><div class="done-grp-h"><span class="sw"></span> Archived · ${rows.length}</div>
+          ${shown.map(row).join("")}${extra.length ? `<div class="more-rows" hidden>${extra.map(row).join("")}</div><button class="morelink" data-toggle="more">+${extra.length} more — show all</button>` : ""}</div>
+      </div>`;
   }
 
   // ─────────────────────────── archived / abandoned surface (M3) ───────────────────────────

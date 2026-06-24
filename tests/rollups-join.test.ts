@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   assembleRollups,
   buildWorkstreamRollup,
+  collectArchivedProjects,
   isCwdUnder,
   isMixed,
   mapSessionsToProjects,
@@ -369,6 +370,31 @@ describe("assembleRollups", () => {
       workstreams: [],
     };
     expect(await assembleRollups(registry, [], cleanStub)).toHaveLength(0);
+  });
+
+  it("collectArchivedProjects lists ONLY archived projects, with preserved-workstream counts, newest first", () => {
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [
+        project({ id: "live", roots: ["/live"] }), // active → must NOT appear
+        project({ id: "old", roots: ["/old", "/old2"], archived: true, updatedAt: "2026-06-01T00:00:00.000Z", description: "shelved" }),
+        project({ id: "new", roots: ["/new"], archived: true, updatedAt: "2026-06-20T00:00:00.000Z" }),
+      ],
+      workstreams: [
+        workstream({ id: "w1", projectId: "old" }),
+        workstream({ id: "w2", projectId: "old" }),
+        workstream({ id: "w3", projectId: "live" }), // not counted (project is active)
+      ],
+    };
+    const archived = collectArchivedProjects(registry);
+    expect(archived.map((p) => p.id)).toEqual(["new", "old"]); // newest updatedAt first; "live" excluded
+    const old = archived.find((p) => p.id === "old")!;
+    expect(old.rootCount).toBe(2);
+    expect(old.workstreamCount).toBe(2); // both of old's workstreams are preserved & reported
+    expect(old.description).toBe("shelved");
+    const fresh = archived.find((p) => p.id === "new")!;
+    expect(fresh.workstreamCount).toBe(0);
+    expect(fresh.description).toBeUndefined(); // omitted when absent
   });
 
   it("a git_merged whose `into` ref is missing degrades to not-met — the feed never 500s", async () => {

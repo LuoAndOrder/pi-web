@@ -405,6 +405,63 @@ test.describe("Project Rollups dashboard", () => {
 
       expect(pageErrors).toEqual([]);
     });
+
+    // Full PROJECT lifecycle round-trip in the UI: archive a project from its kebab → it leaves
+    // the active grid and lands in the collapsed "Archived projects" surface → Restore from there
+    // brings it back. Guards the MED finding (archived projects were UI-unreachable). Also exercises
+    // the project kebab POPOVER escaping the card's overflow:hidden clip (HIGH finding) — the
+    // archive item must be clickable, not sliced off at the card edge.
+    test("Archive a project → it moves to the Archived projects surface → Restore brings it back", async ({ page }) => {
+      const pageErrors = trackPageErrors(page);
+      const name = `E2E ProjLifecycle ${Date.now()}`;
+      const { projectId } = await createSignProject(page.request, name);
+
+      await page.locator("#dashboardButton").click();
+      const view = page.locator("#dashboardView");
+      await expect(view).toBeVisible();
+      const pcard = view.locator(`.pcard[data-project-id="${projectId}"]`);
+      await expect(pcard).toBeVisible();
+
+      // ── Archive ── open the project kebab; its popover must be fully visible (position:fixed,
+      // escaping the card clip) so the Archive item is clickable. Accept the confirm dialog.
+      const projMenu = pcard.locator(".pcard-head .projmenu").first();
+      await projMenu.locator("[data-projmenu-toggle]").click();
+      const projPop = projMenu.locator(".projmenu-pop");
+      await expect(projPop).toBeVisible();
+      // The popover is promoted to position:fixed so it can't be clipped by .pcard{overflow:hidden}.
+      await expect(projPop).toHaveClass(/pop-fixed/);
+      const archiveItem = projMenu.locator('[data-projaction="archive"]');
+      await expect(archiveItem).toBeVisible();
+      page.once("dialog", (d) => d.accept());
+      await archiveItem.click();
+
+      // The project leaves the active grid and the feed's rollups[] (archivedProjects[] carries it).
+      await expect.poll(async () => {
+        const res = await page.request.get("/api/rollups");
+        const body = await res.json();
+        return (body.rollups as Array<{ project: { id: string } }>).some((r) => r.project.id === projectId);
+      }).toBe(false);
+      await expect(pcard).toHaveCount(0);
+
+      // ── Archived projects surface ── collapsed by default; expand and assert the row is there.
+      const archProj = view.locator('[data-testid="archived-projects"]');
+      await expect(archProj).toBeVisible();
+      await archProj.locator(".done-head").click();
+      const archRow = archProj.locator(`.archrow[data-archived-project-id="${projectId}"]`);
+      await expect(archRow).toBeVisible();
+      await expect(archRow).toContainText(name);
+
+      // ── Restore ── from the archived-projects row → project rejoins the active grid.
+      await archRow.locator('[data-projaction="restore"]').click();
+      await expect.poll(async () => {
+        const res = await page.request.get("/api/rollups");
+        const body = await res.json();
+        return (body.rollups as Array<{ project: { id: string } }>).some((r) => r.project.id === projectId);
+      }).toBe(true);
+      await expect(view.locator(`.pcard[data-project-id="${projectId}"]`)).toBeVisible();
+
+      expect(pageErrors).toEqual([]);
+    });
   });
 
   // ── M4: create & assign workstreams from the Unfiled bucket ──────────────────
