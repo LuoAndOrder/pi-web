@@ -389,9 +389,11 @@ test.describe("Project Rollups dashboard", () => {
       await expect(wsRow.locator(".ws-dod")).toContainText("tracked manually");
       await expect(wsRow.locator(`[data-wsaddcriteria="${workstreamId}"]`)).toBeVisible();
       await wsRow.locator(".ws-head").click();
+      // The row action is WORKSTREAM-scoped (a session has no DoD of its own), so it reads
+      // "Mark workstream done" — honest about flipping the whole workstream + project ring.
       const markDone = wsRow.locator(`.sess [data-wsaction="done"][data-wsid="${workstreamId}"]`).first();
       await expect(markDone).toBeVisible();
-      await expect(markDone).toContainText("Mark done");
+      await expect(markDone).toContainText("Mark workstream done");
 
       // Mark done → persists status "done" AND the project ring flips to 100% (1 of 1 done).
       await markDone.click();

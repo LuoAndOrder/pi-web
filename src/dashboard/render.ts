@@ -1486,8 +1486,20 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     let primary: string;
     let secondary = "";
     if (s.status === "unset" && !isUnfiledRow) {
-      primary = `<button class="btn primary sm" data-wsaction="done" data-wsid="${esc(w.id)}" title="Mark this workstream done — it has no Definition of Done, so completion is by hand">${checkIcon()} Mark done</button>`;
-      secondary = `<button class="btn ghost sm" data-open="${s.id}">${continueIcon()} Open</button>`;
+      // A no-DoD session has no DoD of its own — "done" is a WORKSTREAM-level mark (the whole
+      // workstream rolls up done, flipping the project ring). The row action carries that scope
+      // explicitly ("Mark workstream done"), so a click never silently completes more than the
+      // label implies. And it must NEVER flip the workstream (and the ring) done while a SIBLING
+      // session is still running (run/loop) — that would mark active work complete over the
+      // user's head. When a sibling is live the row offers only Open; the deliberate
+      // workstream-done flip stays in the ws-header kebab (an explicit, clearly-scoped action).
+      const siblingRunning = (w.sessions || []).some((x) => x.id !== s.id && (x.status === "run" || x.status === "loop"));
+      if (siblingRunning) {
+        primary = `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} Open</button>`;
+      } else {
+        primary = `<button class="btn primary sm" data-wsaction="done" data-wsid="${esc(w.id)}" title="Mark the whole workstream “${esc(w.name)}” done — it has no Definition of Done, so completion is by hand">${checkIcon()} Mark workstream done</button>`;
+        secondary = `<button class="btn ghost sm" data-open="${s.id}">${continueIcon()} Open</button>`;
+      }
     } else {
       const verb = (navOnly && s.status === "sign") ? "Review"
         : s.status === "merge" ? "View" : (s.status === "run" || s.status === "loop" || s.status === "unset") ? "Open" : "Continue";

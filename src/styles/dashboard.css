@@ -71,11 +71,8 @@
 #dashboardView .headline em { font-style: normal; color: var(--st-block); }
 #dashboardView .headline em.calm { color: var(--st-run); }
 #dashboardView .headline em.sign { color: var(--st-sign); }
-#dashboardView .headline em.setup { color: var(--accent); }
 #dashboardView .subline { color: var(--muted); font-size: 13px; max-width: 760px; }
 #dashboardView .subline b { color: var(--text); font-weight: 650; }
-#dashboardView .subline .hero-setup-cta { margin-left: 4px; display: inline-flex; align-items: center; gap: 5px; color: #0b0f14; background: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 3px 11px; font-size: 12px; font-weight: 800; cursor: pointer; }
-#dashboardView .subline .hero-setup-cta:hover { background: color-mix(in srgb, var(--accent) 88%, #fff); border-color: color-mix(in srgb, var(--accent) 88%, #fff); }
 #dashboardView .subline .maybe { color: var(--muted); cursor: help; border-bottom: 1px dotted color-mix(in srgb, var(--muted) 45%, transparent); }
 #dashboardView .subline .maybe b { color: var(--text); font-weight: 650; }
 #dashboardView .softline { margin-top: 9px; display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
@@ -106,10 +103,6 @@
 #dashboardView .pill.sign .sw { background: var(--st-sign); }
 #dashboardView .pill.sign .n { color: var(--st-sign); }
 #dashboardView .pill.sign:hover { border-color: color-mix(in srgb, var(--st-sign) 60%, var(--border)); }
-#dashboardView .pill.setup { color: var(--st-sign); border-color: color-mix(in srgb, var(--st-sign) 34%, var(--border)); }
-#dashboardView .pill.setup .sw { background: transparent; box-shadow: inset 0 0 0 1.4px var(--st-sign); }
-#dashboardView .pill.setup .n { color: var(--st-sign); }
-#dashboardView .pill.setup:hover { border-color: color-mix(in srgb, var(--st-sign) 60%, var(--border)); }
 #dashboardView .subline .delta a { color: color-mix(in srgb, var(--text) 90%, transparent); cursor: pointer; border-bottom: 1px dotted color-mix(in srgb, var(--muted) 45%, transparent); }
 #dashboardView .subline .delta a:hover { color: var(--accent); border-bottom-color: var(--accent); }
 #dashboardView .subline .delta .dnums { color: color-mix(in srgb, var(--muted) 82%, transparent); font-weight: 500; border-bottom: 0; }
@@ -400,8 +393,6 @@
 #dashboardView .grp-h .gt.sgn { color: var(--st-sign); }
 #dashboardView .grp-h .gt.sup { color: var(--st-sign); }
 #dashboardView .grp-h .gc { color: color-mix(in srgb, var(--muted) 75%, transparent); font-weight: 450; }
-#dashboardView .prow .setup-cta { flex: 0 0 auto; border-color: color-mix(in srgb, var(--st-sign) 38%, var(--border)); color: var(--st-sign); }
-#dashboardView .prow .setup-cta:hover { border-color: color-mix(in srgb, var(--st-sign) 60%, var(--border)); background: color-mix(in srgb, var(--st-sign) 8%, transparent); }
 #dashboardView .grp-h .chev { margin-left: auto; }
 #dashboardView .grpcard.open .grp-h .chev { transform: rotate(90deg); }
 #dashboardView .grp-b { display: none; border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
@@ -413,8 +404,6 @@
 #dashboardView .prow .pp { font-size: 11px; color: color-mix(in srgb, var(--muted) 72%, transparent); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #dashboardView .prow .psum { font-size: 12px; color: var(--muted); flex: 0 0 auto; }
 #dashboardView .prow .psum b { color: color-mix(in srgb, var(--text) 85%, transparent); font-weight: 650; }
-#dashboardView .prow .setup-sum { display: inline-flex; align-items: center; gap: 6px; color: var(--st-sign); font-weight: 650; }
-#dashboardView .prow .setup-sum .qmk { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 999px; font-size: 10px; font-weight: 800; color: var(--st-sign); box-shadow: inset 0 0 0 1.4px var(--st-sign); }
 #dashboardView .prow.open { background: color-mix(in srgb, var(--panel-2) 60%, transparent); }
 #dashboardView .prow-body { display: none; background: color-mix(in srgb, var(--bg) 25%, transparent); border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent); }
 #dashboardView .prow-body.open { display: block; }
