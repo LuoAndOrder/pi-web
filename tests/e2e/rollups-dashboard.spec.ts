@@ -332,8 +332,10 @@ test.describe("Project Rollups dashboard", () => {
     const badgeClass = (await loopBadge.getAttribute("class")) || "";
     expect(badgeClass).not.toMatch(/warn|amber|over|stall|alarm/i);
 
-    // Expand the workstream to reveal its session rows + the per-session loop telemetry.
-    await wsRow.locator(".ws-head").click();
+    // Expand the workstream to reveal its session rows + the per-session loop telemetry. Click the
+    // NAME (not the head's center, which on a narrow viewport can land on the ws-meta "+ New
+    // session" button and fire it instead of toggling).
+    await wsRow.locator(".ws-name").click();
 
     // Iteration/budget telemetry lives ONLY in the muted "proposed" band, never live —
     // and with no durable iteration log it reads "…not live yet", never a fabricated "iter N".
@@ -388,7 +390,10 @@ test.describe("Project Rollups dashboard", () => {
       await expect(wsRow).toBeVisible();
       await expect(wsRow.locator(".ws-dod")).toContainText("tracked manually");
       await expect(wsRow.locator(`[data-wsaddcriteria="${workstreamId}"]`)).toBeVisible();
-      await wsRow.locator(".ws-head").click();
+      // Expand the workstream by clicking its NAME (a non-interactive part of the head that still
+      // bubbles to the data-toggle="ws" handler). Clicking the head's center would land on the
+      // "+ Add criteria to auto-track" button it contains and open the DoD drawer instead.
+      await wsRow.locator(".ws-name").click();
       // The row action is WORKSTREAM-scoped (a session has no DoD of its own), so it reads
       // "Mark workstream done" — honest about flipping the whole workstream + project ring.
       const markDone = wsRow.locator(`.sess [data-wsaction="done"][data-wsid="${workstreamId}"]`).first();
@@ -575,7 +580,14 @@ test.describe("Project Rollups dashboard", () => {
       await expect(view.locator('[data-testid="signoff"] [data-open="mock-current"]')).toHaveCount(0);
 
       // ── Restore then Cancel ── restore from the Archived row, then cancel (abandon) it.
-      await archived.locator(`.archrow[data-ws-id="${workstreamId}"] [data-wsaction="restore"]`).click();
+      // The archive action raised a bottom-pinned toast (5.2s, pointer-events:auto) that overlaps
+      // the Archived section on a narrow viewport and intercepts the Restore click — wait for it to
+      // clear first. (A realtime refetch can also re-render the Archived section collapsed, so
+      // re-expand it if needed before targeting the row.)
+      await expect(page.locator("#dashboardToast.show")).toHaveCount(0, { timeout: 7000 });
+      const restoreRow = archived.locator(`.archrow[data-ws-id="${workstreamId}"] [data-wsaction="restore"]`);
+      if (!(await restoreRow.isVisible())) await archived.locator(".done-head").click();
+      await restoreRow.click();
       await expect.poll(async () => (await rollupFor(page, projectId))?.workstreams[0]?.inactive ?? false).toBe(false);
 
       // Cancel confirms via the in-overlay modal → accept it.
@@ -742,6 +754,120 @@ test.describe("Project Rollups dashboard", () => {
 
       expect(pageErrors).toEqual([]);
     });
+
+    // The persistent "+ New project" button in the populated grid carries data-projaction="new"
+    // with NO data-projid (it's a fleet-level register-another action). Regression guard: the
+    // controller's runProjAction must NOT short-circuit on the empty id, or the button is dead and
+    // clicking it does nothing. The folder is chosen via the BROWSABLE folder picker (reused from
+    // the cwd-switch), then a name prompt — assert a second project is registered.
+    test("the grid '+ New project' button registers another project via the folder picker", async ({ page }) => {
+      const pageErrors = trackPageErrors(page);
+      const seedName = `E2E NewProjSeed ${Date.now()}`;
+      await createSignProject(page.request, seedName); // a project so the populated grid + button render
+
+      await page.locator("#dashboardButton").click();
+      const view = page.locator("#dashboardView");
+      await expect(view).toBeVisible();
+
+      const newProjBtn = view.locator('.newproj[data-projaction="new"]');
+      await expect(newProjBtn).toBeVisible();
+      await newProjBtn.click();
+
+      // The click must open the BROWSABLE folder picker — proving the action fired (regression: a
+      // dead button would never show it). The picker is mounted on document.body (NOT inside
+      // #dashboardView) and must sit ABOVE the dashboard overlay (z-index). Its Select uses the
+      // input's value, so type an absolute path and confirm. A unique /tmp root keeps it off any
+      // real registry and (being empty) yields a calm rollup.
+      const root = `/tmp/rollups-e2e-newproj-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const projName = `E2E NewProj ${Date.now()}`;
+      const picker = page.locator(".folderPicker");
+      await expect(picker).toBeVisible();
+      // Wait for the initial directory load to settle — it overwrites the input with the resolved
+      // path, so fill AFTER the ".." row appears or our value would be clobbered mid-type.
+      await expect(picker.locator(".folderPickerRow").first()).toBeVisible();
+      await picker.locator(".folderPickerInput").fill(root);
+      await picker.getByRole("button", { name: "Use this folder" }).click();
+      await expect(picker).toBeHidden();
+
+      // Then the name prompt (the in-overlay #dashboardModal).
+      const modal = page.locator("#dashboardModal");
+      await expect(modal.locator(".mnmodal-title")).toHaveText("Name this project");
+      await modal.locator("#dashboardModalInput").fill(projName);
+      await modal.locator("[data-mnmodal-submit]").click();
+      await expect(modal).toBeHidden();
+
+      // Persisted: a second project with that root is now in the registry.
+      let createdId = "";
+      await expect.poll(async () => {
+        const res = await page.request.get("/api/projects");
+        const reg = (await res.json()).registry as { projects: Array<{ id: string; name: string; roots: string[] }> };
+        const created = reg.projects.find((p) => p.name === projName && p.roots.includes(root));
+        if (created && !createdId) { createdId = created.id; createdProjectIds.push(created.id); }
+        return !!created;
+      }).toBe(true);
+      // The new project rendered into the grid. Assert it's ATTACHED by id (a freshly-registered,
+      // need-free project lands in a COLLAPSED "Healthy & dormant" group as a .prow, so it's in the
+      // DOM but not visible). Targeting the id — not a loose getByText(projName) — also avoids a
+      // strict-mode multi-match with the "Registered <projName>" success toast.
+      await expect(view.locator(`[data-project-id="${createdId}"]`)).toBeAttached();
+
+      expect(pageErrors).toEqual([]);
+    });
+
+    // "+ New session" on a workstream row starts a fresh pi session in the project ROOT, attaches
+    // it to that workstream, and drops into the live conversation. The project must be rooted at a
+    // REAL directory (the server cwd's into it via /api/sessions/new → assertDirectory), so we root
+    // it at the mock sessions' cwd (PI_WEB_CWD = repo root on the playwright server).
+    test("the workstream '+ New session' button starts a session in the project root and attaches it", async ({ page }) => {
+      const pageErrors = trackPageErrors(page);
+      // A real on-disk root: the mock sessions' cwd.
+      const sessRes = await page.request.get("/api/sessions");
+      const allSessions = (await sessRes.json()).sessions as Array<{ id: string; cwd?: string }>;
+      const root = allSessions.find((s) => s.id === "mock-current")?.cwd as string;
+      expect(root, "mock-current must have a cwd").toBeTruthy();
+
+      const name = `E2E NewSess ${Date.now()}`;
+      const pRes = await page.request.post("/api/projects", { data: { name, roots: [root] } });
+      expect(pRes.status(), await pRes.text()).toBe(201);
+      const projectId = (await pRes.json()).project.id as string;
+      createdProjectIds.push(projectId);
+      const wRes = await page.request.post(`/api/projects/${projectId}/workstreams`, { data: { name: "Target workstream" } });
+      expect(wRes.status(), await wRes.text()).toBe(201);
+      const workstreamId = (await wRes.json()).workstream.id as string;
+
+      await page.locator("#dashboardButton").click();
+      const view = page.locator("#dashboardView");
+      await expect(view).toBeVisible();
+
+      // Open the card, then the workstream row's "+ New session" button (it lives in .ws-meta and
+      // must short-circuit the head's expand-toggle).
+      const pcard = view.locator(`.pcard[data-project-id="${projectId}"]`);
+      await expect(pcard).toBeVisible();
+      await pcard.locator(".pcard-head").click();
+      const newSessBtn = pcard.locator(`.ws[data-ws-id="${workstreamId}"] [data-newsess="${workstreamId}"]`);
+      await expect(newSessBtn).toBeVisible();
+      await newSessBtn.click();
+
+      // Lands in the live conversation: the dashboard closes and the new session's id is in the URL.
+      await expect(view).toBeHidden();
+      await expect.poll(() => new URL(page.url()).searchParams.get("sessionId")).toBeTruthy();
+      const newSessionId = new URL(page.url()).searchParams.get("sessionId")!;
+
+      // Persisted: the new session id is now in the workstream's explicit membership list (set via
+      // PUT /api/workstreams/:id/sessions — membership is an explicit list, NOT pure cwd-prefix). We
+      // assert the REGISTRY directly rather than the rollup: in PI_WEB_MOCK mode a freshly-minted
+      // session isn't added to the fixed mock /api/sessions feed, so the rollup join (which reads
+      // that feed) can't surface it — but the attach itself is what this feature guarantees, and the
+      // registry is its source of truth. (In real use the new session IS listed, so it rolls up.)
+      await expect.poll(async () => {
+        const res = await page.request.get("/api/projects");
+        const reg = (await res.json()).registry as { workstreams: Array<{ id: string; sessionIds: string[] }> };
+        const ws = reg.workstreams.find((w) => w.id === workstreamId);
+        return ws?.sessionIds.includes(newSessionId) ?? false;
+      }).toBe(true);
+
+      expect(pageErrors).toEqual([]);
+    });
   });
 
   // ── M4: create & assign workstreams from the Unfiled bucket ──────────────────
@@ -791,20 +917,26 @@ test.describe("Project Rollups dashboard", () => {
       await expect(view).toBeVisible();
 
       // A no-DoD project with only loose Unfiled sessions renders as a calm "manual" full
-      // .pcard (NOT a "Needs setup" alarm group — that framing is gone). R4: the all-loose card
-      // AUTO-OPENS and surfaces a prominent "Organize N unfiled sessions" CTA, and its Unfiled
-      // bucket is open by default, so the organize tools are reachable WITHOUT any expand clicks.
+      // .pcard (NOT a "Needs setup" alarm group — that framing is gone). Loose/ephemeral sessions
+      // are DE-EMPHASIZED: the card renders COLLAPSED (no auto-open), and the prompt is a QUIET,
+      // optional line ("N loose sessions — organize … if you want") with a muted "organize ↓"
+      // jump, NOT a loud "Organize N unfiled sessions" CTA. Triage is opt-in.
       await expect(view.locator('[data-testid="needs-setup"]')).toHaveCount(0);
       const card = view.locator(`.pcard[data-project-id="${projectId}"]`);
       await expect(card).toBeVisible();
-      await expect(card).toHaveClass(/\bopen\b/); // auto-open (no head click needed)
-      await expect(card).toContainText("Organize 2 unfiled sessions");
+      await expect(card).not.toHaveClass(/\bopen\b/); // collapsed by default — not auto-opened
+      await expect(card).toContainText("2 loose sessions");
       const unfiledWs = view.locator(`.ws-unfiled[data-unfiled-project="${projectId}"]`);
-      await expect(unfiledWs).toBeVisible();
-      await expect(unfiledWs).toHaveClass(/\bopen\b/); // bucket open by default — tools visible
 
-      // The organize tools (assignment bar + New workstream) are present and visible WITHOUT
-      // expanding anything. The assignment bar starts disabled (no selection).
+      // The quiet "organize ↓" jump is the opt-in entry point: it expands the card AND the Unfiled
+      // bucket so the organize tools become reachable on demand (they're not forced into view).
+      await card.locator('.muted-jump[data-jump="unfiled-' + projectId + '"]').click();
+      await expect(card).toHaveClass(/\bopen\b/);
+      await expect(unfiledWs).toBeVisible();
+      await expect(unfiledWs).toHaveClass(/\bopen\b/); // bucket expanded by the jump — tools visible
+
+      // The organize tools (assignment bar + New workstream) are now present and visible. The
+      // assignment bar starts disabled (no selection).
       const newBtn = unfiledWs.locator("[data-mn-newws]");
       await expect(newBtn).toBeVisible();
       await expect(newBtn).toBeDisabled();

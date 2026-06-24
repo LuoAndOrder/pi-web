@@ -72,6 +72,10 @@
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+.statusPath:hover {
+  color: var(--accent);
 }
 .activityStatus,
 .connectionStatus {

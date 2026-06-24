@@ -180,8 +180,12 @@ export interface RenderState {
 // Onboarding intent callbacks the controller wires to the REAL REST surface (S9). The
 // renderer stays render-only: it draws the onboarding card + binds buttons to these.
 export interface OnboardHandlers {
-  // Register a candidate (or the generic "Add a project") → POST /api/projects {name, roots}.
+  // Register a specific candidate (the one-tap per-folder "Add") → POST /api/projects {name, roots}.
   onRegister: (name: string, path: string) => void;
+  // The generic "Add a project" button → the typed-path flow (prompt pre-filled with the busiest
+  // detected candidate, editable to ANY absolute path). Lets the user pick the directory rather
+  // than silently registering the first candidate.
+  onAddProject: () => void;
   // Start the user's first pi session → sessions.startNewSession() then close the overlay.
   onStartSession: () => void;
 }
@@ -1163,9 +1167,9 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     if (manual.length) {
       // A lone manual project is the canonical cold-start. Give it the same `.single`
       // treatment the `full` grid uses so it doesn't render left-aligned at the 360px
-      // min-width with a large empty gutter (which also squeezes the organize bar). The
-      // `.grid.single:has(.pcard.open)` rule then stretches the auto-opened (allLoose)
-      // fresh card to the full page width for a balanced cold-start.
+      // min-width with a large empty gutter. The card now renders COLLAPSED (loose sessions
+      // are de-emphasized, not auto-opened); the `.grid.single:has(.pcard.open)` rule still
+      // stretches it to full width once the user expands it.
       const manualSingle = manual.length === 1 ? "single" : "";
       out += `<div class="grid ${manualSingle}" data-testid="manual-projects">` + manual.map((p) => renderCard(p)).join("") + `</div>`;
     }
@@ -1226,26 +1230,27 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const poleLine = allOpenEnded
       ? `<div class="csum-pole"><span class="plbl">Continuous loop — no terminal Definition of Done.</span></div>`
       : noDod
-        // Loose Unfiled sessions = NORMAL, not broken: organize them into workstreams and
-        // mark them done. NO "set a Definition of Done" gate (M3). The cold-start CTA names the
-        // count + jumps straight to the (auto-open) bucket so the organize tools are one click away.
+        // Loose Unfiled sessions = NORMAL and OPTIONAL to organize — not everything has to map to a
+        // workstream, and many sessions are ephemeral. So this is a QUIET line, not a loud CTA: the
+        // bucket stays collapsed and the "organize" jump expands it on demand (issue: triage was too
+        // pushy). NO "set a Definition of Done" gate (M3).
         ? (allLoose
-            ? `<div class="csum-pole"><span class="plbl"><b>Organize ${unfiledN} unfiled session${unfiledN === 1 ? "" : "s"}</b> into workstreams, then Mark done.</span> <button class="jump" data-jump="unfiled-${esc(p.id)}">organize ↓</button></div>`
+            ? `<div class="csum-pole"><span class="plbl">${unfiledN} loose session${unfiledN === 1 ? "" : "s"} — organize into workstreams if you want.</span> <button class="muted-jump" data-jump="unfiled-${esc(p.id)}">organize ↓</button></div>`
             : `<div class="csum-pole"><span class="plbl">No sessions yet — start one, or add a workstream from the ⋯ menu.</span></div>`)
         : pole && !wsDone(pole)
           ? `<div class="csum-pole"><span class="plbl">Long pole:</span> <b>${esc(shortWs(pole.name))}</b> ${poleTag}</div>`
           : ``;
     // A STRUCTURED project (real workstreams done/in-progress) can ALSO carry leftover loose
-    // sessions — surface them with their own "organize ↓" jump so the cold-start affordance is
-    // reachable for ANY project with an Unfiled bucket, not only all-loose ones (R4).
+    // sessions — surface them as a QUIET, optional line (collapsed bucket, on-demand jump), never a
+    // demanding CTA: organizing loose/ephemeral sessions is opt-in.
     const unfiledNote = (!noDod && unfiledN > 0)
-      ? `<div class="csum-pole"><span class="plbl"><b>${unfiledN} unfiled session${unfiledN === 1 ? "" : "s"}</b> to organize</span> <button class="jump" data-jump="unfiled-${esc(p.id)}">organize ↓</button></div>`
+      ? `<div class="csum-pole"><span class="plbl">${unfiledN} loose session${unfiledN === 1 ? "" : "s"}</span> <button class="muted-jump" data-jump="unfiled-${esc(p.id)}">organize ↓</button></div>`
       : "";
     const gaugeLine = allOpenEnded
       ? `<div class="csum-line"><b>∞ looping</b> · open-ended ${dotStrip(p)}</div>`
       : noDod
         ? (allLoose
-            ? `<div class="csum-line"><b>${unfiledN}</b> unfiled session${unfiledN === 1 ? "" : "s"} to organize ${dotStrip(p)}</div>`
+            ? `<div class="csum-line"><span class="muted">${unfiledN} loose session${unfiledN === 1 ? "" : "s"}</span> ${dotStrip(p)}</div>`
             : `<div class="csum-line"><span class="muted">No sessions yet</span> ${dotStrip(p)}</div>`)
         : `<div class="csum-line"><b>${g.done} of ${g.total}</b> ${scopedWord} done${loopClause} ${dotStrip(p)}</div>`;
     const ringsBlock = `<div class="csum">
@@ -1272,7 +1277,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       ping = (live.id && live.id === state._pingId) ? " ping" : "";
     }
 
-    return `<article class="pcard${allLoose ? " open" : ""}" id="card-${p.id}" data-p="${p.id}" data-project-id="${p.id}">
+    return `<article class="pcard" id="card-${p.id}" data-p="${p.id}" data-project-id="${p.id}">
       <div class="pcard-head" data-toggle="card">
         <div class="pcard-id">
           <div class="pname"><span class="nm">${esc(p.name)}</span> ${p.nest ? `<span class="nest" title="own project root nested inside its parent — its work is NOT counted toward the parent">⤷ ${esc(p.nest)}</span>` : ""}</div>
@@ -1352,12 +1357,13 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
         ? `<span class="muted">No criteria — tracked manually (Mark done by hand).</span> <button class="btn ghost sm wsaddcrit" type="button" data-wsaddcriteria="${esc(w.id)}" title="Optional: add criteria so the ring auto-tracks progress toward done">+ Add criteria to auto-track</button>`
         : dodInline(w.dod, w.dodSrc));
     const unfiledTools = isUnfiled ? unfiledAssignHtml(w, p) : "";
-    // R4 — the Unfiled bucket renders OPEN by default (its `.sess-list` — the organize tools +
-    // session rows — is hidden behind `.ws.open` for normal workstreams). You never "collapse"
-    // Unfiled; you organize OUT of it, so its tools must be immediately reachable the moment its
-    // card/row is open, regardless of the project's DoD/card state. The stable `id` lets the
-    // card summary's "organize ↓" jump scroll + expand straight to it.
-    return `<div class="ws${isUnfiled ? " ws-unfiled open" : ""}" data-w="${w.id}" data-ws-id="${w.id}"${isUnfiled ? ` id="unfiled-${esc(p.id)}" data-unfiled-project="${esc(p.id)}"` : ""}>
+    // The Unfiled bucket renders COLLAPSED by default like any other workstream (its `.sess-list`
+    // is hidden behind `.ws.open`). Organizing loose/ephemeral sessions is OPTIONAL — not everything
+    // maps to a workstream — so its tools are revealed on demand: clicking its head expands it, and
+    // the card summary's quiet "organize ↓" jump (which expands the bucket + its card/row ancestors)
+    // scrolls straight to it. The stable `id` is that jump target.
+    // (This reverses the earlier R4 "open by default" choice, per the de-emphasis-triage goal.)
+    return `<div class="ws${isUnfiled ? " ws-unfiled" : ""}" data-w="${w.id}" data-ws-id="${w.id}"${isUnfiled ? ` id="unfiled-${esc(p.id)}" data-unfiled-project="${esc(p.id)}"` : ""}>
       <div class="ws-head" data-toggle="ws">
         <div class="ws-ring">${ringSvg(w, 44)}</div>
         <div class="ws-id">
@@ -1365,6 +1371,9 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
           <div class="ws-dod">${isUnfiled ? `<span class="muted">loose sessions matched to this project root — select to group them into a workstream</span>` : wsDod}</div>
         </div>
         <div class="ws-meta">
+          ${(!isUnfiled && !w._inactive)
+            ? `<button class="ws-newsess" type="button" data-newsess="${esc(w.id)}" data-newsess-project="${esc(p.id)}" title="Start a new pi session in this workstream (opens in the project root)" aria-label="New session in ${esc(w.name)}">${plusIcon()}<span class="ws-newsess-lbl">New session</span></button>`
+            : ""}
           <span class="ws-cnt">${w.sessions.length} session${w.sessions.length > 1 ? "s" : ""}</span>
           ${wsMenu(w)}
           <span class="ws-chev chev">${chevIcon()}</span>
@@ -1681,11 +1690,10 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
   function bindOnboard() {
     if (!onboard) return;
     const add = wrap.querySelector<HTMLButtonElement>("#obAdd");
-    if (add) add.onclick = () => {
-      const first = (state.candidates || [])[0];
-      if (first) onboard.onRegister(first.name, first.path);
-      else onboard.onStartSession(); // nothing to register yet → start a session to seed a candidate
-    };
+    // "Add a project" routes to the typed-path flow so the user picks/edits the directory (pre-filled
+    // with the busiest detected candidate), instead of silently registering the first candidate. The
+    // per-candidate "Add" buttons below remain one-tap for their specific folder.
+    if (add) add.onclick = () => onboard.onAddProject();
     const start = wrap.querySelector<HTMLButtonElement>("#obStart");
     if (start) start.onclick = () => onboard.onStartSession();
     wrap.querySelectorAll<HTMLButtonElement>("[data-cand]").forEach((b) => {

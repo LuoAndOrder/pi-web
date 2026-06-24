@@ -115,8 +115,10 @@ export function createDashboard(options: {
   const renderer = createRenderer({
     wrap: elements.dashboardWrap,
     state: view,
-    // Cold-start onboarding intents (S9), wired to the REAL REST surface.
-    onboard: { onRegister: registerProject, onStartSession: startFirstSession },
+    // Cold-start onboarding intents (S9), wired to the REAL REST surface. "Add a project" reuses
+    // the grid's typed-path flow (newProjectFromGrid) so the directory is pickable/editable, not
+    // silently the first detected candidate.
+    onboard: { onRegister: registerProject, onAddProject: () => void newProjectFromGrid(), onStartSession: startFirstSession },
   });
 
   function renderLoadingOrError(): boolean {
@@ -1241,6 +1243,55 @@ export function createDashboard(options: {
     await refetch();
   }
 
+  // "+ New session" on a workstream row — start a fresh pi session in the project's ROOT folder,
+  // attach it to the workstream, then open the live conversation. Membership is an explicit list
+  // (not pure cwd-prefix), so we POST /api/sessions/new {cwd: root} to mint the session, then PUT
+  // the workstream's sessions as the UNION of its current members + the new id (PUT replaces the
+  // whole set, so a bare [newId] would detach the rest). Finally close the overlay and drop into
+  // the conversation — mirroring the drill-in/Continue landing.
+  async function newSessionForWorkstream(workstreamId: string, projectId: string) {
+    closeWsMenus();
+    const ctx = findProjectContext(projectId);
+    const root = (ctx?.roots || [])[0] || "";
+    if (!root) { showToast("This project has no folder to start a session in — add a root first."); return; }
+    const wsName = findWsContext(workstreamId)?.wsName || "workstream";
+    // 1) Mint the session in the project root.
+    let sessionId = "";
+    let cwd = root;
+    try {
+      const res = await fetch("/api/sessions/new", {
+        method: "POST",
+        headers: api.headers(),
+        body: JSON.stringify({ cwd: root }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) throw new Error(data.error || await res.text());
+      sessionId = typeof data.sessionId === "string" ? data.sessionId : "";
+      if (typeof data.cwd === "string" && data.cwd) cwd = data.cwd;
+    } catch (error) {
+      showToast(`Couldn't start a session for <b>${escText(wsName)}</b> — ${escText(error instanceof Error ? error.message : String(error))}`);
+      return;
+    }
+    if (!sessionId) { showToast(`Couldn't start a session for <b>${escText(wsName)}</b> — no session id returned.`); return; }
+    // 2) Attach it to the workstream (UNION with current members so we don't detach the rest).
+    const union = Array.from(new Set([...targetCurrentSessionIds(workstreamId), sessionId]));
+    try {
+      const res = await fetch(`/api/workstreams/${encodeURIComponent(workstreamId)}/sessions`, {
+        method: "PUT",
+        headers: api.headers(),
+        body: JSON.stringify({ sessionIds: union }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    } catch (error) {
+      // The session exists (it'll appear in Unfiled); only the attach failed — be honest.
+      showToast(`Started a session, but couldn't attach it to <b>${escText(wsName)}</b> — ${escText(error instanceof Error ? error.message : String(error))}`);
+    }
+    // 3) Drop into the live conversation.
+    closeDashboard({ syncUrl: false }); // openSession owns the navigation to /?sessionId=
+    await sessions.openSession(sessionId, cwd);
+    showContextBand(sessionId);
+  }
+
   // Session-independent DoD-drawer open: used for an empty workstream that no session backs.
   // Mirrors openDodDrawer but seeds an empty draft, an empty sessionId (the session_idle auto
   // evaluator simply won't have a target — it stays an opt-in chip), and the project root as cwd
@@ -1576,25 +1627,20 @@ export function createDashboard(options: {
     return null;
   }
 
-  // "+ New project" from the populated grid. Reuses refreshCandidates() to suggest a folder,
-  // then prompts for a name — registerProject() does the POST + refetch. When there are no
-  // unregistered candidates, the user can still type an absolute path by hand (the same
-  // POST /api/projects {name, roots:[path]} contract the onboarding cards use).
+  // "+ New project" from the populated grid. Picks the folder via the BROWSABLE folder picker
+  // (the same one the cwd-switch uses), pre-seeded with the busiest unregistered candidate, then
+  // prompts for a name — registerProject() does the POST + refetch.
   async function newProjectFromGrid() {
     closeProjMenus();
     await refreshCandidates();
     const cands = view.candidates || [];
     const suggestedRoot = cands[0]?.path || "";
-    const root = (await promptModal({
-      title: "Register a project folder",
-      body: cands.length
-        ? `pi found <b>${cands.length}</b> unregistered folder${cands.length === 1 ? "" : "s"} with sessions — the busiest is pre-filled. Edit to any absolute path.`
-        : "Paste the absolute path of the folder to track.",
-      value: suggestedRoot,
-      placeholder: "/Users/you/project",
-      confirmLabel: "Next",
+    const root = (await sessions.pickFolder({
+      startPath: suggestedRoot,
+      title: "Choose a project folder",
+      confirmLabel: "Use this folder",
     }) || "").trim();
-    if (!root) return; // cancelled / empty → no-op (no fabricated default)
+    if (!root) return; // cancelled → no-op (no fabricated default)
     const defaultName = cands.find((c) => c.path === root)?.name || basename(root) || "New project";
     const name = (await promptModal({
       title: "Name this project",
@@ -1699,10 +1745,12 @@ export function createDashboard(options: {
   }
 
   function runProjAction(action: string, projectId: string) {
-    if (!projectId) return;
     closeProjMenus();
+    // "new" is a fleet-level action (register ANOTHER project) and intentionally carries NO
+    // projectId — it must run regardless. Every other verb is project-scoped, so guard those.
+    if (action === "new") { void newProjectFromGrid(); return; }
+    if (!projectId) return;
     switch (action) {
-      case "new": void newProjectFromGrid(); break;
       case "newws": void newWorkstreamForProject(projectId); break;
       case "rename": void renameProject(projectId); break;
       case "archive": void archiveProject(projectId); break;
@@ -1879,6 +1927,17 @@ export function createDashboard(options: {
       event.stopPropagation();
       closeWsMenus();
       void addCriteriaToWorkstream(wsAddCrit.getAttribute("data-wsaddcriteria") || "");
+      return;
+    }
+
+    // "+ New session" on a workstream row — start a session in the project root + attach it, then
+    // open the conversation. Checked BEFORE the data-toggle="ws" head toggle it lives inside, so a
+    // click on it never just expands/collapses the workstream.
+    const newSess = target.closest<HTMLElement>("[data-newsess]");
+    if (newSess) {
+      event.preventDefault();
+      event.stopPropagation();
+      void newSessionForWorkstream(newSess.getAttribute("data-newsess") || "", newSess.getAttribute("data-newsess-project") || "");
       return;
     }
 

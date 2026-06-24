@@ -38,7 +38,10 @@
 .folderPickerBackdrop {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  /* Above the dashboard overlay (#dashboardView is z-index 50, its modals 80) so the picker is
+     usable when opened from the dashboard's "New project" flow — while staying below the token
+     overlay (1000). */
+  z-index: 100;
   display: flex;
   align-items: center;
   justify-content: center;

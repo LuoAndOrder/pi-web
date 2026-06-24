@@ -17,6 +17,13 @@ export type SessionsController = {
   applySessionUiState: (value: unknown) => void;
   markSessionRead: (sessionId?: string) => Promise<void>;
   openSession: (sessionId: string, cwd: string) => Promise<void>;
+  // Open the folder picker to change the working directory from anywhere (e.g. the status bar),
+  // not just the empty-session "Change folder" button.
+  changeWorkingDirectory: () => void;
+  // Open the browsable folder picker and resolve the chosen absolute path (or null if cancelled).
+  // Lets other surfaces (e.g. the dashboard's "New project") reuse the SAME picker instead of a
+  // typed-path prompt. `title`/`confirmLabel` relabel it for the caller's context.
+  pickFolder: (opts?: { startPath?: string; title?: string; confirmLabel?: string }) => Promise<string | null>;
 };
 
 function formatRelativeTime(value: string) {
@@ -161,14 +168,41 @@ export function createSessions(options: {
     refreshSessionTitle();
   }
 
-  async function openFolderPicker(startPath: string) {
+  // Apply a folder chosen in the picker. pi pins a session to its cwd once it has messages, so
+  // the server's /api/session/cwd (selectSessionCwd) only accepts a switch on an EMPTY session.
+  // For a session that already has messages — or is mid-response — "changing directory" therefore
+  // means starting a fresh session in the chosen folder rather than failing. An empty session
+  // switches in place. This lets the status-bar cwd be changed at any time (issue: the only
+  // affordance used to be the "Change folder" button, which shows only before the first message).
+  async function applyCwdSelection(cwd: string) {
+    const sessionHasMessages = elements.messagesEl.children.length > 0 || state.isStreaming;
+    if (sessionHasMessages) await startNewSession(cwd);
+    else await selectSessionCwd(cwd);
+  }
+
+  // The browsable folder picker, generalized so it backs BOTH the cwd-switch (Select → onSelect)
+  // and the dashboard's "New project" folder choice. `onSelect` runs when Select is clicked; if it
+  // throws, the error shows inline and the modal stays open to retry (the cwd flow relies on this).
+  // `onCancel` fires on cancel / backdrop dismiss. `title`/`confirmLabel` relabel it per caller.
+  type FolderPickerOptions = {
+    startPath: string;
+    title?: string;
+    confirmLabel?: string;
+    onSelect: (path: string) => Promise<void>;
+    onCancel?: () => void;
+  };
+
+  async function openFolderPicker(opts: FolderPickerOptions) {
+    const { startPath } = opts;
     blurActiveEditableOnMobile();
+    let dismissed = false;
+    const dismiss = () => { if (dismissed) return; dismissed = true; backdrop.remove(); opts.onCancel?.(); };
     const backdrop = document.createElement("div");
     backdrop.className = "folderPickerBackdrop";
     const modal = document.createElement("div");
     modal.className = "folderPicker";
     const title = document.createElement("h2");
-    title.textContent = "Select working directory";
+    title.textContent = opts.title || "Select working directory";
     const input = document.createElement("input");
     input.className = "folderPickerInput";
     input.value = startPath;
@@ -187,7 +221,7 @@ export function createSessions(options: {
     const select = document.createElement("button");
     select.type = "button";
     select.className = "primaryAction";
-    select.textContent = "Select folder";
+    select.textContent = opts.confirmLabel || "Select folder";
     actions.append(create, cancel, select);
     modal.append(title, input, list, error, actions);
     backdrop.append(modal);
@@ -238,15 +272,25 @@ export function createSessions(options: {
         create.disabled = false;
       }
     });
-    cancel.addEventListener("click", () => backdrop.remove());
-    backdrop.addEventListener("click", (event) => { if (event.target === backdrop) backdrop.remove(); });
+    cancel.addEventListener("click", dismiss);
+    backdrop.addEventListener("click", (event) => { if (event.target === backdrop) dismiss(); });
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") load(input.value).catch((e) => { error.textContent = e.message; });
     });
+    // ESC closes the PICKER (not whatever is underneath). stopPropagation + preventDefault keeps the
+    // app-level Escape shortcuts (e.g. dashboard-close) from firing behind the picker, which would
+    // otherwise tear down the surface the picker was opened from. Capture-phase so it wins the event.
+    backdrop.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      dismiss();
+    }, true);
     select.addEventListener("click", async () => {
       try {
         select.disabled = true;
-        await selectSessionCwd(input.value);
+        await opts.onSelect(input.value);
+        dismissed = true; // onSelect succeeded — close WITHOUT firing onCancel
         backdrop.remove();
       } catch (e) {
         error.textContent = e instanceof Error ? e.message : String(e);
@@ -1459,7 +1503,7 @@ export function createSessions(options: {
 
   function init() {
     new MutationObserver(updateEmptyCwdChooser).observe(elements.messagesEl, { childList: true });
-    elements.emptyCwdButton.addEventListener("click", () => openFolderPicker(state.currentCwd));
+    elements.emptyCwdButton.addEventListener("click", () => openFolderPicker({ startPath: state.currentCwd, onSelect: applyCwdSelection }));
     const headerTitle = elements.sessionDrawer.querySelector(".sessionDrawerHeader h2");
     if (headerTitle) {
       const filterWrap = document.createElement("div");
@@ -1542,5 +1586,17 @@ export function createSessions(options: {
     applySessionUiState,
     markSessionRead,
     openSession: openSessionTab,
+    changeWorkingDirectory: () => openFolderPicker({ startPath: state.currentCwd, onSelect: applyCwdSelection }),
+    pickFolder: (pickOpts) => new Promise<string | null>((resolve) => {
+      let picked = false;
+      void openFolderPicker({
+        startPath: pickOpts?.startPath || state.currentCwd,
+        title: pickOpts?.title,
+        confirmLabel: pickOpts?.confirmLabel,
+        // Resolve with the chosen path; onSelect must NOT throw (so the picker closes on Select).
+        onSelect: async (path) => { picked = true; resolve(path); },
+        onCancel: () => { if (!picked) resolve(null); },
+      });
+    }),
   };
 }

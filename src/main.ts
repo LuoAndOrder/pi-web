@@ -65,6 +65,9 @@ function updateMeta(data: any) {
   if ("sessionTitle" in data) statusBar.setStatusTitle(data.sessionTitle?.trim() || "New session");
   else if ("sessionName" in data) statusBar.setStatusTitle(data.sessionName?.trim() || "New session");
   elements.statusPathEl.textContent = state.currentCwd;
+  elements.statusPathEl.title = state.currentCwd
+    ? `Working directory: ${state.currentCwd}. Click to change.`
+    : "Set working directory";
   modelSettings.updateSummary();
   if (sessions) {
     if (data.sessionUiState) sessions.applySessionUiState(data.sessionUiState);
@@ -247,6 +250,17 @@ modelSettings.init();
 settings.init();
 dashboard.init();
 elements.dashboardButton.addEventListener("click", () => dashboard.open());
+// The status-bar cwd path is a button: clicking it opens the folder picker to change the
+// working directory at any time (an empty session switches in place; a session with messages
+// starts a new one in the chosen folder — pi pins a session to its cwd after the first message).
+elements.statusPathEl.setAttribute("role", "button");
+elements.statusPathEl.tabIndex = 0;
+elements.statusPathEl.addEventListener("click", () => sessions.changeWorkingDirectory());
+elements.statusPathEl.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  sessions.changeWorkingDirectory();
+});
 initKeyboardShortcuts([
   {
     id: "sessions.toggleDrawer",

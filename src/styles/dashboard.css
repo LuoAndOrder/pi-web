@@ -338,6 +338,9 @@
 #dashboardView .sess-list { display: none; padding: 0 16px 8px 16px; }
 #dashboardView .ws.open .sess-list { display: block; }
 #dashboardView .ws-cnt { font-size: 11px; color: var(--muted); }
+#dashboardView .ws-newsess { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px 0 7px; border-radius: 7px; border: 1px dashed color-mix(in srgb, var(--accent) 42%, var(--border)); background: transparent; color: color-mix(in srgb, var(--accent) 92%, var(--text)); cursor: pointer; font-size: 11px; font-weight: 650; }
+#dashboardView .ws-newsess:hover { border-style: solid; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+#dashboardView .ws-newsess svg { width: 13px; height: 13px; }
 
 /* session row */
 #dashboardView .sess { display: flex; align-items: center; gap: 12px; padding: 11px 12px; margin: 6px 0 0; border-radius: 11px; border: 1px solid color-mix(in srgb, var(--border) 70%, transparent); background: color-mix(in srgb, var(--panel-2) 70%, transparent); cursor: pointer; }
@@ -680,6 +683,10 @@
   #dashboardView .headline { font-size: 20px; }
   #dashboardView .grid.single { grid-template-columns: 1fr; }
   #dashboardView .dashClose { top: 10px; right: 12px; }
+  /* Collapse the workstream "+ New session" button to icon-only on narrow viewports so it doesn't
+     crowd the header row (which is also the tap target to expand the workstream). */
+  #dashboardView .ws-newsess { padding: 0; width: 24px; justify-content: center; }
+  #dashboardView .ws-newsess .ws-newsess-lbl { display: none; }
 }
 
 /* ═══════════════ drill-in oversight context band (above the REAL conversation) ═══════════════
