@@ -52,8 +52,11 @@ describe("deriveUiStatus (§5.3 table)", () => {
     expect(toWorkItemStatus(ui)).toBe("in_progress");
   });
 
-  it("a running loop → loop", () => {
-    expect(deriveUiStatus({ runtime: runtime({ isRunning: true }), isLoop: true })).toBe("loop");
+  it("a running session is always 'run' (loop is a workstream concept derived client-side, not here)", () => {
+    // deriveUiStatus has no isLoop input: the "loop" render-state is inherited per-session
+    // from the owning workstream in the client adapter (rollupAdapter toSession), the single
+    // source of truth. The server only ever emits "run" for a running session.
+    expect(deriveUiStatus({ runtime: runtime({ isRunning: true }) })).toBe("run");
   });
 
   it("git conflicted → block (running is outranked by a real blocker)", () => {

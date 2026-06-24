@@ -34,8 +34,6 @@ export interface UiStatusInput {
   elicitation?: boolean;
   /** A tool error / abnormal agent_end was observed. */
   fail?: boolean;
-  /** The session/workstream is an autonomous loop (renders ∞ "running"). */
-  isLoop?: boolean;
   /** Whether a DoD targets this item at all. false → "unset" = MANUAL mode (no DoD):
    *  the item is tracked by hand (Mark done), a CALM state — NOT "broken"/"needs setup". */
   hasDoD?: boolean;
@@ -51,7 +49,11 @@ export function deriveUiStatus(input: UiStatusInput): UiStatus {
   if (input.fail) return "fail";
   if (input.git?.blocked) return "block"; // git conflicted is a real blocker
   if (input.elicitation) return "block"; // a structured ask needs input
-  if (input.runtime?.isRunning) return input.isLoop ? "loop" : "run";
+  // A running session is "run". The "loop" render-state is a WORKSTREAM-level concept
+  // (Workstream.isLoop), inherited per-session in the client adapter (rollupAdapter
+  // toSession), which is the single source of truth for loop classification — the
+  // server never needs an isLoop input here.
+  if (input.runtime?.isRunning) return "run";
   // A non-elicited idle stop: surfaced as "block" render-state but split out by
   // isSoftWait (so it never enters the hard Needs-you count).
   if (input.softWait) return "block";

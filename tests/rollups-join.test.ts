@@ -664,6 +664,56 @@ describe("assembleRollups", () => {
     expect(p.workstreams.find((w) => w.workstream.id === "dead")!.inactive).toBe(true);
   });
 
+  it("a DONE-then-ARCHIVED workstream still counts toward the gauge (archiving finished work never regresses the ring)", async () => {
+    // "Mark done → archive to declutter" (restoreWs in dashboard.ts): a 1/2 = 50% project
+    // must STAY 1/2 after the done workstream is archived, not drop to 0/1 = 0%.
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["shipped", "wip"] })],
+      workstreams: [
+        // Done AND archived (filed away to declutter) — still a resolved unit in k-of-n.
+        workstream({ id: "shipped", projectId: "A", status: "done", archived: true, sessionIds: ["s1"] }),
+        // Active, not yet done.
+        workstream({ id: "wip", projectId: "A", status: "in_progress", sessionIds: ["s2"] }),
+      ],
+    };
+    const rollups = await assembleRollups(
+      registry,
+      [session({ id: "s1", cwd: "/a" }), session({ id: "s2", cwd: "/a" })],
+      cleanStub,
+    );
+    const p = rollups[0];
+    // 1 of 2 scorable workstreams done → 50% (the archived-done one stays counted), not 0/1.
+    expect(p.progress.met).toBe(1);
+    expect(p.progress.total).toBe(2);
+    expect(p.progress.percent).toBe(50);
+    // It is still flagged inactive for the UI (renders in the Archived section, out of the
+    // active grid) even though it counts toward the project ring.
+    expect(p.workstreams.find((w) => w.workstream.id === "shipped")!.inactive).toBe(true);
+  });
+
+  it("an ARCHIVED-but-UNFINISHED workstream is excluded from the gauge (shelved, not resolved)", async () => {
+    // Archiving incomplete work merely shelves it: it must NOT inflate the ring either.
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["shelved", "wip"] })],
+      workstreams: [
+        workstream({ id: "shelved", projectId: "A", status: "in_progress", archived: true, sessionIds: ["s1"] }),
+        workstream({ id: "wip", projectId: "A", status: "in_progress", sessionIds: ["s2"] }),
+      ],
+    };
+    const rollups = await assembleRollups(
+      registry,
+      [session({ id: "s1", cwd: "/a" }), session({ id: "s2", cwd: "/a" })],
+      cleanStub,
+    );
+    const p = rollups[0];
+    // Only the active "wip" is scorable → 0 of 1 done, the shelved one is out of scope.
+    expect(p.progress.total).toBe(1);
+    expect(p.progress.met).toBe(0);
+    expect(p.progress.percent).toBe(0);
+  });
+
   it("a DONE-status workstream still counts toward the gauge as done (not inactive)", async () => {
     const registry: ProjectRegistry = {
       version: 1,

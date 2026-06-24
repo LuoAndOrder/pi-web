@@ -575,18 +575,29 @@ function isUnfiledWorkstream(w: WorkstreamRollup): boolean {
   return w.workstream.id.endsWith(":unfiled");
 }
 
-/** Un-scorable = NOT a unit the project ring is "k of n" against:
- *   - archived / abandoned workstreams (shelved by the human — M1),
+/** Un-scorable = NOT a unit the project ring is "k of n done/archived" against:
  *   - open-ended autonomous loops (no terminal DoD to complete),
- *   - the synthetic Unfiled catch-all bucket (loose, un-triaged sessions).
- *  EVERY other active workstream is SCORABLE — whether it auto-tracks a DoD or is a
- *  MANUAL (no-DoD) workstream. A manual workstream is never "needs setup": it counts
- *  via its STORED status (done iff status==="done"; see workstreamDone), so a no-DoD
- *  workstream is a calm "in progress · Mark done" slot in the ring, not a 0/0 gate. */
+ *   - the synthetic Unfiled catch-all bucket (loose, un-triaged sessions),
+ *   - CANCELLED (abandoned) workstreams (out of scope — neither resolved nor counted),
+ *   - archived workstreams that are NOT done (merely shelved, unfinished).
+ *  EVERY other workstream is SCORABLE — whether it auto-tracks a DoD or is a MANUAL
+ *  (no-DoD) workstream, AND including a DONE-then-archived one (it stays a resolved unit
+ *  in the ring, see below). A manual workstream is never "needs setup": it counts via its
+ *  STORED status (done iff status==="done"; see workstreamDone), so a no-DoD workstream is
+ *  a calm "in progress · Mark done" slot in the ring, not a 0/0 gate. */
 function wsUnscorable(w: WorkstreamRollup): boolean {
-  if (w.inactive) return true;
   if (wsOpenEnded(w)) return true;
   if (isUnfiledWorkstream(w)) return true;
+  // Cancelled (abandoned) work leaves the ring entirely — it neither helps nor hurts the
+  // k-of-n (1 done + 1 cancelled reads 100%, not 50%). Checked before `archived` so an
+  // abandoned-then-archived workstream stays out of scope, never counted as resolved.
+  if (w.workstream.status === "abandoned") return true;
+  // Archived work: a DONE-then-archived workstream STILL counts toward k-of-n. "Mark
+  // done → archive to declutter" is an explicitly-supported flow (restoreWs in
+  // dashboard.ts) and decision #3 reads "k of n done/archived", so filing FINISHED work
+  // away must NOT regress the gauge (1/2 stays 1/2, never drops to 0/1). An archived but
+  // UNFINISHED workstream is merely shelved → excluded so it can't inflate the ring either.
+  if (w.workstream.archived) return !workstreamDone(w);
   return false;
 }
 

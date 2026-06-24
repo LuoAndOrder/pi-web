@@ -1163,7 +1163,13 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     // alarm group, and never collapsed into "Healthy & dormant" (it's active work). When the
     // ONLY cards are manual ones (a fresh fleet), they're already the page's primary content.
     if (manual.length) {
-      out += `<div class="grid" data-testid="manual-projects">` + manual.map((p) => renderCard(p)).join("") + `</div>`;
+      // A lone manual project is the canonical cold-start. Give it the same `.single`
+      // treatment the `full` grid uses so it doesn't render left-aligned at the 360px
+      // min-width with a large empty gutter (which also squeezes the organize bar). The
+      // `.grid.single:has(.pcard.open)` rule then stretches the auto-opened (allLoose)
+      // fresh card to the full page width for a balanced cold-start.
+      const manualSingle = manual.length === 1 ? "single" : "";
+      out += `<div class="grid ${manualSingle}" data-testid="manual-projects">` + manual.map((p) => renderCard(p)).join("") + `</div>`;
     }
     if (dormant.length) {
       const sorted = dormant.slice().sort((a, b) => mergeRecency(a) - mergeRecency(b));
