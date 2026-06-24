@@ -1201,6 +1201,14 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const someLoop = p.workstreams.some(wsOpenEnded);
     const allOpenEnded = g.total === 0 && someLoop;
     const noDod = g.total === 0 && !someLoop;
+    // R4 — loose sessions matched to this project root but no workstream live in the synthetic
+    // Unfiled bucket. Surfacing the count drives the prominent "Organize N unfiled sessions" CTA
+    // (the cold-start case) instead of the old "Set a Definition of Done" gate. A project can be
+    // all-loose (noDod) OR structured-with-leftovers (real workstreams + some unfiled) — both
+    // surface a count + an "organize ↓" jump straight to the auto-open bucket.
+    const unfiledWs = p.workstreams.find((w) => w._synthetic);
+    const unfiledN = unfiledWs ? unfiledWs.sessions.length : 0;
+    const allLoose = noDod && unfiledN > 0;
     const gaugeItem: RingItem = allOpenEnded ? { status: "loop", loop: true }
       : noDod ? { status: "unset" }
         : { status: "gauge", _sessGauge: { done: g.done, total: g.total, percent: g.percent } };
@@ -1215,21 +1223,33 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       ? `<div class="csum-pole"><span class="plbl">Continuous loop — no terminal Definition of Done.</span></div>`
       : noDod
         // Loose Unfiled sessions = NORMAL, not broken: organize them into workstreams and
-        // mark them done. NO "set a Definition of Done" gate (M3).
-        ? `<div class="csum-pole"><span class="plbl">Loose sessions — organize into workstreams, then Mark done.</span></div>`
+        // mark them done. NO "set a Definition of Done" gate (M3). The cold-start CTA names the
+        // count + jumps straight to the (auto-open) bucket so the organize tools are one click away.
+        ? (allLoose
+            ? `<div class="csum-pole"><span class="plbl"><b>Organize ${unfiledN} unfiled session${unfiledN === 1 ? "" : "s"}</b> into workstreams, then Mark done.</span> <button class="jump" data-jump="unfiled-${esc(p.id)}">organize ↓</button></div>`
+            : `<div class="csum-pole"><span class="plbl">No sessions yet — start one, or add a workstream from the ⋯ menu.</span></div>`)
         : pole && !wsDone(pole)
           ? `<div class="csum-pole"><span class="plbl">Long pole:</span> <b>${esc(shortWs(pole.name))}</b> ${poleTag}</div>`
           : ``;
+    // A STRUCTURED project (real workstreams done/in-progress) can ALSO carry leftover loose
+    // sessions — surface them with their own "organize ↓" jump so the cold-start affordance is
+    // reachable for ANY project with an Unfiled bucket, not only all-loose ones (R4).
+    const unfiledNote = (!noDod && unfiledN > 0)
+      ? `<div class="csum-pole"><span class="plbl"><b>${unfiledN} unfiled session${unfiledN === 1 ? "" : "s"}</b> to organize</span> <button class="jump" data-jump="unfiled-${esc(p.id)}">organize ↓</button></div>`
+      : "";
     const gaugeLine = allOpenEnded
       ? `<div class="csum-line"><b>∞ looping</b> · open-ended ${dotStrip(p)}</div>`
       : noDod
-        ? `<div class="csum-line"><span class="muted">Loose sessions, not yet organized</span> ${dotStrip(p)}</div>`
+        ? (allLoose
+            ? `<div class="csum-line"><b>${unfiledN}</b> unfiled session${unfiledN === 1 ? "" : "s"} to organize ${dotStrip(p)}</div>`
+            : `<div class="csum-line"><span class="muted">No sessions yet</span> ${dotStrip(p)}</div>`)
         : `<div class="csum-line"><b>${g.done} of ${g.total}</b> ${scopedWord} done${loopClause} ${dotStrip(p)}</div>`;
     const ringsBlock = `<div class="csum">
       <div class="csum-ring" title="${allOpenEnded ? "an open-ended loop has no terminal DoD to be k-of-n against — shown as running ∞" : noDod ? "loose sessions matched to this project root, not yet organized into workstreams" : "k of " + g.total + " workstreams done (manually marked, or met their Definition of Done) — an honest aggregate, not an authored percent"}">${ringSvg(gaugeItem, 50)}</div>
       <div class="csum-body">
         ${gaugeLine}
         ${poleLine}
+        ${unfiledNote}
       </div>
     </div>`;
 
@@ -1248,7 +1268,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       ping = (live.id && live.id === state._pingId) ? " ping" : "";
     }
 
-    return `<article class="pcard" id="card-${p.id}" data-p="${p.id}" data-project-id="${p.id}">
+    return `<article class="pcard${allLoose ? " open" : ""}" id="card-${p.id}" data-p="${p.id}" data-project-id="${p.id}">
       <div class="pcard-head" data-toggle="card">
         <div class="pcard-id">
           <div class="pname"><span class="nm">${esc(p.name)}</span> ${p.nest ? `<span class="nest" title="own project root nested inside its parent — its work is NOT counted toward the parent">⤷ ${esc(p.nest)}</span>` : ""}</div>
@@ -1329,7 +1349,12 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
         ? `<span class="muted">No criteria — tracked manually (Mark done by hand).</span> <button class="btn ghost sm wsaddcrit" type="button" data-wsaddcriteria="${esc(w.id)}" title="Optional: add criteria so the ring auto-tracks progress toward done">+ Add criteria to auto-track</button>`
         : dodInline(w.dod, w.dodSrc)) + mixedNote;
     const unfiledTools = isUnfiled ? unfiledAssignHtml(w, p) : "";
-    return `<div class="ws${isUnfiled ? " ws-unfiled" : ""}" data-w="${w.id}" data-ws-id="${w.id}"${isUnfiled ? ` data-unfiled-project="${esc(p.id)}"` : ""}>
+    // R4 — the Unfiled bucket renders OPEN by default (its `.sess-list` — the organize tools +
+    // session rows — is hidden behind `.ws.open` for normal workstreams). You never "collapse"
+    // Unfiled; you organize OUT of it, so its tools must be immediately reachable the moment its
+    // card/row is open, regardless of the project's DoD/card state. The stable `id` lets the
+    // card summary's "organize ↓" jump scroll + expand straight to it.
+    return `<div class="ws${isUnfiled ? " ws-unfiled open" : ""}" data-w="${w.id}" data-ws-id="${w.id}"${isUnfiled ? ` id="unfiled-${esc(p.id)}" data-unfiled-project="${esc(p.id)}"` : ""}>
       <div class="ws-head" data-toggle="ws">
         <div class="ws-ring">${ringSvg(w, 44)}</div>
         <div class="ws-id">

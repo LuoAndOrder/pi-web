@@ -789,21 +789,25 @@ test.describe("Project Rollups dashboard", () => {
       await expect(view).toBeVisible();
 
       // A no-DoD project with only loose Unfiled sessions renders as a calm "manual" full
-      // .pcard (NOT a "Needs setup" alarm group — that framing is gone). Expand its head to
-      // reveal the Unfiled bucket.
+      // .pcard (NOT a "Needs setup" alarm group — that framing is gone). R4: the all-loose card
+      // AUTO-OPENS and surfaces a prominent "Organize N unfiled sessions" CTA, and its Unfiled
+      // bucket is open by default, so the organize tools are reachable WITHOUT any expand clicks.
       await expect(view.locator('[data-testid="needs-setup"]')).toHaveCount(0);
       const card = view.locator(`.pcard[data-project-id="${projectId}"]`);
       await expect(card).toBeVisible();
-      await card.locator(".pcard-head").click(); // expand the manual card to reveal its workstreams
+      await expect(card).toHaveClass(/\bopen\b/); // auto-open (no head click needed)
+      await expect(card).toContainText("Organize 2 unfiled sessions");
       const unfiledWs = view.locator(`.ws-unfiled[data-unfiled-project="${projectId}"]`);
       await expect(unfiledWs).toBeVisible();
-      await unfiledWs.locator(".ws-head").click();
+      await expect(unfiledWs).toHaveClass(/\bopen\b/); // bucket open by default — tools visible
 
-      // The assignment bar starts disabled (no selection); New workstream is disabled.
+      // The organize tools (assignment bar + New workstream) are present and visible WITHOUT
+      // expanding anything. The assignment bar starts disabled (no selection).
       const newBtn = unfiledWs.locator("[data-mn-newws]");
+      await expect(newBtn).toBeVisible();
       await expect(newBtn).toBeDisabled();
 
-      // Select both sessions via their checkboxes.
+      // Select both sessions via their (already-visible) checkboxes.
       await unfiledWs.locator('[data-mnselect="mock-current"]').check();
       await unfiledWs.locator('[data-mnselect="mock-older"]').check();
       await expect(unfiledWs.locator(".mn-count")).toContainText("2 selected");

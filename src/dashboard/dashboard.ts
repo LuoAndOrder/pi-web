@@ -2042,6 +2042,20 @@ export function createDashboard(options: {
           const body = el.nextElementSibling;
           if (body && body.classList.contains("prow-body")) body.classList.add("open");
         }
+        // R4 — an "organize ↓" jump targets the (auto-open) Unfiled `.ws` bucket. Reveal it by
+        // expanding every collapsed ancestor: the bucket itself, its enclosing project card, and —
+        // when the project renders as a collapsed row — that row + its body. The bucket already
+        // carries `.open`, but its card/row may not, so without this the scroll lands on hidden DOM.
+        if (el.classList.contains("ws")) {
+          el.classList.add("open");
+          el.closest(".pcard")?.classList.add("open");
+          const rowBody = el.closest(".prow-body");
+          if (rowBody) {
+            rowBody.classList.add("open");
+            const prow = rowBody.previousElementSibling;
+            if (prow && prow.classList.contains("prow")) prow.classList.add("open");
+          }
+        }
         el.scrollIntoView({ behavior: "smooth", block: "start" });
       }
       return;
