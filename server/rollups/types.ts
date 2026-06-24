@@ -259,6 +259,9 @@ export interface ArchivedProjectSummary {
   name: string;
   description?: string;
   rootCount: number; // number of registered repo roots
+  roots: string[]; // the registered repo roots themselves — so the onboarding/candidate
+  // path can suppress an already-known (archived) root and steer the user to RESTORE the
+  // existing project instead of minting a SECOND project on the same root (round-4 finding).
   workstreamCount: number; // stored workstreams that would come back on restore
   updatedAt: string; // when it was last touched (incl. the archive flip)
 }

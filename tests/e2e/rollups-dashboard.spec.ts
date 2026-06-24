@@ -406,6 +406,70 @@ test.describe("Project Rollups dashboard", () => {
       expect(pageErrors).toEqual([]);
     });
 
+    // Round-4 high finding: Delete → Undo must FAITHFULLY restore a `command` DoD criterion's
+    // real command, not a hardcoded `npm test`. The pre-delete snapshot reads the RAW registry
+    // (`GET /api/projects` → `dod.criteria` with intact `source.cmd`), so the Undo re-creates the
+    // workstream with the exact stored command. This guards against the lossy view-model rebuild.
+    test("Delete → Undo restores the exact command DoD (make lint), not a hardcoded npm test", async ({ page }) => {
+      const pageErrors = trackPageErrors(page);
+      const name = `E2E UndoCmdDoD ${Date.now()}`;
+      // Seed the same "awaiting sign-off" shape the other lifecycle tests use (so the card
+      // renders in a stable, locatable surface) — then ADD a distinctive command + git criterion
+      // whose stored `source` is what Undo must faithfully restore.
+      const { projectId, workstreamId } = await createSignProject(page.request, name);
+      const root = `/tmp/rollups-e2e-cmd-${Date.now()}`;
+      const COMMAND_DOD = [
+        ...SIGN_DOD,
+        { text: "make lint passes", source: { kind: "command", cwd: root, cmd: "make lint" }, weight: 1 },
+        { text: "merged to release", source: { kind: "git_merged", into: "release" }, weight: 1 },
+      ];
+      await page.request.put(`/api/workstreams/${workstreamId}/dod`, { data: { criteria: COMMAND_DOD } });
+
+      await page.locator("#dashboardButton").click();
+      const view = page.locator("#dashboardView");
+      await expect(view).toBeVisible();
+      // A workstream whose DoD includes an as-yet-unevaluated command criterion sorts into the
+      // collapsed "Healthy & dormant" section rather than the active grid (its ring reads quiet).
+      // Expand that section and drill into the project row so its workstream kebab is reachable —
+      // this is the real user path to lifecycle actions on a dormant project.
+      const dormant = view.locator("#sec-healthy");
+      await expect(dormant).toBeVisible();
+      await dormant.locator('.grp-h[data-toggle="grp"]').click();
+      await expect(dormant).toHaveClass(/open/);
+      const prow = dormant.locator(`.prow[data-project-id="${projectId}"]`);
+      await expect(prow).toBeVisible();
+      await prow.click(); // drill in → expands the prow body with the workstream rows + kebab
+      const wsMenu = view.locator(`.wsmenu[data-wsmenu="${workstreamId}"]`).first();
+      await expect(wsMenu).toBeVisible();
+
+      // Delete via the workstream kebab; accept the confirm.
+      page.once("dialog", (d) => d.accept());
+      await wsMenu.locator("[data-wsmenu-toggle]").click();
+      await wsMenu.locator(`[data-wsaction="delete"]`).click();
+      // The original workstream is gone.
+      await expect.poll(async () => (await rollupFor(page, projectId))?.workstreams.length ?? 0).toBe(0);
+
+      // Click the Undo toast → re-creates the workstream (a new id) from the snapshot.
+      const undo = page.locator("#dashboardToastUndo");
+      await expect(undo).toBeVisible();
+      await undo.click();
+      await expect.poll(async () => (await rollupFor(page, projectId))?.workstreams.length ?? 0).toBe(1);
+
+      // Assert the restored command criterion preserves `make lint` (NOT npm test) and the git
+      // criterion preserves `into: release` (NOT main) — read from the raw registry.
+      const reg = await (await page.request.get("/api/projects")).json();
+      const restored = reg.registry.workstreams.find((w: { projectId: string }) => w.projectId === projectId);
+      expect(restored, "re-created workstream present in registry").toBeTruthy();
+      const sources = (restored.dod?.criteria ?? []).map((c: { source: Record<string, unknown> }) => c.source);
+      const cmd = sources.find((s: { kind?: string }) => s.kind === "command");
+      expect(cmd?.cmd).toBe("make lint");
+      expect(cmd?.cmd).not.toBe("npm test");
+      const git = sources.find((s: { kind?: string }) => s.kind === "git_merged");
+      expect(git?.into).toBe("release");
+
+      expect(pageErrors).toEqual([]);
+    });
+
     // Full PROJECT lifecycle round-trip in the UI: archive a project from its kebab → it leaves
     // the active grid and lands in the collapsed "Archived projects" surface → Restore from there
     // brings it back. Guards the MED finding (archived projects were UI-unreachable). Also exercises

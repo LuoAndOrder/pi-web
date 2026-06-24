@@ -300,6 +300,10 @@ describe("rollups registry CRUD routes", () => {
     expect(summary.name).toBe("ArchMe");
     expect(summary.workstreamCount).toBe(1);
     expect(summary.rootCount).toBe(1);
+    // The archived summary carries its actual roots so the onboarding/candidate path can
+    // suppress an already-known (archived) root and steer to Restore over a duplicate register.
+    expect(Array.isArray(summary.roots)).toBe(true);
+    expect(summary.roots).toEqual([process.cwd()]);
 
     // Restore via PATCH archived:false → back in rollups[], out of archivedProjects[].
     const restore = await server.api("PATCH", `/api/projects/${projectId}`, { archived: false });

@@ -156,7 +156,13 @@ export function createDashboard(options: {
       const data = await res.json();
       const sessions: Array<{ cwd?: string }> = Array.isArray(data?.sessions) ? data.sessions : [];
       // Roots already registered — a candidate under one of these is NOT offered again.
-      const registeredRoots = state.rollups.flatMap((r) => r.project?.roots ?? []);
+      // CRITICAL (round-4 finding): include ARCHIVED projects' roots too. `state.rollups`
+      // excludes archived projects, so without this an archived project's root would be
+      // re-offered as a "+ New project" candidate — registering it would mint a SECOND
+      // project on the same root (two rollups splitting the gauge) instead of restoring the
+      // archived one. Suppressing the known root steers the user to Restore instead.
+      const archivedRoots = state.archivedProjects.flatMap((p) => p.roots ?? []);
+      const registeredRoots = [...state.rollups.flatMap((r) => r.project?.roots ?? []), ...archivedRoots];
       const covered = (cwd: string) => registeredRoots.some((root) => cwd === root || cwd.startsWith(root.endsWith("/") ? root : root + "/"));
       const byCwd = new Map<string, number>();
       for (const s of sessions) {
@@ -288,11 +294,15 @@ export function createDashboard(options: {
       const id = typeof o.id === "string" ? o.id : "";
       const name = typeof o.name === "string" && o.name ? o.name : "";
       if (!id || !name) continue; // no id → no Restore/Delete target; skip rather than render dead
+      const roots = Array.isArray(o.roots)
+        ? (o.roots as unknown[]).filter((r): r is string => typeof r === "string" && !!r)
+        : [];
       out.push({
         id,
         name,
         ...(typeof o.description === "string" && o.description ? { description: o.description } : {}),
         rootCount: Number.isFinite(o.rootCount) ? Number(o.rootCount) : 0,
+        roots,
         workstreamCount: Number.isFinite(o.workstreamCount) ? Number(o.workstreamCount) : 0,
         updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : "",
       });
@@ -1223,37 +1233,68 @@ export function createDashboard(options: {
   }
 
   // Build the re-create payload for an Undo-after-delete: the workstream's name, its DoD
-  // criteria (round-tripped from the rollup view model's `crit`), and its attached session
-  // ids. A new id is minted server-side (delete is irreversible at the id level), but the
-  // user's work — the criteria + membership — is restored intact.
-  function snapshotWorkstream(workstreamId: string): { projectId: string; body: Record<string, unknown> } | null {
+  // criteria, and its attached session ids. A new id is minted server-side (delete is
+  // irreversible at the id level), but the user's work — the criteria + membership — is
+  // restored intact.
+  //
+  // CRITICAL (round-4 high finding): the criteria must round-trip with their FULL stored
+  // `source`, not a reconstruction from the lossy view model. The client `crit`/VCrit only
+  // carries `src`/`into` — never `source.cmd`/`cwd`/`expectExit`/`repo` — so rebuilding a
+  // `command` criterion from VCrit would write a HARDCODED `cmd:"npm test"`, silently
+  // mutating a `make lint` / `cargo test` gate on Undo. So we read the RAW registry
+  // (`GET /api/projects` → the workstream's `dod.criteria` with intact `source`) BEFORE the
+  // DELETE and POST that exact array back. Returns the session ids from the view model
+  // (membership is faithfully represented there) plus the raw criteria from the registry.
+  // If the raw read fails, we still restore name + sessions and signal `lossyDod` so the
+  // caller's toast can be honest rather than fabricating commands.
+  async function snapshotWorkstream(
+    workstreamId: string,
+  ): Promise<{ projectId: string; body: Record<string, unknown>; lossyDod: boolean } | null> {
+    let projectId = "";
+    let name = "";
+    let sessionIds: string[] = [];
     for (const p of view.data) {
       const w = [...(p.workstreams || []), ...(p.archivedWorkstreams || [])].find((x) => x.id === workstreamId);
       if (!w) continue;
-      const sessionIds = w.sessions.map((s) => s.id);
-      // Reconstruct the DoD criteria from the first session that carries them (the DoD is
-      // workstream-level, mirrored onto every session). Manual `met` is preserved.
-      const critSrc = (w.sessions.find((s) => s.crit && s.crit.length)?.crit) || [];
-      const criteria = critSrc.map((c) => {
-        const kind = (c.src || "manual");
-        let source: Record<string, unknown>;
-        if (kind === "git_merged") source = { kind, into: c.into || "main" };
-        else if (kind === "command") source = { kind, cwd: w.sessions[0]?.cwd || "", cmd: "npm test" };
-        else if (kind === "session_idle") source = { kind, sessionId: sessionIds[0] || "" };
-        else source = { kind };
-        return {
-          text: c.text || "",
-          source,
-          ...(c.gate ? { gate: true } : {}),
-          ...(kind === "manual" ? { met: !!c.met } : {}),
-          ...(c.weight != null ? { weight: c.weight } : {}),
-        };
-      });
-      const body: Record<string, unknown> = { name: w.name, sessionIds };
-      if (criteria.length) body.dod = { criteria };
-      return { projectId: p.id, body };
+      projectId = p.id;
+      name = w.name;
+      sessionIds = w.sessions.map((s) => s.id);
+      break;
     }
-    return null;
+    if (!projectId) return null;
+    const body: Record<string, unknown> = { name, sessionIds };
+    // Pull the intact stored criteria (with `source`) straight from the registry. This is a
+    // READ-ONLY GET; on any failure we fall back to a DoD-less restore + an honest toast.
+    let lossyDod = false;
+    try {
+      const res = await fetch("/api/projects", { headers: api.headers() });
+      if (res.ok) {
+        const data = await res.json();
+        const wsList: Array<Record<string, unknown>> = Array.isArray(data?.registry?.workstreams)
+          ? data.registry.workstreams
+          : [];
+        const stored = wsList.find((x) => x && (x as { id?: unknown }).id === workstreamId);
+        const dod = stored && (stored as { dod?: unknown }).dod;
+        const criteria = dod && Array.isArray((dod as { criteria?: unknown }).criteria)
+          ? (dod as { criteria: unknown[] }).criteria
+          : [];
+        // Forward each stored criterion verbatim except for the server-minted `id` (a new
+        // workstream mints fresh ids) — `text`, `source` (cmd/cwd/into/repo/expectExit),
+        // `gate`, `met`, `weight`, `authoredBy` are all preserved as the server stored them.
+        const restorable = criteria
+          .filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
+          .map((c) => {
+            const { id: _drop, ...rest } = c;
+            return rest;
+          });
+        if (restorable.length) body.dod = { criteria: restorable };
+      } else {
+        lossyDod = true;
+      }
+    } catch {
+      lossyDod = true;
+    }
+    return { projectId, body, lossyDod };
   }
 
   // PATCH a workstream's fields (status / archived) then refetch. Returns ok.
@@ -1334,7 +1375,10 @@ export function createDashboard(options: {
     const ctx = findWsContext(workstreamId);
     const name = ctx?.wsName || "this workstream";
     if (!window.confirm(`Delete "${name}"? This removes the workstream and its Definition of Done. Undo re-creates it from a snapshot (a new id).`)) return;
-    const snap = snapshotWorkstream(workstreamId);
+    // Snapshot BEFORE the DELETE — the raw DoD (with intact command/git `source`) only exists
+    // in the registry until the workstream is gone. Reads `GET /api/projects` so Undo restores
+    // the exact stored criteria, never a fabricated `npm test` (round-4 high finding).
+    const snap = await snapshotWorkstream(workstreamId);
     let ok = false;
     try {
       const res = await fetch(`/api/workstreams/${encodeURIComponent(workstreamId)}`, { method: "DELETE", headers: api.headers() });
@@ -1351,7 +1395,12 @@ export function createDashboard(options: {
             .catch(() => showToast(`Couldn't restore <b>${escText(name)}</b>.`));
         }
       : undefined;
-    showToast(`<b>${escText(name)}</b> deleted.`, undo);
+    // Be honest if the raw DoD couldn't be read (the GET failed): Undo will restore name +
+    // sessions but NOT the command/git criteria — better to say so than silently re-author them.
+    const deletedMsg = snap?.lossyDod
+      ? `<b>${escText(name)}</b> deleted. Undo restores its name + sessions; re-author any command/git criteria.`
+      : `<b>${escText(name)}</b> deleted.`;
+    showToast(deletedMsg, undo);
     await refetch();
   }
 

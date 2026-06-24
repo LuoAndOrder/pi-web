@@ -155,6 +155,9 @@ export interface VArchivedProject {
   name: string;
   description?: string;
   rootCount: number;
+  // The registered repo roots, carried so the onboarding/candidate path can suppress an
+  // already-archived root (and steer to Restore, not a duplicate registration).
+  roots: string[];
   workstreamCount: number;
   updatedAt: string;
 }

@@ -847,6 +847,7 @@ export function collectArchivedProjects(registry: ProjectRegistry): ArchivedProj
       name: p.name,
       ...(p.description ? { description: p.description } : {}),
       rootCount: Array.isArray(p.roots) ? p.roots.length : 0,
+      roots: Array.isArray(p.roots) ? p.roots.filter((r): r is string => typeof r === "string" && !!r) : [],
       workstreamCount: registry.workstreams.filter((ws) => ws.projectId === p.id).length,
       updatedAt: p.updatedAt,
     }))
