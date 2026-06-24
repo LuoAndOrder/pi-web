@@ -25,6 +25,7 @@ test-results/
 playwright-report/
 .pi/playwright-session-ui-state-*.json
 .pi/playwright-projects-*.json
+.pi/playwright-settings-*.json
 
 # OS / editor
 .DS_Store
