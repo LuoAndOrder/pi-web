@@ -78,13 +78,31 @@ describe("normalization", () => {
     expect(registry.projects[0].workstreamIds).toEqual(["w1", "w2"]);
   });
 
-  it("keeps a manual `met` boolean but never persists a computed met for git/command sources", () => {
+  it("drops a DoD authored on a PROJECT (projects have NO Definition of Done)", () => {
     const registry = normalizeProjectRegistry({
       projects: [
         {
           id: "p1",
           name: "P",
           roots: [],
+          // A project-level dod must never survive — the DoD lives on workstreams only.
+          dod: { criteria: [{ id: "m1", text: "x", source: { kind: "manual" }, met: true }] },
+        },
+      ],
+      workstreams: [],
+    });
+    expect((registry.projects[0] as { dod?: unknown }).dod).toBeUndefined();
+  });
+
+  it("keeps a manual `met` boolean but never persists a computed met for git/command sources (workstream DoD)", () => {
+    const registry = normalizeProjectRegistry({
+      projects: [{ id: "p1", name: "P", roots: [] }],
+      workstreams: [
+        {
+          id: "w1",
+          projectId: "p1",
+          name: "ws",
+          order: 0,
           dod: {
             criteria: [
               { id: "m1", text: "approved", source: { kind: "manual" }, met: true },
@@ -94,21 +112,22 @@ describe("normalization", () => {
           },
         },
       ],
-      workstreams: [],
     });
-    const criteria = registry.projects[0].dod!.criteria;
+    const criteria = registry.workstreams[0].dod!.criteria;
     expect(criteria.find((c) => c.id === "m1")!.met).toBe(true);
     expect(criteria.find((c) => c.id === "g1")!.met).toBeUndefined();
     expect(criteria.find((c) => c.id === "c1")!.met).toBeUndefined();
   });
 
-  it("drops criteria with an invalid/incomplete source", () => {
+  it("drops criteria with an invalid/incomplete source (workstream DoD)", () => {
     const registry = normalizeProjectRegistry({
-      projects: [
+      projects: [{ id: "p1", name: "P", roots: [] }],
+      workstreams: [
         {
-          id: "p1",
-          name: "P",
-          roots: [],
+          id: "w1",
+          projectId: "p1",
+          name: "ws",
+          order: 0,
           dod: {
             criteria: [
               { id: "ok", text: "ok", source: { kind: "manual" } },
@@ -120,18 +139,19 @@ describe("normalization", () => {
           },
         },
       ],
-      workstreams: [],
     });
-    expect(registry.projects[0].dod!.criteria.map((c) => c.id)).toEqual(["ok"]);
+    expect(registry.workstreams[0].dod!.criteria.map((c) => c.id)).toEqual(["ok"]);
   });
 
-  it("clamps a negative weight to 0 and defaults a missing weight to 1", () => {
+  it("clamps a negative weight to 0 and defaults a missing weight to 1 (workstream DoD)", () => {
     const registry = normalizeProjectRegistry({
-      projects: [
+      projects: [{ id: "p1", name: "P", roots: [] }],
+      workstreams: [
         {
-          id: "p1",
-          name: "P",
-          roots: [],
+          id: "w1",
+          projectId: "p1",
+          name: "ws",
+          order: 0,
           dod: {
             criteria: [
               { id: "a", text: "a", source: { kind: "manual" }, weight: -5 },
@@ -141,9 +161,8 @@ describe("normalization", () => {
           },
         },
       ],
-      workstreams: [],
     });
-    const byId = Object.fromEntries(registry.projects[0].dod!.criteria.map((c) => [c.id, c.weight]));
+    const byId = Object.fromEntries(registry.workstreams[0].dod!.criteria.map((c) => [c.id, c.weight]));
     expect(byId).toEqual({ a: 0, b: 1, c: 3 });
   });
 });
@@ -219,6 +238,15 @@ describe("domain mutators", () => {
     expect(updated?.project.archived).toBe(true);
     expect(updated?.project.updatedAt >= project.updatedAt).toBe(true);
     expect(await store.updateProject("ghost", { name: "x" })).toBeUndefined();
+  });
+
+  it("ignores a `dod` in an updateProject patch — projects have no Definition of Done", async () => {
+    const store = createProjectRegistryStore(file);
+    const { project } = await store.createProject({ name: "Alpha", roots: [dir] });
+    const updated = await store.updateProject(project.id, {
+      dod: { criteria: [{ id: "m1", text: "x", source: { kind: "manual" }, met: true }] },
+    });
+    expect((updated?.project as { dod?: unknown }).dod).toBeUndefined();
   });
 
   it("deletes a project and drops its workstreams", async () => {

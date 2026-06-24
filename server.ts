@@ -657,9 +657,7 @@ const COMMAND_EVAL_CACHE_MAX = 500;
  *  (review finding). */
 function liveCriterionIds(registry: ProjectRegistry): Set<string> {
   const ids = new Set<string>();
-  for (const project of registry.projects) {
-    for (const c of project.dod?.criteria ?? []) ids.add(c.id);
-  }
+  // DoD criteria live on WORKSTREAMS only (projects/sessions have none).
   for (const ws of registry.workstreams) {
     for (const c of ws.dod?.criteria ?? []) ids.add(c.id);
   }
@@ -740,10 +738,7 @@ function resolveDodTarget(registry: ProjectRegistry, body: Record<string, unknow
     ws.matchCwd || registry.projects.find((p) => p.id === ws.projectId)?.roots[0];
 
   if (criterionId) {
-    for (const project of registry.projects) {
-      const found = project.dod?.criteria.find((c) => c.id === criterionId);
-      if (found) return { criteria: [found], projectId: project.id, cwd: project.roots[0] };
-    }
+    // DoD criteria live on WORKSTREAMS only.
     for (const ws of registry.workstreams) {
       const found = ws.dod?.criteria.find((c) => c.id === criterionId);
       if (found) return { criteria: [found], projectId: ws.projectId, cwd: wsCwd(ws) };
@@ -753,13 +748,16 @@ function resolveDodTarget(registry: ProjectRegistry, body: Record<string, unknow
   if (workstreamId) {
     const ws = registry.workstreams.find((w) => w.id === workstreamId);
     if (!ws) return undefined;
-    const dod: DoD | undefined = ws.dod ?? registry.projects.find((p) => p.id === ws.projectId)?.dod;
+    const dod: DoD | undefined = ws.dod;
     return { criteria: dod?.criteria ?? [], projectId: ws.projectId, cwd: wsCwd(ws) };
   }
   if (projectId) {
+    // Projects carry no DoD — there is nothing to evaluate at project scope. Resolve
+    // to an empty criteria set (a valid no-op target) rather than 404, so a stray
+    // project-scoped evaluate request still returns { ok:true, evals:[] }.
     const project = registry.projects.find((p) => p.id === projectId);
     if (!project) return undefined;
-    return { criteria: project.dod?.criteria ?? [], projectId: project.id, cwd: project.roots[0] };
+    return { criteria: [], projectId: project.id, cwd: project.roots[0] };
   }
   return undefined;
 }

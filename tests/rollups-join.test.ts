@@ -352,6 +352,77 @@ describe("assembleRollups", () => {
     expect(rollups[0].progress).toMatchObject({ met: 1, total: 2, percent: 50, allMet: false });
   });
 
+  it("a no-DoD (MANUAL) workstream is scorable via its STORED status — Mark-done drives the project ring", async () => {
+    // New model: a workstream WITHOUT a DoD is manual (not "needs setup"/un-scorable).
+    // It counts in the project k-of-n and is "done" iff the user marked status === "done".
+    const reg = (status: Workstream["status"]): ProjectRegistry => ({
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["w1"] })],
+      workstreams: [workstream({ id: "w1", projectId: "A", status, sessionIds: ["s1"] })],
+    });
+
+    // Default manual workstream (planned, no DoD): scorable but not done → 0 of 1.
+    const planned = await assembleRollups(reg("planned"), [session({ id: "s1", cwd: "/a" })], cleanStub);
+    const wsP = planned[0].workstreams.find((w) => w.workstream.id === "w1")!;
+    expect(wsP.progress).toBeNull(); // no DoD → no criteria ring (never a fabricated %)
+    expect(wsP.inactive).toBeUndefined();
+    expect(planned[0].progress).toMatchObject({ met: 0, total: 1, percent: 0, allMet: false });
+    expect(planned[0].progress.derivedStatus).not.toBe("done");
+
+    // User clicks "Mark done" (PATCH status → done): the workstream completes → 1 of 1.
+    const done = await assembleRollups(reg("done"), [session({ id: "s1", cwd: "/a" })], cleanStub);
+    expect(done[0].progress).toMatchObject({ met: 1, total: 1, percent: 100, allMet: true });
+    expect(done[0].progress.derivedStatus).toBe("done");
+  });
+
+  it("a DoD workstream still AUTO-tracks (k-of-n) alongside a manual one in the same project ring", async () => {
+    // Mixed project: one auto-tracked DoD workstream (git_ahead_zero met on a clean
+    // tree → done) + one manual no-DoD workstream not yet marked done → 1 of 2 = 50%.
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["auto", "manual"] })],
+      workstreams: [
+        workstream({
+          id: "auto",
+          projectId: "A",
+          sessionIds: ["s1"],
+          dod: { criteria: [{ id: "g", text: "in sync", source: { kind: "git_ahead_zero" } }] },
+        }),
+        workstream({ id: "manual", projectId: "A", status: "in_progress", sessionIds: ["s2"] }),
+      ],
+    };
+    const rollups = await assembleRollups(
+      registry,
+      [session({ id: "s1", cwd: "/a" }), session({ id: "s2", cwd: "/a" })],
+      cleanStub,
+    );
+    const auto = rollups[0].workstreams.find((w) => w.workstream.id === "auto")!;
+    expect(auto.progress?.allMet).toBe(true); // DoD auto-derived
+    expect(rollups[0].progress).toMatchObject({ met: 1, total: 2, percent: 50, allMet: false });
+  });
+
+  it("the synthetic Unfiled bucket stays OUT of the project k-of-n (you can't 'mark Unfiled done')", async () => {
+    // A fresh project with only loose (Unfiled) sessions is NORMAL, not broken. The
+    // Unfiled catch-all must not count toward the ring, so a project with one real
+    // done workstream reads 1 of 1 (100%), not 1 of 2, despite an Unfiled session.
+    const registry: ProjectRegistry = {
+      version: 1,
+      projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["w1"] })],
+      workstreams: [workstream({ id: "w1", projectId: "A", status: "done", sessionIds: ["s1"] })],
+    };
+    const rollups = await assembleRollups(
+      registry,
+      [session({ id: "s1", cwd: "/a" }), session({ id: "loose", cwd: "/a" })],
+      cleanStub,
+    );
+    const p = rollups[0];
+    // The loose session landed in an Unfiled bucket...
+    const unfiled = p.workstreams.find((w) => w.workstream.id.endsWith(":unfiled"))!;
+    expect(unfiled.sessions.map((s) => s.id)).toEqual(["loose"]);
+    // ...but the ring is 1 of 1 (only the real workstream is scorable).
+    expect(p.progress).toMatchObject({ met: 1, total: 1, percent: 100, allMet: true });
+  });
+
   it("unmatched sessions are omitted from the rollup feed", async () => {
     const registry: ProjectRegistry = {
       version: 1,

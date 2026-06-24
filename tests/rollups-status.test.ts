@@ -84,7 +84,10 @@ describe("deriveUiStatus (§5.3 table)", () => {
     expect(toWorkItemStatus(ui)).toBe("done");
   });
 
-  it("no DoD at all → unset (needs setup)", () => {
+  it("no DoD at all → unset = MANUAL mode (calm Mark-done, NOT a needs-setup alarm)", () => {
+    // A DoD is optional. With none, the item is tracked manually: the "unset" token is
+    // a CALM manual state, never "broken"/"needs setup". It collapses to the neutral
+    // "planned" canonical (no fabricated alarm just because there's no DoD).
     const ui = deriveUiStatus({ runtime: runtime(), hasDoD: false });
     expect(ui).toBe("unset");
     expect(toWorkItemStatus(ui)).toBe("planned");

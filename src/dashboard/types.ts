@@ -42,13 +42,14 @@ export interface DoD {
   criteria: DoDCriterion[];
 }
 
+// Projects have NO Definition of Done — status is a pure rollup of their workstreams
+// (k of n done/archived). A DoD is an optional, workstream-only auto-track enhancement.
 export interface Project {
   id: string;
   name: string;
   description?: string;
   roots: string[];
   workstreamIds: string[];
-  dod?: DoD;
   createdAt: string;
   updatedAt: string;
   archived?: boolean;

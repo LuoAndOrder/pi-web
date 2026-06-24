@@ -36,7 +36,8 @@ export interface UiStatusInput {
   fail?: boolean;
   /** The session/workstream is an autonomous loop (renders ∞ "running"). */
   isLoop?: boolean;
-  /** Whether a DoD targets this item at all (false → "unset" / needs setup). */
+  /** Whether a DoD targets this item at all. false → "unset" = MANUAL mode (no DoD):
+   *  the item is tracked by hand (Mark done), a CALM state — NOT "broken"/"needs setup". */
   hasDoD?: boolean;
   /** A non-elicited idle stop that may be waiting on a human (quiet, never amber). */
   softWait?: boolean;
@@ -55,7 +56,9 @@ export function deriveUiStatus(input: UiStatusInput): UiStatus {
   // isSoftWait (so it never enters the hard Needs-you count).
   if (input.softWait) return "block";
   if (input.progress?.allMet) return input.pendingGate ? "sign" : "merge";
-  if (!input.hasDoD) return "unset"; // no criteria → needs setup
+  // No DoD → MANUAL mode: tracked by hand (Mark done). "unset" is a CALM manual token
+  // here, NOT a "needs setup"/broken gate — a DoD is an optional auto-track add-on.
+  if (!input.hasDoD) return "unset";
   if (input.progress && (input.progress.metWeight > 0 || input.progress.unrun > 0)) return "queued";
   return "planned";
 }

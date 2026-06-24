@@ -47,13 +47,17 @@ export interface DoD {
 }
 
 // A project groups one or more repos/cwds + workstreams.
+//
+// A PROJECT has NO Definition of Done. Its status is a pure ROLLUP of its
+// workstreams (k of n done/archived — see rollup.ts `projectProgress`); a project
+// is NEVER classified "needs setup". A DoD is an OPTIONAL, workstream-only
+// "add criteria to auto-track" enhancement — never a project-level gate.
 export interface Project {
   id: string; // pi-web generated (uuid)
   name: string;
   description?: string;
   roots: string[]; // absolute cwd paths; sessions matched by cwd prefix
   workstreamIds: string[]; // ordered
-  dod?: DoD; // project-level acceptance criteria
   createdAt: string;
   updatedAt: string;
   archived?: boolean;
@@ -210,6 +214,10 @@ export interface SessionRollup {
     budget?: { maxMinutes?: number; maxCostUsd?: number };
   };
   plannedQueue?: { items: string[]; total: number; source: "notes" | "plan_tool" };
+  // A SESSION carries no editable DoD of its own. This is a READ-ONLY summary of the
+  // criteria INHERITED from the owning workstream (evaluated against this session's
+  // cwd), surfaced so the renderer can show per-session evidence. A session is marked
+  // done manually or rolls up from its workstream — never via a session-level DoD.
   dod?: {
     text: string;
     sourceLabel: string;

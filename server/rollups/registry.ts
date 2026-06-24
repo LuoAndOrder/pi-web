@@ -220,8 +220,8 @@ export function normalizeProject(value: unknown): Project | undefined {
   if (typeof value.description === "string" && value.description.trim()) {
     project.description = value.description.trim();
   }
-  const dod = normalizeDoD(value.dod);
-  if (dod) project.dod = dod;
+  // Projects have NO Definition of Done (it lives on workstreams only) — any `dod`
+  // authored on a project is intentionally dropped here so the model can't drift back.
   if (value.archived === true) project.archived = true;
   return project;
 }
@@ -323,17 +323,12 @@ export function applyProjectRegistryPatch(
   return normalizeProjectRegistry(next);
 }
 
-// Single project→workstream traversal that returns BOTH the criterion and its
-// owning Project/Workstream, so callers that need to bump `owner.updatedAt` don't
-// re-walk the registry.
+// Find a DoD criterion + its owning WORKSTREAM (the only DoD owner — projects and
+// sessions carry no DoD), so callers that bump `owner.updatedAt` don't re-walk.
 function findCriterionWithOwner(
   registry: ProjectRegistry,
   criterionId: string,
-): { owner: Project | Workstream; criterion: DoDCriterion } | undefined {
-  for (const project of registry.projects) {
-    const criterion = project.dod?.criteria.find((item) => item.id === criterionId);
-    if (criterion) return { owner: project, criterion };
-  }
+): { owner: Workstream; criterion: DoDCriterion } | undefined {
   for (const workstream of registry.workstreams) {
     const criterion = workstream.dod?.criteria.find((item) => item.id === criterionId);
     if (criterion) return { owner: workstream, criterion };
@@ -421,11 +416,7 @@ export function createProjectRegistryStore(file: string) {
       }
       if ("roots" in source) updated.roots = normalizeRoots(source.roots);
       if ("workstreamIds" in source) updated.workstreamIds = normalizeStringArray(source.workstreamIds);
-      if ("dod" in source) {
-        const dod = normalizeDoD(source.dod);
-        if (dod) updated.dod = dod;
-        else delete updated.dod;
-      }
+      // No project-level DoD: a `dod` in the patch is ignored (workstreams own the DoD).
       if ("archived" in source) {
         if (source.archived === true) updated.archived = true;
         else delete updated.archived;

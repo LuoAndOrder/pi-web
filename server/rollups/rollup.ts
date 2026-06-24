@@ -566,19 +566,28 @@ function workstreamDone(w: WorkstreamRollup): boolean {
   return Boolean(w.sessionGauge && w.sessionGauge.total > 0 && w.sessionGauge.done === w.sessionGauge.total);
 }
 
-/** Un-scorable = nothing to be "k of n" against: open-ended loops OR a
- *  non-terminal, non-mixed workstream whose aggregated DoD is empty (null ring).
- *  Excluded from BOTH the gauge numerator and denominator so neither a perpetual
- *  loop nor an empty-DoD/zero-session workstream poisons "X of N met DoD"
- *  (mockup wsUnscorable / wsEmptyDod L1735-1742). */
+/** The synthetic "Unfiled" catch-all (unfiledWorkstream): loose sessions the user
+ *  hasn't organized yet. It is NOT a unit of completion — you organize sessions OUT
+ *  of it, never "mark Unfiled done" — so it stays out of the project k-of-n. Keyed
+ *  off the reserved id suffix the synthetic bucket alone carries (real workstream /
+ *  project ids are randomUUIDs — no colon), so it can't collide with a real ws. */
+function isUnfiledWorkstream(w: WorkstreamRollup): boolean {
+  return w.workstream.id.endsWith(":unfiled");
+}
+
+/** Un-scorable = NOT a unit the project ring is "k of n" against:
+ *   - archived / abandoned workstreams (shelved by the human — M1),
+ *   - open-ended autonomous loops (no terminal DoD to complete),
+ *   - the synthetic Unfiled catch-all bucket (loose, un-triaged sessions).
+ *  EVERY other active workstream is SCORABLE — whether it auto-tracks a DoD or is a
+ *  MANUAL (no-DoD) workstream. A manual workstream is never "needs setup": it counts
+ *  via its STORED status (done iff status==="done"; see workstreamDone), so a no-DoD
+ *  workstream is a calm "in progress · Mark done" slot in the ring, not a 0/0 gate. */
 function wsUnscorable(w: WorkstreamRollup): boolean {
-  // Archived / abandoned: shelved by the human, never "k of n" against the active
-  // project ring — excluded from BOTH the gauge numerator and denominator (M1).
   if (w.inactive) return true;
   if (wsOpenEnded(w)) return true;
-  if (w.workstream.status === "done") return false; // terminal status is its own "done"
-  if (w.mixed) return false; // mixed ws use the session-gauge, not crit %
-  return w.progress == null; // no evaluable DoD criteria → un-scorable
+  if (isUnfiledWorkstream(w)) return true;
+  return false;
 }
 
 /** The project ring as a ProgressSnapshot, computed as k-of-n scorable
@@ -650,7 +659,6 @@ function collectRepoRoots(
   for (const project of registry.projects) {
     if (project.archived) continue;
     add(project.roots[0]);
-    addCriteriaRepos(project.dod);
   }
   for (const ws of registry.workstreams) {
     const project = projectById.get(ws.projectId);
@@ -775,8 +783,10 @@ export async function assembleRollups(
     for (const ws of orderedWorkstreams) {
       // The DoD is INHERITED by each session and evaluated against that session's
       // own cwd; the workstream ring is the aggregate of those per-session evals
-      // (see buildWorkstreamRollup) — never a single re-eval at the ws root.
-      const inherited = ws.dod ?? project.dod;
+      // (see buildWorkstreamRollup) — never a single re-eval at the ws root. The DoD
+      // lives on the WORKSTREAM only (projects have none); a workstream WITHOUT one is
+      // MANUAL — its stored status drives the project ring (see workstreamDone).
+      const inherited = ws.dod;
       const sessionInputs = wsBuckets.get(ws.id) ?? [];
       const sessionRollups = await Promise.all(
         sessionInputs.map((s) => buildSessionRollup(s, inherited, ctx)),
@@ -784,14 +794,15 @@ export async function assembleRollups(
       workstreamRollups.push(buildWorkstreamRollup(ws, sessionRollups));
     }
 
-    // Sessions matched to the project root but no workstream → an Unfiled bucket
-    // (they inherit the project DoD, evaluated per-session like any other).
+    // Sessions matched to the project root but no workstream → an Unfiled bucket.
+    // It carries NO DoD (projects have none) — these are loose, un-triaged sessions
+    // the user organizes into real workstreams and marks done. A fresh project with
+    // only Unfiled sessions is NORMAL, not broken (no "needs setup" gate).
     const unfiledInputs = wsBuckets.get("__unfiled__") ?? [];
     if (unfiledInputs.length) {
       const ws = unfiledWorkstream(project);
-      const inherited = project.dod;
       const sessionRollups = await Promise.all(
-        unfiledInputs.map((s) => buildSessionRollup(s, inherited, ctx)),
+        unfiledInputs.map((s) => buildSessionRollup(s, undefined, ctx)),
       );
       workstreamRollups.push(buildWorkstreamRollup(ws, sessionRollups));
     }
