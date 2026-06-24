@@ -2,7 +2,7 @@
 //
 // This is the single highest-leverage decision in the frontend port (impl-plan
 // pillar 2). The validated mockup renders a FIXTURE shape and derived `_prog`/
-// `_gate`/`_mixed`/`_sessGauge` in `enrich(data)` at the `loadScenario` seam. The
+// `_gate` (+ the project `_sessGauge` ring) in `enrich(data)` at the `loadScenario` seam. The
 // real `/api/rollups` returns `ProjectRollup[]` with `progress` ALREADY computed
 // server-side and a STRUCTURED `source.kind` on each criterion. `toViewModel` maps
 // each rollup back onto the fixture field names `render.ts` reads — keeping every
@@ -12,9 +12,10 @@
 //   - The client NEVER re-derives progress: `progress` (ProgressSnapshot) flows
 //     straight onto `_prog`; `_gate` is the first unmet gate criterion (a lookup,
 //     not a recompute).
-//   - The mockup's `srcFamily()`/`sessFamily()` substring matchers are gone — the
-//     evaluator family + mixed-source decision are the SERVER's (`mixed`/
-//     `sessionGauge`), and each criterion carries the structured `sourceKind`.
+//   - The mockup's `srcFamily()`/`sessFamily()` substring matchers are gone — each
+//     criterion carries the structured `sourceKind`, and a workstream's ring is the
+//     SERVER's k-of-n aggregate of its sessions' criteria (no per-session mixed gauge:
+//     a DoD lives on the workstream only, so its sessions can't differ in family).
 //   - Messy real sessions never throw: every optional field is defaulted (mirrors
 //     `simplifySessionInfo`), so a session with no name / no DoD renders honestly.
 
@@ -259,8 +260,6 @@ function toWorkstream(wr: WorkstreamRollup, project: ProjectRollup["project"]): 
     dodSrc: dodInfo?.src ?? "unset",
     sessions,
     _prog: toProg(wr.progress),
-    _mixed: !!wr.mixed,
-    _sessGauge: wr.sessionGauge,
     loop: !!wr.workstream.isLoop,
     // Renderer fallback for a merge-status session whose receipt carries no mergedAgo.
     mergedAgo: mergedAgoFromCriteria(wr.progress?.criteria),

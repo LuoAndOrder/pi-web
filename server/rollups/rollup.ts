@@ -18,7 +18,6 @@ import { resolve } from "node:path";
 
 import {
   computeProgress,
-  GIT_KINDS,
   pendingGate,
 } from "./progress.js";
 import { deriveUiStatus, toWorkItemStatus } from "./status.js";
@@ -115,39 +114,6 @@ export function isCwdUnder(child: string, parent: string): boolean {
   return c.startsWith(p.endsWith("/") ? p : `${p}/`);
 }
 
-type CritFamily = "git" | "cmd" | "user" | "other";
-
-function critFamily(kind: DoDSourceKind | undefined): CritFamily {
-  if (!kind) return "other";
-  if (GIT_KINDS.has(kind)) return "git";
-  if (kind === "command") return "cmd";
-  if (kind === "manual" || kind === "session_idle") return "user";
-  return "other";
-}
-
-/** Whether ONE session's (non-gate) criteria span >1 evaluator family, keyed off
- *  the STRUCTURED source kind (not the mockup's substring matcher). This is the
- *  per-session heterogeneity test that backs `sessFamily`. */
-export function isMixed(evals: CriterionEval[]): boolean {
-  const fams = new Set(evals.filter((e) => !e.gate).map((e) => critFamily(e.sourceKind)));
-  return fams.size > 1;
-}
-
-/** Collapse ONE session's (non-gate) criteria to a SINGLE family label
- *  (DATA-MODEL §5.5 / mockup `sessFamily`): the session's family, "mixed" if it is
- *  internally heterogeneous, or undefined when it has no scorable criteria so it
- *  doesn't widen the workstream's family set. The workstream-level mixed decision
- *  (buildWorkstreamRollup) is the size of the SET of these per-session labels —
- *  NOT the family span of the flattened criteria aggregate, so a workstream of
- *  same-DoD sessions (even the §5.2 default `manual + git` DoD) blends into a
- *  k-of-n ring instead of degrading to a 0/1 session gauge. */
-function sessFamily(evals: CriterionEval[]): CritFamily | "mixed" | undefined {
-  const scorable = evals.filter((e) => !e.gate);
-  if (!scorable.length) return undefined;
-  if (isMixed(scorable)) return "mixed";
-  return critFamily(scorable[0].sourceKind);
-}
-
 function countStatuses(sessions: SessionRollup[]): StatusCounts {
   const counts = zeroCounts();
   for (const s of sessions) counts[s.status] += 1;
@@ -160,15 +126,6 @@ function sumCounts(parts: StatusCounts[]): StatusCounts {
     for (const key of STATUS_KEYS) total[key] += part[key];
   }
   return total;
-}
-
-/** A session has reached its DoD (used by the mixed-source k-of-n gauge, §5.5). */
-function sessionDone(s: SessionRollup): boolean {
-  return (
-    s.uiStatus === "merge" ||
-    s.uiStatus === "sign" ||
-    Boolean(s.progress && s.progress.allMet)
-  );
 }
 
 const SOURCE_LABELS: Record<DoDSourceKind, string> = {
@@ -491,34 +448,16 @@ export function buildWorkstreamRollup(
     ? { ...zeroCounts(), abandoned: sessions.length }
     : countStatuses(sessions);
   const aggregate = aggregateSessionCriteria(sessions);
-  // Mixed-source = the workstream's SESSIONS span >1 evaluator family
-  // (types.ts:221 / DATA-MODEL §5.5). Each session collapses to ONE family via
-  // `sessFamily`, so a heterogeneous DoD shared by every session is NOT mixed and
-  // its criteria blend into a k-of-n ring (sessionGauge is reserved for sessions
-  // that genuinely differ in family).
-  const sessionFamilies = sessions
-    .map((s) => sessFamily(s.progress?.criteria ?? s.dod?.criteria ?? []))
-    .filter((f): f is CritFamily | "mixed" => f !== undefined);
-  const mixed = new Set(sessionFamilies).size > 1;
-
-  let progress: ProgressSnapshot | null;
-  let sessionGauge: WorkstreamRollup["sessionGauge"];
-  if (mixed) {
-    progress = null;
-    const total = sessions.length;
-    const done = sessions.filter(sessionDone).length;
-    sessionGauge = { done, total, percent: total ? Math.round((done / total) * 100) : 0 };
-  } else {
-    // `computeProgress` returns null on an empty aggregate → un-scorable ring.
-    progress = computeProgress(aggregate);
-  }
+  // The workstream ring is ALWAYS the k-of-n aggregate of its sessions' criteria.
+  // A DoD lives on the WORKSTREAM only and is inherited by every session in it, so
+  // all of a workstream's sessions evaluate the SAME criteria source set — they can
+  // never genuinely differ in evaluator family. There is therefore no per-session
+  // "mixed-source" gauge at the workstream level (a session has no DoD of its own).
+  // `computeProgress` returns null on an empty aggregate → an un-scorable ("?") ring.
+  const progress = computeProgress(aggregate);
 
   const out: WorkstreamRollup = { workstream, sessions, progress, counts };
   if (inactive) out.inactive = true;
-  if (mixed) {
-    out.mixed = true;
-    out.sessionGauge = sessionGauge;
-  }
   if (workstream.isLoop) {
     out.loop = {
       iter: 0,
@@ -562,8 +501,7 @@ function wsOpenEnded(w: WorkstreamRollup): boolean {
 /** A workstream has reached its DoD (mockup wsDone L1725). */
 function workstreamDone(w: WorkstreamRollup): boolean {
   if (w.workstream.status === "done") return true;
-  if (w.progress && w.progress.allMet) return true;
-  return Boolean(w.sessionGauge && w.sessionGauge.total > 0 && w.sessionGauge.done === w.sessionGauge.total);
+  return Boolean(w.progress && w.progress.allMet);
 }
 
 /** The synthetic "Unfiled" catch-all (unfiledWorkstream): loose sessions the user

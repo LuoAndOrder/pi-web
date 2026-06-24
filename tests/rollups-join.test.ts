@@ -2,28 +2,23 @@
 //
 // Direct import, stub git (no server, no real repos). Pins the mapping +
 // aggregation branches the DoD demands: nested-root → OWN project + lineage,
-// explicit-sessionIds override, mixed-source → session gauge, counts sum,
+// explicit-sessionIds override, k-of-n session-criteria aggregate, counts sum,
 // unmatched omitted, messy session never throws.
 
 import { describe, expect, it } from "vitest";
 
 import {
   assembleRollups,
-  buildWorkstreamRollup,
   collectArchivedProjects,
   isCwdUnder,
-  isMixed,
   mapSessionsToProjects,
   type AssembleContext,
   type RollupSessionInput,
 } from "../server/rollups/rollup.js";
-import { computeProgress } from "../server/rollups/progress.js";
 import type {
-  CriterionEval,
   DoDCriterion,
   Project,
   ProjectRegistry,
-  SessionRollup,
   Workstream,
 } from "../server/rollups/types.js";
 
@@ -56,27 +51,6 @@ function manual(text: string, met = false, gate = false): DoDCriterion {
 
 function session(over: Partial<RollupSessionInput> & { id: string }): RollupSessionInput {
   return { messageCount: 1, modified: "2026-06-20T00:00:00.000Z", ...over };
-}
-
-/** A minimal SessionRollup carrying just the already-evaluated `criteria`, for
- *  unit-testing buildWorkstreamRollup directly (where sessions can genuinely span
- *  different evaluator families — something inheritance can't produce). */
-function sessionRollup(id: string, criteria: CriterionEval[]): SessionRollup {
-  return {
-    id,
-    modified: "",
-    messageCount: 0,
-    runtime: {
-      loaded: false,
-      isRunning: false,
-      isStreaming: false,
-      isCompacting: false,
-      pendingMessageCount: 0,
-    },
-    status: "planned",
-    uiStatus: "planned",
-    progress: computeProgress(criteria) ?? undefined,
-  };
 }
 
 const cleanStub: AssembleContext = {
@@ -228,13 +202,12 @@ describe("assembleRollups", () => {
     expect(A.activeSessionCount).toBe(1);
   });
 
-  it("an inherited DoD that spans families blends into a k-of-n ring, not a session gauge", async () => {
-    // §5.2 default-style DoD: a manual sign-off + a git criterion, shared by the
-    // SAME session(s). Each session collapses to one family ('mixed'), so the SET
-    // of session families is {mixed} (size 1) → the workstream is NOT mixed and the
-    // criteria blend. mixed is keyed off "sessions span >1 family" (types.ts:221 /
-    // DATA-MODEL §5.5), NOT the family span of the flattened criteria aggregate —
-    // otherwise the common default DoD would degrade to a 0/1 session gauge.
+  it("an inherited DoD that spans families blends into ONE k-of-n criteria ring", async () => {
+    // A DoD lives on the WORKSTREAM only and is inherited by every session in it, so a
+    // heterogeneous DoD (a manual sign-off + a git criterion) is evaluated identically
+    // across all the workstream's sessions — they can't differ in evaluator family. The
+    // ring is therefore the single k-of-n aggregate of those criteria, never a per-session
+    // "mixed-source" gauge (that path doesn't exist: a session has no DoD of its own).
     const registry: ProjectRegistry = {
       version: 1,
       projects: [project({ id: "A", roots: ["/a"], workstreamIds: ["w1"] })],
@@ -255,29 +228,8 @@ describe("assembleRollups", () => {
     // manual met + git_merged not-met (cleanStub.isAncestor → false) → 1 of 2 = 50%.
     const rollups = await assembleRollups(registry, [session({ id: "s1", cwd: "/a" })], cleanStub);
     const ws = rollups[0].workstreams.find((w) => w.workstream.id === "w1")!;
-    expect(ws.mixed).toBeFalsy();
     expect(ws.progress).not.toBeNull();
     expect(ws.progress?.percent).toBe(50);
-    expect(ws.sessionGauge).toBeUndefined();
-  });
-
-  it("a workstream whose SESSIONS span >1 family → progress null + a session gauge", () => {
-    // Mixed is per-WORKSTREAM over the set of one-family-per-session labels. Two
-    // sessions with genuinely different families (git vs. manual) → {git, user}
-    // (size 2) → mixed → the session gauge replaces the criteria ring.
-    const gitSession = sessionRollup("s1", [
-      { id: "g", met: true, evaluatedAt: "x", sourceKind: "git_ahead_zero" },
-    ]);
-    const userSession = sessionRollup("s2", [
-      { id: "m", met: false, evaluatedAt: "x", sourceKind: "manual" },
-    ]);
-    const ws = buildWorkstreamRollup(workstream({ id: "w1", projectId: "A" }), [
-      gitSession,
-      userSession,
-    ]);
-    expect(ws.mixed).toBe(true);
-    expect(ws.progress).toBeNull();
-    expect(ws.sessionGauge).toMatchObject({ done: 1, total: 2, percent: 50 });
   });
 
   it("a homogeneous git workstream DoD → an honest k-of-n ring (clean tree = 100%)", async () => {
@@ -297,7 +249,6 @@ describe("assembleRollups", () => {
     };
     const rollups = await assembleRollups(registry, [session({ id: "s1", cwd: "/a" })], cleanStub);
     const ws = rollups[0].workstreams.find((w) => w.workstream.id === "w1")!;
-    expect(ws.mixed).toBeFalsy();
     expect(ws.progress?.percent).toBe(100); // ahead 0 + upstream tracked
     expect(ws.progress?.allMet).toBe(true);
   });
@@ -320,7 +271,6 @@ describe("assembleRollups", () => {
     const rollups = await assembleRollups(registry, [], cleanStub);
     const ws = rollups[0].workstreams.find((w) => w.workstream.id === "w1")!;
     expect(ws.progress).toBeNull();
-    expect(ws.mixed).toBeFalsy();
   });
 
   it("the project ring is k-of-n WORKSTREAMS done (projGauge), not a root-criteria blend", async () => {
@@ -727,16 +677,5 @@ describe("assembleRollups", () => {
     expect(p.workstreams[0].inactive).toBeUndefined();
     expect(p.progress.percent).toBe(100); // a "done" ws is its own done
     expect(p.archivedSessionCount).toBeUndefined();
-  });
-});
-
-describe("isMixed", () => {
-  it("spans >1 evaluator family (excluding gates)", () => {
-    const evals: CriterionEval[] = [
-      { id: "1", met: true, evaluatedAt: "x", sourceKind: "manual" },
-      { id: "2", met: true, evaluatedAt: "x", sourceKind: "git_clean" },
-    ];
-    expect(isMixed(evals)).toBe(true);
-    expect(isMixed([{ id: "1", met: true, evaluatedAt: "x", sourceKind: "git_merged" }, { id: "2", met: true, evaluatedAt: "x", sourceKind: "git_clean" }])).toBe(false);
   });
 });

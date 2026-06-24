@@ -2,8 +2,8 @@
 //
 // Ported nearly byte-for-byte from the validated mockup
 // `docs/dashboard-designs-final/index.html` (render functions L896-2862). The ONE
-// structural change is the data seam: the mockup derived `_prog`/`_gate`/`_mixed`/
-// `_sessGauge` in `enrich(data)` and read a fixture; here `rollupAdapter.toViewModel`
+// structural change is the data seam: the mockup derived `_prog`/`_gate` (and the
+// project `_sessGauge` ring) in `enrich(data)` and read a fixture; here `rollupAdapter.toViewModel`
 // maps the server `ProjectRollup[]` onto these same fixture field names BEFORE render,
 // so every function below reads exactly what it read in the mockup — and the client
 // NEVER re-derives progress (it trusts the server `ProgressSnapshot`).
@@ -98,8 +98,6 @@ export interface VWorkstream {
   dodSrc?: string;
   sessions: VSession[];
   _prog?: VProg | null;
-  _mixed?: boolean;
-  _sessGauge?: VGauge;
   loop?: boolean;
   mergedAgo?: string;
   // Archived OR abandoned: this workstream is shelved. The adapter routes inactive
@@ -424,7 +422,8 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     if (st === "fail") return `<text x="18" y="7.6" text-anchor="middle" font-size="11" font-weight="800" fill="${color}">×</text>`;
     return "";
   }
-  // item = a session or workstream carrying .status, ._prog (or ._sessGauge for mixed), .loop.
+  // item = a session/workstream carrying .status, ._prog, .loop — OR the PROJECT gauge
+  // item, which carries ._sessGauge (the k-of-n WORKSTREAMS-done ring; the only producer).
   // [data-testid="ring"] + [data-percent]/[data-asterisk] are the e2e contract hooks; data-percent
   // ALWAYS equals a server-derived percent (never an invented one), satisfying DoD invariant #6.
   function ringSvg(item: RingItem, size: number, opts?: { neutral?: boolean }) {
@@ -439,7 +438,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       return wrap2(`<circle class="ring-dot" cx="18" cy="18" r="${r}" style="stroke:color-mix(in srgb,var(--st-run) 55%,transparent)"/><text class="ring-gly" x="18" y="22.8" text-anchor="middle" fill="${color}">∞</text>`, true);
     }
     if (st === "queued" || st === "planned") return wrap2(`<circle class="ring-dot" cx="18" cy="18" r="${r}"/><text class="ring-gly" x="18" y="22.6" text-anchor="middle" fill="var(--st-idle)">·</text>`, true);
-    if (item._sessGauge) {
+    if (item._sessGauge) { // the project k-of-n WORKSTREAMS-done ring (gaugeItem below)
       const g = item._sessGauge;
       return wrap2(`${segArcs(g.done, g.total, 0, g.percent, "color-mix(in srgb,var(--muted) 78%,transparent)")}${ringShape(st, o.neutral ? color : hue)}<text class="ring-num" x="18" y="22.2" text-anchor="middle" font-size="9">${g.done}/${g.total}</text>`, false, ` data-percent="${g.percent}" data-asterisk="0"`);
     }
@@ -519,11 +518,10 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
   // projectProgress) so the client never re-derives a shown percent (review finding). They
   // survive ONLY as the `longPole` spotlight heuristic (which one workstream to call out as
   // the bottleneck) — a cosmetic pick, never a number rendered as truth.
-  function wsDone(w: VWorkstream) { return w.status === "merge" || w.status === "sign" || !!(w._prog && w._prog.allMet) || !!(w._sessGauge && w._sessGauge.total > 0 && w._sessGauge.done === w._sessGauge.total); }
+  function wsDone(w: VWorkstream) { return w.status === "merge" || w.status === "sign" || !!(w._prog && w._prog.allMet); }
   function wsOpenEnded(w: VWorkstream) { return w.status === "loop" || !!w.loop; }
   function wsEmptyDod(w: VWorkstream) {
     if (w.status === "merge" || w.status === "sign") return false;
-    if (w._mixed) return false;
     return !w._prog;
   }
   function wsUnscorable(w: VWorkstream) { return wsOpenEnded(w) || wsEmptyDod(w); }
@@ -1343,7 +1341,6 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const CAP = 6, shown = sorted.slice(0, CAP), more = sorted.slice(CAP);
     const sess = shown.map((s) => renderSession(s, w, p, rowOpts)).join("")
       + (more.length ? `<div class="sess-extra" hidden>${more.map((s) => renderSession(s, w, p, rowOpts)).join("")}</div><button class="sessmore" data-toggle="sessmore">+${more.length} more session${more.length > 1 ? "s" : ""}</button>` : "");
-    const mixedNote = w._mixed && w._sessGauge ? ` <span class="srcTag" title="this workstream's sessions use different DoD evaluators, so the ring is a 'k of n sessions done' gauge — not a blended percent">mixed sources · ${w._sessGauge.done}/${w._sessGauge.total} done</span>` : "";
     // A no-DoD workstream is MANUAL: a calm "tracked by hand" line whose default action is
     // Mark done (on the session rows below / the kebab), with an OPTIONAL "add criteria to
     // auto-track" enhancement — NEVER a "not set" / "Set a Definition of Done" alarm (M3).
@@ -1353,7 +1350,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       ? `<span class="muted">Done — marked manually (no Definition of Done).</span>`
       : noDoD
         ? `<span class="muted">No criteria — tracked manually (Mark done by hand).</span> <button class="btn ghost sm wsaddcrit" type="button" data-wsaddcriteria="${esc(w.id)}" title="Optional: add criteria so the ring auto-tracks progress toward done">+ Add criteria to auto-track</button>`
-        : dodInline(w.dod, w.dodSrc)) + mixedNote;
+        : dodInline(w.dod, w.dodSrc));
     const unfiledTools = isUnfiled ? unfiledAssignHtml(w, p) : "";
     // R4 — the Unfiled bucket renders OPEN by default (its `.sess-list` — the organize tools +
     // session rows — is hidden behind `.ws.open` for normal workstreams). You never "collapse"

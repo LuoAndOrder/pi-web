@@ -232,9 +232,12 @@ export type StatusCounts = Record<WorkItemStatus, number>;
 export interface WorkstreamRollup {
   workstream: Workstream;
   sessions: SessionRollup[];
-  progress: ProgressSnapshot | null; // null when mixed-source
-  mixed?: boolean; // sessions span >1 evaluator family
-  sessionGauge?: { done: number; total: number; percent: number }; // used when mixed
+  // The k-of-n aggregate of this workstream's sessions' criteria; null when there is
+  // nothing to score (no sessions, or no DoD inherited) → an un-scorable ("?") ring.
+  // A DoD lives on the workstream only and is inherited by every session, so a
+  // workstream's sessions can't differ in evaluator family — there is no per-session
+  // "mixed-source" gauge at this level.
+  progress: ProgressSnapshot | null;
   counts: StatusCounts;
   loop?: SessionRollup["loop"];
   // True when the workstream is archived OR its status is "abandoned": the UI groups

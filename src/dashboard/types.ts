@@ -183,8 +183,6 @@ export interface WorkstreamRollup {
   workstream: Workstream;
   sessions: SessionRollup[];
   progress: ProgressSnapshot | null;
-  mixed?: boolean;
-  sessionGauge?: { done: number; total: number; percent: number };
   counts: StatusCounts;
   loop?: SessionRollup["loop"];
   // True when the workstream is archived OR its status is "abandoned": the UI groups
