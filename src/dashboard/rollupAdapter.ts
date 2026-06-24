@@ -145,13 +145,20 @@ function sessionStatus(sr: SessionRollup): string {
  *  Reuses render.ts's shared `statusRank` — no second ordering copy to drift. */
 function workstreamStatus(wr: WorkstreamRollup, sessions: VSession[]): string {
   if (wr.workstream.isLoop) return "loop";
+  // A workstream MANUALLY marked done (its stored WorkItemStatus is "done") is terminal: the
+  // human closed it out, so its row reads "Completed · merged" even though its sessions carry
+  // no DoD and stay "unset". Without this, "Mark done" on a no-DoD workstream would flip the
+  // project ring (which counts status==="done") but leave the ws row showing "In progress"
+  // forever — an inconsistency that hides the very action the manual model is built on (M3).
+  if (wr.workstream.status === "done") return "merge";
   if (sessions.length) {
     return sessions.reduce((best, s) => (statusRank(s.status) < statusRank(best.status) ? s : best)).status;
   }
+  // `done` is handled above (returns "merge"); an empty workstream's remaining stored statuses
+  // map to their render-state.
   switch (wr.workstream.status) {
     case "in_progress": return "run";
     case "blocked": return "block";
-    case "done": return "merge";
     default: return "planned";
   }
 }

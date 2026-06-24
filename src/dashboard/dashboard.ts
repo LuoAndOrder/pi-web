@@ -183,8 +183,9 @@ export function createDashboard(options: {
   }
 
   // Register a candidate (or "Add a project") → POST /api/projects {name, roots}; then refetch the
-  // rollups so the freshly-registered project re-renders into the grid (needs-setup, no DoD yet —
-  // an honest "?" ring, never a fabricated percent). The toast names the real API.
+  // rollups so the freshly-registered project re-renders into the grid as a calm "manual"
+  // project (loose Unfiled sessions to organize + Mark done — NOT a "needs setup" alarm). The
+  // toast names the real API.
   async function registerProject(name: string, path: string) {
     const root = (path || "").trim();
     if (!root) { showToast("Pick a folder to register, or start a session first."); return; }
@@ -196,7 +197,7 @@ export function createDashboard(options: {
         body: JSON.stringify({ name: projName, roots: [root] }),
       });
       if (res.ok || res.status === 201) {
-        showToast(`Registered <b>${escText(projName)}</b> — its sessions roll up by cwd-prefix. Set a Definition of Done to track progress.`);
+        showToast(`Registered <b>${escText(projName)}</b> — its sessions roll up by cwd-prefix. Organize them into workstreams and Mark done, or add criteria to auto-track.`);
         await refreshCandidates();
         await refetch();
       } else {
@@ -761,7 +762,8 @@ export function createDashboard(options: {
 
   // ── DoD authoring drawer (impl-plan S10) ──
   // The authoring flow is keyed to a WORKSTREAM (DoD is stored per-workstream and PUT to
-  // /api/workstreams/:id/dod), reached by clicking "Define done" on any unset session row.
+  // /api/workstreams/:id/dod), reached via the OPTIONAL "Add criteria to auto-track"
+  // affordance on a no-DoD (manual) workstream — an enhancement, never a gate.
   // It is a modal panel mounted INSIDE #dashboardView (its .dodDrawer CSS is scoped there),
   // so it rides above the grid and never touches the host document. On save it PUTs the
   // structured criteria, then refetches /api/rollups so the ring updates to honest k-of-n —
@@ -944,7 +946,7 @@ export function createDashboard(options: {
       : "Pick at least one criterion to start tracking progress.";
     el.innerHTML = `
       <div class="dodDrawer-scrim" data-dod-close></div>
-      <div class="dodDrawer-panel" role="dialog" aria-modal="true" aria-label="Define done">
+      <div class="dodDrawer-panel" role="dialog" aria-modal="true" aria-label="Add criteria to auto-track">
         <div class="dodDrawer-head">
           <div>
             <div class="dodDrawer-eyebrow">Definition of Done</div>
@@ -959,7 +961,7 @@ export function createDashboard(options: {
           <div class="grp"><b>On-demand / manual</b> · a command (re-run to refresh) or a boolean you toggle</div>
           <div class="dodpick">${pick(other)}</div>
           <div class="addrow"><input type="text" id="dodCritText" placeholder="…or describe a criterion in your own words"><button data-critaddtext>Add</button></div>
-          <ul class="draft">${draftList || `<li class="empty">No criteria yet — the ring honestly shows "?" (not set), and this workstream is excluded from the project gauge until you add one.</li>`}</ul>
+          <ul class="draft">${draftList || `<li class="empty">No criteria yet — this workstream stays MANUAL (Mark done by hand). Adding criteria is optional: it switches the ring to honest k-of-n auto-tracking.</li>`}</ul>
           <div class="saverow">
             <span class="note">${note}</span>
             <button class="btn primary sm" data-critsave ${count ? "" : "disabled"}>Save Definition of Done</button>
@@ -1423,6 +1425,22 @@ export function createDashboard(options: {
     }
   }
 
+  // OPTIONAL "Add criteria to auto-track" — open the DoD authoring drawer for a no-DoD
+  // (manual) workstream so the user can opt into auto-tracking. A workstream WITH sessions
+  // reuses openDodDrawer (seeded from a member session's cwd for git/command criteria); an
+  // empty workstream opens the session-independent drawer keyed straight to its id. Either
+  // way saveDoD PUTs /api/workstreams/:id/dod — never a gate, just an enhancement.
+  async function addCriteriaToWorkstream(workstreamId: string) {
+    if (!workstreamId) return;
+    for (const ref of Object.values(view.SESS)) {
+      if (ref.w.id === workstreamId && !ref.w._synthetic) { await openDodDrawer(ref.s.id); return; }
+    }
+    const ctx = findWsContext(workstreamId);
+    if (!ctx) { showToast("Couldn't open the criteria editor — try again."); return; }
+    const root = (findProjectContext(ctx.projectId)?.roots || [])[0] || "";
+    await openDodDrawerForWorkstream(workstreamId, ctx.wsName, ctx.projectId, root);
+  }
+
   async function markWsDone(workstreamId: string) {
     const ctx = findWsContext(workstreamId);
     const name = ctx?.wsName || "Workstream";
@@ -1855,6 +1873,17 @@ export function createDashboard(options: {
       runWsAction(wsAction.getAttribute("data-wsaction") || "", wsAction.getAttribute("data-wsid") || "");
       return;
     }
+    // OPTIONAL "Add criteria to auto-track" — opens the DoD authoring drawer for a no-DoD
+    // (manual) workstream. This is an enhancement, never a gate: a no-DoD workstream is marked
+    // done by hand by default, and only auto-tracks once the user opts in here (M3).
+    const wsAddCrit = target.closest<HTMLElement>("[data-wsaddcriteria]");
+    if (wsAddCrit) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeWsMenus();
+      void addCriteriaToWorkstream(wsAddCrit.getAttribute("data-wsaddcriteria") || "");
+      return;
+    }
 
     // ── project-level lifecycle (operability lens) ── kebab toggle + actions, checked before
     // the card/row toggle beneath them. "+ New project" carries data-projaction="new" with no id.
@@ -1991,11 +2020,10 @@ export function createDashboard(options: {
       event.preventDefault();
       event.stopPropagation();
       const id = openEl.getAttribute("data-open");
-      // "Define done" — an unset session (no DoD) routes to the authoring drawer for its workstream
-      // (PUT /api/workstreams/:id/dod), NOT into the conversation. Every other status opens the
-      // real session as before.
-      if (id && view.SESS[id]?.s.status === "unset") openDodDrawer(id);
-      else if (id) void openSessionFromCard(id);
+      // Sessions have NO DoD, so a session row never routes to the authoring drawer: Open
+      // always lands in the REAL conversation. DoD authoring is the OPTIONAL, workstream-level
+      // "Add criteria to auto-track" path (data-wsaddcriteria), not a per-session gate.
+      if (id) void openSessionFromCard(id);
       return;
     }
 

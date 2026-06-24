@@ -195,7 +195,7 @@ type RingItem = {
   loop?: boolean;
   _evaluating?: boolean;
 };
-type RowOpts = { navOnly?: boolean; setup?: boolean; live?: boolean; selectable?: boolean };
+type RowOpts = { navOnly?: boolean; live?: boolean; selectable?: boolean };
 interface Counts {
   run: number;
   loop: number;
@@ -211,7 +211,9 @@ interface Counts {
   active: number;
   needs: number;
   healthy: number;
-  setup: number;
+  // Count of calm "manual" (no-DoD) projects — in-progress work tracked by hand. Surfaced
+  // as a neutral grid card, never a "needs setup" alarm (M3).
+  manual: number;
 }
 interface CardLive {
   tone: string;
@@ -220,7 +222,6 @@ interface CardLive {
   id: string | null;
   pointUp?: string;
   qDelta?: { total: number } | null;
-  unset?: boolean;
 }
 
 export interface DashboardRenderer {
@@ -353,7 +354,9 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     fail: { label: "Failed", cls: "fail", color: "var(--st-fail)" },
     queued: { label: "Queued", cls: "idle", color: "var(--st-idle)" },
     planned: { label: "Planned · not started", cls: "idle", color: "var(--st-idle)" },
-    unset: { label: "Set criterion", cls: "unset", color: "var(--st-sign)" },
+    // No DoD = MANUAL mode (calm "in progress · Mark done"), NOT a "needs setup"
+    // alarm. A neutral idle badge, never the amber/sign "set criterion" treatment.
+    unset: { label: "In progress", cls: "idle", color: "var(--st-idle)" },
   };
   function byAttention(a: { status: string; id?: string; name?: string }, b: { status: string; id?: string; name?: string }) {
     return (statusRank(a.status) - statusRank(b.status)) || String(a.id || a.name || "").localeCompare(String(b.id || b.name || ""));
@@ -441,7 +444,10 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       return wrap2(`${segArcs(g.done, g.total, 0, g.percent, "color-mix(in srgb,var(--muted) 78%,transparent)")}${ringShape(st, o.neutral ? color : hue)}<text class="ring-num" x="18" y="22.2" text-anchor="middle" font-size="9">${g.done}/${g.total}</text>`, false, ` data-percent="${g.percent}" data-asterisk="0"`);
     }
     const prog = item._prog;
-    if (st === "unset" || !prog || (prog.total === 0 && !prog.unrun)) return wrap2(`<circle class="ring-dot" cx="18" cy="18" r="${r}" style="stroke:color-mix(in srgb,var(--st-sign) 55%,transparent)"/><text class="ring-gly" x="18" y="22.5" text-anchor="middle" fill="var(--st-sign)">?</text>`, true);
+    // No DoD = MANUAL mode: a CALM neutral dot (tracked by hand, Mark done), NOT the
+    // amber "?" needs-setup ring. A DoD is an optional "add criteria to auto-track"
+    // enhancement, never a gate — so a no-DoD item must not render as broken/alarmed.
+    if (st === "unset" || !prog || (prog.total === 0 && !prog.unrun)) return wrap2(`<title>In progress · tracked manually (no Definition of Done set)</title><circle class="ring-dot" cx="18" cy="18" r="${r}" style="stroke:color-mix(in srgb,var(--st-idle) 60%,transparent)"/><text class="ring-gly" x="18" y="22.6" text-anchor="middle" fill="var(--st-idle)">·</text>`, true);
     const showFrac = prog.unrun > 0 || prog.stale > 0;
     const numTxt = `${prog.met}/${prog.total}${showFrac ? "*" : ""}`;
     const numFill = showFrac ? "color-mix(in srgb,var(--muted) 88%,transparent)" : (o.neutral ? color : "var(--text)");
@@ -480,9 +486,11 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     return { you, fail, sign, run };
   }
   function allUnset(p: VProject) { let any = false; for (const w of p.workstreams) for (const s of w.sessions) { any = true; if (s.status !== "unset") return false; } return any; }
-  function pClass(p: VProject) { const c = projNeeds(p); if (c.you || c.fail) return "attn"; if (c.run) return "active"; if (c.sign) return "signoff"; if (allUnset(p)) return "needsSetup"; return "calm"; }
+  // A project whose only work is no-DoD (manual) sessions is NORMAL, not broken: it is a
+  // calm "manual" project (in progress · Mark done), rendered as a prominent card — NEVER a
+  // "needsSetup" alarm group. Projects have no DoD and are never gated on one (M3).
+  function pClass(p: VProject) { const c = projNeeds(p); if (c.you || c.fail) return "attn"; if (c.run) return "active"; if (c.sign) return "signoff"; if (allUnset(p)) return "manual"; return "calm"; }
   function cardBlast(p: VProject) { let best = "lo"; p.workstreams.forEach((w) => w.sessions.forEach((s) => { if (isNeed(s)) { const b = blastRadius(s); if (blastRank(b) < blastRank(best)) best = b; } })); return best; }
-  function firstSessId(p: VProject, statuses: string[]) { for (const w of p.workstreams) for (const s of w.sessions) if (statuses.includes(s.status)) return s.id; return null; }
 
   // representative live one-liner (#A): surface the HIGHEST-priority state first and point UP when blocking
   function cardLive(p: VProject): CardLive {
@@ -502,7 +510,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       return { tone: st === "loop" ? "loop" : "run", loop: st === "loop", txt: t.live || "", id: t.id, qDelta: qd };
     }
     if (st === "sign") return { tone: "sign", loop: false, pointUp: "sec-signoff", txt: `${wn} is done per its DoD — sign off above`, id: t.id };
-    if (st === "unset") return { tone: "calm", loop: false, txt: `${wn} — no Definition of Done set yet`, id: t.id, unset: true };
+    if (st === "unset") return { tone: "calm", loop: false, txt: `${wn} — in progress, tracked manually`, id: t.id };
     if (st === "queued" || st === "planned") return { tone: "calm", loop: false, txt: t.live || "", id: t.id };
     return { tone: "calm", loop: false, txt: "All work merged. Nothing pending.", id: t.id };
   }
@@ -527,6 +535,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
 
   // ─────────────────────────── icons ───────────────────────────
   const continueIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 11.5a8.4 8.4 0 0 1-12 7.6L3 21l1.9-6A8.4 8.4 0 1 1 21 11.5Z"/></svg>`;
+  const checkIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>`;
   const chevIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="14" height="14"><path d="m9 6 6 6-6 6"/></svg>`;
   const plusIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>`;
   const focusIcon = () => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>`;
@@ -743,10 +752,10 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
   }
 
   function dormantIds() { return new Set(state.data.filter((p) => pClass(p) === "calm").map((p) => p.id)); }
-  function setupIds() { return new Set(state.data.filter((p) => pClass(p) === "needsSetup").map((p) => p.id)); }
+  function manualIds() { return new Set(state.data.filter((p) => pClass(p) === "manual").map((p) => p.id)); }
 
   function fleetCounts(): Counts {
-    const c: Counts = { run: 0, loop: 0, block: 0, softwait: 0, sign: 0, plan: 0, merge: 0, fail: 0, unset: 0, total: 0, projects: state.data.length, active: 0, needs: 0, healthy: 0, setup: 0 };
+    const c: Counts = { run: 0, loop: 0, block: 0, softwait: 0, sign: 0, plan: 0, merge: 0, fail: 0, unset: 0, total: 0, projects: state.data.length, active: 0, needs: 0, healthy: 0, manual: 0 };
     const dorm = dormantIds();
     activeSess().forEach(({ s, p }) => {
       c.total++;
@@ -763,7 +772,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     c.active = c.run + c.loop;
     c.needs = c.block + c.fail;
     c.healthy = dorm.size;
-    c.setup = setupIds().size;
+    c.manual = manualIds().size;
     return c;
   }
 
@@ -838,20 +847,17 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
         headline = `<em class="sign">${c.sign} done</em> — review below.`;
         if (c.loop) subBits.push(`<b>${c.loop} loop${c.loop > 1 ? "s" : ""}</b> running`);
         if (c.run) subBits.push(`<b>${c.run} running</b>`);
-      } else if (c.setup) {
-        headline = `<em class="setup">${c.setup} project${c.setup > 1 ? "s" : ""} need${c.setup > 1 ? "" : "s"} setup</em> — author a Definition of Done to start tracking.`;
-        if (c.loop) subBits.push(`<b>${c.loop} loop${c.loop > 1 ? "s" : ""}</b> running`);
-        if (c.run) subBits.push(`<b>${c.run} running</b>`);
       } else {
+        // No "N projects need setup" headline: a no-DoD project is a calm manual project, not
+        // an alarm. We surface manual work-in-progress quietly in the subline, never as a gate.
         headline = `<em class="calm">Nothing needs you.</em> ${esc(runTxt)}, everything else can wait.`;
+        if (c.manual) subBits.push(`<b>${c.manual} manual</b>`);
       }
       if (c.plan) subBits.push(`<b>${c.plan} planned</b>`);
       let closeTab = "";
-      if (c.sign === 0 && c.needs === 0 && !c.softwait && !c.setup) {
+      if (c.sign === 0 && c.needs === 0 && !c.softwait) {
         const ll = longestLoop();
         closeTab = (ll && ll.min >= CLOSE_TAB_LOOP_MIN) ? ` Longest loop running <b>${esc(ll.label)}</b>.` : " You can close this tab.";
-      } else if (c.setup && c.sign === 0 && c.needs === 0 && !c.softwait) {
-        closeTab = ` <button class="hero-setup-cta" data-jump="sec-setup">Set a Definition of Done →</button>`;
       }
       const dc = deltaClause(c.needs);
       return `<div class="eyebrow">${day} · everything in one quiet view</div>
@@ -891,9 +897,9 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     if (c.active) pills.push(["", "Running", calm ? "" : c.active, "sec-proj", false]);
     if (c.plan) pills.push(["", "Planned", c.plan, "sec-planned", false]);
     if (c.merge) pills.push(["", "Merged", calm ? "" : c.merge, "sec-done", false]);
-    if (c.setup) pills.push(["setup", "Needs setup", c.setup, "sec-setup", true]);
+    if (c.manual) pills.push(["", `Manual · ${c.manual} project${c.manual > 1 ? "s" : ""}`, "", "sec-proj", false]);
     if (c.healthy) pills.push(["", `Healthy · ${c.healthy} project${c.healthy > 1 ? "s" : ""}`, "", "sec-healthy", false]);
-    if (!pills.length && c.needs === 0 && !c.setup) pills.push(["", "Everything healthy — nothing needs you", "", "sec-proj", false]);
+    if (!pills.length && c.needs === 0) pills.push(["", "Everything healthy — nothing needs you", "", "sec-proj", false]);
     railEl.innerHTML = pills.map(([cl, l, n, j, sw]) =>
       `<button class="pill ${cl}" data-jump="${j}">${sw ? '<span class="sw"></span>' : ""}${l}${n !== "" ? ` <span class="n">${n}</span>` : ""}</button>`).join("");
   }
@@ -1078,7 +1084,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     // (operability lens). data-projaction="new" carries no id; the controller prompts for a
     // folder (reusing refreshCandidates) + name, then POSTs /api/projects.
     return `<div class="shead" id="sec-proj"><h2>Projects</h2><span class="cnt">${state.data.length}</span>
-        <span class="hint">tap a card to drill in <span class="infg" title="Each ring is one workstream. Segments = its Definition-of-Done criteria, filled = met. ✓ = merged · ∞ = autonomous loop · ? = no DoD set yet.">?</span></span>
+        <span class="hint">tap a card to drill in <span class="infg" title="Each ring is one workstream. Segments = its Definition-of-Done criteria, filled = met. ✓ = merged · ∞ = autonomous loop · · = manual (no criteria — Mark done by hand).">?</span></span>
         <button class="btn ghost sm newproj" type="button" data-projaction="new" title="Register another project folder — its sessions roll up by cwd-prefix">${plusIcon()} New project</button>
       </div>
       <section id="projectsHost"></section>`;
@@ -1101,7 +1107,9 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const attn = state.data.filter((p) => pClass(p) === "attn");
     const active = state.data.filter((p) => pClass(p) === "active");
     const dormant = state.data.filter((p) => pClass(p) === "calm");
-    const setup = state.data.filter((p) => pClass(p) === "needsSetup");
+    // Calm "manual" (no-DoD) projects render as prominent full cards — in-progress work
+    // tracked by hand — NOT a "Needs setup" alarm group (M3).
+    const manual = state.data.filter((p) => pClass(p) === "manual");
     let signoff = state.data.filter((p) => pClass(p) === "signoff");
 
     let fullSign: VProject[] = [];
@@ -1131,8 +1139,8 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       // edge lined up with the heading + sibling bands — but let it span the FULL row width
       // (`.solo`) so it matches those full-width bands instead of stranding an empty right
       // gutter at min-width (review finding). The two states are mutually exclusive.
-      const single = full.length === 1 && !signoff.length && !dormant.length && !activeOverflow.length && !attnOverflow.length && !setup.length && c.sign === 0;
-      const soloFull = full.length === 1 && (c.sign > 0 || setup.length > 0);
+      const single = full.length === 1 && !signoff.length && !dormant.length && !activeOverflow.length && !attnOverflow.length && !manual.length && c.sign === 0;
+      const soloFull = full.length === 1 && (c.sign > 0 || manual.length > 0);
       if (full.length) out += `<div class="grid ${single ? "single" : soloFull ? "solo" : ""}">` + full.map((p) => renderCard(p)).join("") + `</div>`;
       if (attnOverflow.length) {
         const AOC = 6, aoShown = attnOverflow.slice(0, AOC), aoExtra = attnOverflow.slice(AOC);
@@ -1150,9 +1158,12 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       out += `<div class="grpcard" id="sec-signoff-grid"><div class="grp-h" data-toggle="grp"><span class="gt">Awaiting sign-off</span> <span class="gc">${signoff.length} project${signoff.length > 1 ? "s" : ""} · sign off in the strip above · drill in to review</span><button class="jump" data-jump="sec-signoff">sign off ↑</button><span class="chev">${chevIcon()}</span></div>
         <div class="grp-b">` + signoff.map((p) => renderRow(p, { navOnly: true })).join("") + `</div></div>`;
     }
-    if (setup.length) {
-      out += `<div class="grpcard open" id="sec-setup" data-testid="needs-setup"><div class="grp-h" data-toggle="grp"><span class="gt sup">Needs setup</span> <span class="gc">${setup.length} project${setup.length > 1 ? "s" : ""} · no Definition of Done authored yet · set one to start tracking</span><span class="chev">${chevIcon()}</span></div>
-        <div class="grp-b">` + setup.map((p) => renderRow(p, { setup: true })).join("") + `</div></div>`;
+    // Manual (no-DoD) projects render as a calm prominent grid of full cards — in-progress
+    // work the user marks done by hand (or opts into auto-tracking). NOT a "Needs setup"
+    // alarm group, and never collapsed into "Healthy & dormant" (it's active work). When the
+    // ONLY cards are manual ones (a fresh fleet), they're already the page's primary content.
+    if (manual.length) {
+      out += `<div class="grid" data-testid="manual-projects">` + manual.map((p) => renderCard(p)).join("") + `</div>`;
     }
     if (dormant.length) {
       const sorted = dormant.slice().sort((a, b) => mergeRecency(a) - mergeRecency(b));
@@ -1203,17 +1214,19 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const poleLine = allOpenEnded
       ? `<div class="csum-pole"><span class="plbl">Continuous loop — no terminal Definition of Done.</span></div>`
       : noDod
-        ? `<div class="csum-pole"><span class="plbl">No Definition of Done set — add one to track progress.</span></div>`
+        // Loose Unfiled sessions = NORMAL, not broken: organize them into workstreams and
+        // mark them done. NO "set a Definition of Done" gate (M3).
+        ? `<div class="csum-pole"><span class="plbl">Loose sessions — organize into workstreams, then Mark done.</span></div>`
         : pole && !wsDone(pole)
           ? `<div class="csum-pole"><span class="plbl">Long pole:</span> <b>${esc(shortWs(pole.name))}</b> ${poleTag}</div>`
           : ``;
     const gaugeLine = allOpenEnded
       ? `<div class="csum-line"><b>∞ looping</b> · open-ended ${dotStrip(p)}</div>`
       : noDod
-        ? `<div class="csum-line"><span class="muted">No Definition of Done set yet</span> ${dotStrip(p)}</div>`
-        : `<div class="csum-line"><b>${g.done} of ${g.total}</b> ${scopedWord} met DoD${loopClause} ${dotStrip(p)}</div>`;
+        ? `<div class="csum-line"><span class="muted">Loose sessions, not yet organized</span> ${dotStrip(p)}</div>`
+        : `<div class="csum-line"><b>${g.done} of ${g.total}</b> ${scopedWord} done${loopClause} ${dotStrip(p)}</div>`;
     const ringsBlock = `<div class="csum">
-      <div class="csum-ring" title="${allOpenEnded ? "an open-ended loop has no terminal DoD to be k-of-n against — shown as running ∞" : noDod ? "no Definition of Done set on any workstream yet — nothing to gauge" : "k of " + g.total + " workstreams have met their Definition of Done — an honest aggregate, not an authored percent"}">${ringSvg(gaugeItem, 50)}</div>
+      <div class="csum-ring" title="${allOpenEnded ? "an open-ended loop has no terminal DoD to be k-of-n against — shown as running ∞" : noDod ? "loose sessions matched to this project root, not yet organized into workstreams" : "k of " + g.total + " workstreams done (manually marked, or met their Definition of Done) — an honest aggregate, not an authored percent"}">${ringSvg(gaugeItem, 50)}</div>
       <div class="csum-body">
         ${gaugeLine}
         ${poleLine}
@@ -1229,7 +1242,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       olAttr = `data-jump="${live.pointUp}"`;
     } else {
       olActs = live.id
-        ? `<button class="btn primary sm" data-open="${live.id}">${continueIcon()} ${live.unset ? "Define done" : liveRun ? "Open" : "Continue"}</button>`
+        ? `<button class="btn primary sm" data-open="${live.id}">${continueIcon()} ${liveRun ? "Open" : "Continue"}</button>`
         : "";
       olAttr = live.id ? `data-open="${live.id}"` : "";
       ping = (live.id && live.id === state._pingId) ? " ping" : "";
@@ -1265,12 +1278,12 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const o = opts || {};
     const c = projNeeds(p);
     const lv = o.live ? cardLive(p) : null;
-    const unset = !o.live && allUnset(p);
+    const manual = !o.live && allUnset(p);
     let sum: string;
     if (o.live && lv) sum = `<span style="color:var(--st-run)">${lv.loop ? "∞ " : ""}live</span>`;
     else if (c.you || c.fail) sum = `<b>${c.you + c.fail}</b> need you`;
     else if (c.sign) sum = `<b>${c.sign}</b> to sign off`;
-    else if (unset) sum = `<span class="setup-sum" title="No Definition of Done authored on any workstream yet. Open to set one."><span class="qmk">?</span> needs setup</span>`;
+    else if (manual) sum = `<span class="muted">in progress · manual</span>`;
     else {
       const merged = p.workstreams.filter((w) => w.status === "merge").length; const q = p.workstreams.filter((w) => w.status === "queued" || w.status === "planned").length;
       sum = merged ? `<b>${merged}</b> merged` + (q ? ` · ${q} queued` : "") : (q ? `<b>${q}</b> queued` : "healthy");
@@ -1279,21 +1292,11 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const ppCls = o.live ? "pp" : "pp mono";
     const ppTitle = (o.live && lv) ? esc(lv.txt) : esc(p.path);
     const ws = renderWsList(p, { navOnly: o.navOnly });
-    // The setup CTA routes to the DoD drawer for the first UNSET session. `unset` already
-    // requires ≥1 session (allUnset is false for an empty project), so this id is non-null in
-    // practice — but guard the empty-string fallback so we never render a dead `data-open=""`
-    // button. A zero-session project reaches workstream creation via the project kebab's
-    // "New workstream…" instead.
-    const setupSessId = (o.setup && unset) ? firstSessId(p, ["unset"]) : null;
-    const setupAct = setupSessId
-      ? `<button class="btn ghost sm setup-cta" data-open="${esc(setupSessId)}">${continueIcon()} Set a Definition of Done</button>`
-      : "";
     return `<div class="prow" id="card-${p.id}" data-toggle="prow" data-rowp="${p.id}" data-project-id="${p.id}">
         ${dotStrip(p)}
         <span class="pn">${esc(p.name)}${p.nest ? ` <span class="nest" title="nested under its parent — counted only here, not toward the parent">⤷ ${esc(p.nest)}</span>` : ""}</span>
         <span class="${ppCls}" title="${ppTitle}">${ppTxt}</span>
         <span class="psum">${sum}</span>
-        ${setupAct}
         ${projMenu(p)}
         <span class="chev">${chevIcon()}</span>
       </div>
@@ -1315,9 +1318,16 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const sess = shown.map((s) => renderSession(s, w, p, rowOpts)).join("")
       + (more.length ? `<div class="sess-extra" hidden>${more.map((s) => renderSession(s, w, p, rowOpts)).join("")}</div><button class="sessmore" data-toggle="sessmore">+${more.length} more session${more.length > 1 ? "s" : ""}</button>` : "");
     const mixedNote = w._mixed && w._sessGauge ? ` <span class="srcTag" title="this workstream's sessions use different DoD evaluators, so the ring is a 'k of n sessions done' gauge — not a blended percent">mixed sources · ${w._sessGauge.done}/${w._sessGauge.total} done</span>` : "";
-    const wsDod = (w.status === "unset"
-      ? `<span style="color:var(--st-sign)">not set</span> ${srcTag(w.dodSrc)}`
-      : dodInline(w.dod, w.dodSrc)) + mixedNote;
+    // A no-DoD workstream is MANUAL: a calm "tracked by hand" line whose default action is
+    // Mark done (on the session rows below / the kebab), with an OPTIONAL "add criteria to
+    // auto-track" enhancement — NEVER a "not set" / "Set a Definition of Done" alarm (M3).
+    // Once marked done, it reads a calm "Done — marked manually" instead.
+    const noDoD = !isUnfiled && !w.loop && w.dodSrc === "unset";
+    const wsDod = (noDoD && w.status === "merge"
+      ? `<span class="muted">Done — marked manually (no Definition of Done).</span>`
+      : noDoD
+        ? `<span class="muted">No criteria — tracked manually (Mark done by hand).</span> <button class="btn ghost sm wsaddcrit" type="button" data-wsaddcriteria="${esc(w.id)}" title="Optional: add criteria so the ring auto-tracks progress toward done">+ Add criteria to auto-track</button>`
+        : dodInline(w.dod, w.dodSrc)) + mixedNote;
     const unfiledTools = isUnfiled ? unfiledAssignHtml(w, p) : "";
     return `<div class="ws${isUnfiled ? " ws-unfiled" : ""}" data-w="${w.id}" data-ws-id="${w.id}"${isUnfiled ? ` data-unfiled-project="${esc(p.id)}"` : ""}>
       <div class="ws-head" data-toggle="ws">
@@ -1442,16 +1452,29 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
         + (more > 0 ? `<span class="qmore">~${more} more planned</span>` : "")
         + `<span class="infg" title="Planned-next items are best-effort, parsed from the agent's notes (~).">i</span></div>`;
     }
-    const verb = (navOnly && s.status === "sign") ? "Review"
-      : s.status === "merge" ? "View" : (s.status === "run" || s.status === "loop") ? "Open" : s.status === "unset" ? "Define done" : "Continue";
-    const primary = `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} ${verb}</button>`;
+    // A no-DoD (manual) session row: Mark done is the DEFAULT primary action (sessions have
+    // no DoD; completion is by hand on the owning workstream), with Open beside it. NEVER a
+    // "Define done" — DoD authoring is the optional ws-level "Add criteria to auto-track".
+    // The synthetic Unfiled bucket has no real workstream to mark done; its rows are
+    // organize-first (select + group below), so they only offer Open.
+    const isUnfiledRow = !!(w && w._synthetic);
+    let primary: string;
     let secondary = "";
-    if (s.status === "sign" && !navOnly) secondary = `<button class="btn sign sm" data-signoff="${esc(s._gate?.id ?? "")}" data-signoff-session="${esc(s.id)}"${deferTip("Sign off — merge stays a separate step")}>✓ Sign off</button>`;
-    else if (s.status === "fail") secondary = `<button class="btn ghost sm" data-open="${s.id}">${esc(s.failAction || "Re-run")}</button>`;
+    if (s.status === "unset" && !isUnfiledRow) {
+      primary = `<button class="btn primary sm" data-wsaction="done" data-wsid="${esc(w.id)}" title="Mark this workstream done — it has no Definition of Done, so completion is by hand">${checkIcon()} Mark done</button>`;
+      secondary = `<button class="btn ghost sm" data-open="${s.id}">${continueIcon()} Open</button>`;
+    } else {
+      const verb = (navOnly && s.status === "sign") ? "Review"
+        : s.status === "merge" ? "View" : (s.status === "run" || s.status === "loop" || s.status === "unset") ? "Open" : "Continue";
+      primary = `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} ${verb}</button>`;
+      if (s.status === "sign" && !navOnly) secondary = `<button class="btn sign sm" data-signoff="${esc(s._gate?.id ?? "")}" data-signoff-session="${esc(s.id)}"${deferTip("Sign off — merge stays a separate step")}>✓ Sign off</button>`;
+      else if (s.status === "fail") secondary = `<button class="btn ghost sm" data-open="${s.id}">${esc(s.failAction || "Re-run")}</button>`;
+    }
 
-    const dodTxt = s.status === "unset" ? `<span style="color:var(--st-sign)">no criterion set — define what done means</span> ${srcTag(s.dodSrc)}`
-      : dodInline(s.dod, s.dodSrc);
-    const dodHoisted = w && w.status !== "unset" && s.status !== "unset" && s.dod === w.dod && s.dodSrc === w.dodSrc;
+    const dodTxt = dodInline(s.dod, s.dodSrc);
+    // Suppress the per-session DoD line for a manual (unset) session — the workstream header
+    // already shows the calm "tracked manually" state; repeating it per row is noise.
+    const dodHoisted = (w && w.status !== "unset" && s.status !== "unset" && s.dod === w.dod && s.dodSrc === w.dodSrc) || s.status === "unset";
     const loopTag = s.loop ? `<span class="loopBadge"><span class="inf">∞</span> looping ${esc(fmtMin(loopMinutes(s)))}</span>` : "";
     const softTag = isSoftWaitV(s) ? ` ${badge("block", true)}` : "";
 
@@ -1596,12 +1619,12 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
         <span class="node">Project</span><span class="arr">›</span>
         <span class="node">Workstream</span><span class="arr">›</span>
         <span class="node">Session</span><span class="arr">·</span>
-        <span class="node">Definition of Done</span>
+        <span class="node">Definition of Done <em>(optional)</em></span>
       </div>
       <ol class="obsteps">
         <li><b>Register a project</b> — point pi-web at a folder. Its sessions roll up automatically by longest-path match.</li>
         <li><b>Attach sessions to a workstream</b> — group a project's sessions into a workstream (e.g. "auth", "billing").</li>
-        <li><b>Set a Definition of Done</b> — pick what "done" means. A ring shows honest k-of-n progress toward it.</li>
+        <li><b>Mark work done</b> — close out workstreams by hand, or <b>optionally add criteria</b> so a ring auto-tracks k-of-n progress.</li>
       </ol>
       <div class="actions">
         <button class="btn primary" id="obAdd">${plusIcon()} Add a project</button>
@@ -1657,7 +1680,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const { s, w, p } = ref;
     const ringItem: RingItem = (s._prog || s.status !== "queued") ? s : w;
     const dodLine = s.status === "unset"
-      ? `<span class="cb-unset">not set — no Definition of Done yet</span>`
+      ? `<span class="cb-unset">tracked manually — no criteria (optional: add criteria to auto-track)</span>`
       : `${esc(s.dod)}${(s.status === "sign" && s._gate) ? ` <span class="cb-pend">· evaluable criteria met — sign-off gate pending</span>` : ""}`;
     const hasCrit = !!(s.crit && s.crit.length);
     const crit = hasCrit ? `<div class="cb-crit">${s.crit!.map(critRow).join("")}</div>` : "";

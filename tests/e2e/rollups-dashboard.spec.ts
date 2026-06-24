@@ -72,6 +72,27 @@ async function createLoopProject(
   return { projectId, workstreamId };
 }
 
+// Seed a MANUAL (no-DoD) workstream with a live mock session attached. The session derives
+// uiStatus "unset" (no DoD), so the workstream renders the calm "in progress · Mark done"
+// manual model — the R3 surface under test. Root is arbitrary (the session is attached
+// explicitly via PUT sessions, so it rolls up regardless of cwd-prefix).
+async function createManualProject(request: APIRequestContext, name: string): Promise<{ projectId: string; workstreamId: string }> {
+  const root = `/tmp/rollups-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const pRes = await request.post("/api/projects", { data: { name, roots: [root] } });
+  expect(pRes.status(), await pRes.text()).toBe(201);
+  const projectId = (await pRes.json()).project.id as string;
+  createdProjectIds.push(projectId);
+
+  const wRes = await request.post(`/api/projects/${projectId}/workstreams`, { data: { name: "Manual work" } });
+  expect(wRes.status(), await wRes.text()).toBe(201);
+  const workstreamId = (await wRes.json()).workstream.id as string;
+
+  const sessRes = await request.put(`/api/workstreams/${workstreamId}/sessions`, { data: { sessionIds: ["mock-current"] } });
+  expect(sessRes.status(), await sessRes.text()).toBe(200);
+
+  return { projectId, workstreamId };
+}
+
 function trackPageErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on("pageerror", (err) => errors.push(err.message));
@@ -323,6 +344,99 @@ test.describe("Project Rollups dashboard", () => {
     await expect(proposed).not.toContainText("iter 0");
 
     expect(pageErrors).toEqual([]);
+  });
+
+  // R3 — manual-first lifecycle: a no-DoD workstream is a CALM "in progress · Mark done"
+  // state, NOT a "needs setup" alarm. Mark done is the default primary action and flips the
+  // project ring; "Add criteria to auto-track" is an OPTIONAL secondary that switches the
+  // workstream to k-of-n auto-tracking. Sessions never offer "Define done".
+  test.describe("R3: manual-first lifecycle", () => {
+    async function rollupFor(page: Page, projectId: string) {
+      const res = await page.request.get("/api/rollups");
+      expect(res.ok()).toBe(true);
+      const rollups = (await res.json()).rollups as Array<{
+        project: { id: string };
+        workstreams: Array<{ workstream: { id: string; status: string; dod?: { criteria: unknown[] } } }>;
+      }>;
+      return rollups.find((r) => r.project.id === projectId);
+    }
+
+    test("a no-DoD workstream shows Mark done (not needs-setup); Mark done flips the ring", async ({ page }) => {
+      const pageErrors = trackPageErrors(page);
+      const name = `E2E Manual ${Date.now()}`;
+      const { projectId, workstreamId } = await createManualProject(page.request, name);
+
+      await page.locator("#dashboardButton").click();
+      const view = page.locator("#dashboardView");
+      await expect(view).toBeVisible();
+
+      // The manual project is a calm full card — NEVER a "needs setup" group, and no "Define
+      // done" anywhere in the dashboard.
+      await expect(view.locator('[data-testid="needs-setup"]')).toHaveCount(0);
+      await expect(view.getByText("Define done", { exact: false })).toHaveCount(0);
+      const pcard = view.locator(`.pcard[data-project-id="${projectId}"]`);
+      await expect(pcard).toBeVisible();
+
+      // The project gauge starts at 0% (0 of 1 workstreams done) — an honest k-of-n, not a "?".
+      const gaugeRing = pcard.locator('.csum-ring [data-testid="ring"][data-percent]').first();
+      await expect(gaugeRing).toHaveAttribute("data-percent", "0");
+
+      // Expand → the workstream row shows the calm manual line + the OPTIONAL "Add criteria to
+      // auto-track" affordance, and the session row's DEFAULT primary action is Mark done.
+      await pcard.locator(".pcard-head").click();
+      const wsRow = pcard.locator(`.ws[data-ws-id="${workstreamId}"]`);
+      await expect(wsRow).toBeVisible();
+      await expect(wsRow.locator(".ws-dod")).toContainText("tracked manually");
+      await expect(wsRow.locator(`[data-wsaddcriteria="${workstreamId}"]`)).toBeVisible();
+      await wsRow.locator(".ws-head").click();
+      const markDone = wsRow.locator(`.sess [data-wsaction="done"][data-wsid="${workstreamId}"]`).first();
+      await expect(markDone).toBeVisible();
+      await expect(markDone).toContainText("Mark done");
+
+      // Mark done → persists status "done" AND the project ring flips to 100% (1 of 1 done).
+      await markDone.click();
+      await expect.poll(async () => (await rollupFor(page, projectId))?.workstreams[0]?.workstream.status).toBe("done");
+      await expect.poll(async () =>
+        pcard.locator('.csum-ring [data-testid="ring"][data-percent]').first().getAttribute("data-percent"),
+      ).toBe("100");
+
+      expect(pageErrors).toEqual([]);
+    });
+
+    test("Add criteria to auto-track switches a manual workstream to honest k-of-n", async ({ page }) => {
+      const pageErrors = trackPageErrors(page);
+      const name = `E2E AddCriteria ${Date.now()}`;
+      const { projectId, workstreamId } = await createManualProject(page.request, name);
+
+      await page.locator("#dashboardButton").click();
+      const view = page.locator("#dashboardView");
+      await expect(view).toBeVisible();
+      const pcard = view.locator(`.pcard[data-project-id="${projectId}"]`);
+      await expect(pcard).toBeVisible();
+      await pcard.locator(".pcard-head").click();
+
+      // Open the OPTIONAL authoring drawer from the workstream's "Add criteria to auto-track".
+      await pcard.locator(`[data-wsaddcriteria="${workstreamId}"]`).click();
+      const drawer = view.locator("#dashboardDodDrawer");
+      await expect(drawer).toBeVisible();
+
+      // Add one manual boolean criterion the ring can score, then save.
+      await drawer.locator('[data-critadd="manual"]').click();
+      await drawer.locator("[data-critsave]").click();
+
+      // Persisted: the workstream now carries a DoD (auto-tracking), so it's no longer no-DoD.
+      await expect(drawer).toBeHidden();
+      await expect.poll(async () => {
+        const r = await rollupFor(page, projectId);
+        return (r?.workstreams[0]?.workstream.dod?.criteria.length ?? 0) > 0;
+      }).toBe(true);
+      // Switched to auto-track: the optional manual "Add criteria to auto-track" affordance is
+      // GONE for this workstream (it only renders for a no-DoD/manual workstream), confirming the
+      // workstream now auto-tracks its k-of-n criteria instead of being marked done by hand.
+      await expect(view.locator(`[data-wsaddcriteria="${workstreamId}"]`)).toHaveCount(0);
+
+      expect(pageErrors).toEqual([]);
+    });
   });
 
   // M2 — the dashboard is a REAL top-level route at `/dashboard` (NOT a `?view=` query param,
@@ -674,12 +788,13 @@ test.describe("Project Rollups dashboard", () => {
       const view = page.locator("#dashboardView");
       await expect(view).toBeVisible();
 
-      // A no-DoD project with only unset sessions renders in the "Needs setup" group as a
-      // compact .prow (not a full .pcard). Either container holds the same Unfiled bucket;
-      // target by data-project-id, expand whichever chrome wraps it, then open the bucket.
-      const card = view.locator(`[data-project-id="${projectId}"]`).first();
+      // A no-DoD project with only loose Unfiled sessions renders as a calm "manual" full
+      // .pcard (NOT a "Needs setup" alarm group — that framing is gone). Expand its head to
+      // reveal the Unfiled bucket.
+      await expect(view.locator('[data-testid="needs-setup"]')).toHaveCount(0);
+      const card = view.locator(`.pcard[data-project-id="${projectId}"]`);
       await expect(card).toBeVisible();
-      await card.click(); // expand the card / prow to reveal its workstreams
+      await card.locator(".pcard-head").click(); // expand the manual card to reveal its workstreams
       const unfiledWs = view.locator(`.ws-unfiled[data-unfiled-project="${projectId}"]`);
       await expect(unfiledWs).toBeVisible();
       await unfiledWs.locator(".ws-head").click();
