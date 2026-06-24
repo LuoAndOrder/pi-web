@@ -1209,15 +1209,15 @@ export function createDashboard(options: {
 
   // "New workstream…" from a project's kebab — a SESSION-INDEPENDENT create path (operability
   // lens 1): a freshly registered folder with zero sessions still needs a way to spin up a
-  // workstream and author its Definition of Done from the UI, not just via the API. We POST an
-  // empty workstream (the registry accepts an empty/absent sessionIds), refetch so the new row
-  // appears, then open the DoD drawer on it so the user lands straight in authoring. cwd defaults
-  // to the project's first root so git/command criteria have a sensible base.
+  // workstream from the UI, not just via the API. We POST an empty workstream (the registry
+  // accepts an empty/absent sessionIds) and refetch so the new row appears. Per the model a fresh
+  // workstream defaults to MANUAL (in progress · Mark done); a Definition of Done is an OPTIONAL
+  // "Add criteria to auto-track" enhancement reachable later from its kebab, never a prerequisite,
+  // so we do NOT auto-open the DoD drawer here. Converges with newWorkstreamFromSelection.
   async function newWorkstreamForProject(projectId: string) {
-    const ctx = findProjectContext(projectId);
     const name = (await promptModal({
       title: "New workstream",
-      body: "Name it, then set its Definition of Done to start tracking honest k-of-n progress.",
+      body: "Name it — it starts in progress, and you can mark it done or add criteria to auto-track later.",
       placeholder: "e.g. Auth refactor",
       confirmLabel: "Create",
     }) || "").trim();
@@ -1237,11 +1237,8 @@ export function createDashboard(options: {
       createdId = null;
     }
     if (!createdId) { showToast(`Couldn't create <b>${escText(name)}</b> — try again.`); return; }
-    showToast(`Created <b>${escText(name)}</b> — set its Definition of Done to start tracking.`);
+    showToast(`Created <b>${escText(name)}</b> — in progress.`);
     await refetch();
-    // Open the DoD drawer directly on the new (empty) workstream. No session backs it, so the
-    // draft starts blank and saveDoD takes the non-synthetic PUT /dod path against this id.
-    openDodDrawerForWorkstream(createdId, name, projectId, (ctx?.roots || [])[0] || "");
   }
 
   // Session-independent DoD-drawer open: used for an empty workstream that no session backs.
