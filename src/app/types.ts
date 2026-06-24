@@ -279,8 +279,9 @@ export const defaultPiWebSettings: PiWebSettings = {
 const tokenStorageKey = "pi-web-token";
 const collapsedFoldersStorageKey = "pi-web-collapsed-session-folders";
 const sessionIdUrlParam = "sessionId";
-const viewUrlParam = "view";
-const dashboardViewValue = "dashboard";
+// The dashboard is a REAL top-level route at `/dashboard` (not a `?view=` query param and not a
+// modal): bookmarkable, reload-stable, with its own history entry.
+const dashboardPath = "/dashboard";
 
 function consumeUrlToken() {
   const urlToken = new URLSearchParams(location.search).get("token");
@@ -298,23 +299,32 @@ export function readActiveSessionIdFromUrl() {
 
 export function writeActiveSessionIdToUrl(sessionId: string, mode: "push" | "replace" = "push") {
   const url = new URL(location.href);
+  // Focusing a session always lands at `/` — leaving any client route (e.g. `/dashboard`) — so
+  // opening a session from the dashboard navigates to `/?sessionId=...`, not `/dashboard?sessionId=`.
+  url.pathname = "/";
   if (sessionId) url.searchParams.set(sessionIdUrlParam, sessionId);
   else url.searchParams.delete(sessionIdUrlParam);
   if (url.href === location.href) return;
   history[mode === "replace" ? "replaceState" : "pushState"](null, "", url.toString());
 }
 
-// Deep-link for the Project Rollups dashboard overlay. Mirrors the `?sessionId=`
-// pattern above: `?view=dashboard` opens the overlay on load and is pushed/replaced
-// as the overlay opens/closes, so the route is reachable and survives reload + Back.
+// The Project Rollups dashboard is a real top-level route at `/dashboard`. `read` reports whether
+// the current location IS that route; `write` navigates onto it (open) or back to the conversation
+// at `/` (close), optionally restoring the active session as `/?sessionId=...`.
 export function readDashboardViewFromUrl(): boolean {
-  return new URLSearchParams(location.search).get(viewUrlParam) === dashboardViewValue;
+  return location.pathname.replace(/\/+$/, "") === dashboardPath;
 }
 
-export function writeDashboardViewToUrl(open: boolean, mode: "push" | "replace" = "push") {
+export function writeDashboardViewToUrl(open: boolean, mode: "push" | "replace" = "push", sessionId = "") {
   const url = new URL(location.href);
-  if (open) url.searchParams.set(viewUrlParam, dashboardViewValue);
-  else if (url.searchParams.get(viewUrlParam) === dashboardViewValue) url.searchParams.delete(viewUrlParam);
+  if (open) {
+    url.pathname = dashboardPath;
+    url.search = ""; // the dashboard route carries no query params
+  } else {
+    url.pathname = "/";
+    url.search = "";
+    if (sessionId) url.searchParams.set(sessionIdUrlParam, sessionId);
+  }
   if (url.href === location.href) return;
   history[mode === "replace" ? "replaceState" : "pushState"](null, "", url.toString());
 }

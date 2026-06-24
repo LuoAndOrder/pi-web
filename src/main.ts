@@ -190,6 +190,7 @@ dashboard = createDashboard({
   api,
   sessions,
   addMessage: messages.addMessage,
+  getSessionId: () => state.currentSessionId,
 });
 
 composer = createComposer({
@@ -301,9 +302,13 @@ initKeyboardShortcuts([
 composer.updateQueueToggle();
 initGitPanel({ button: elements.gitButton, panel: elements.gitPanel, apiHeaders: api.headers, getSessionId: () => state.currentSessionId });
 window.addEventListener("popstate", () => {
-  // Reconcile the dashboard overlay to the URL's `?view=dashboard` first, independent of the
-  // session change below — Back/Forward must open/close the deep-linked overlay on its own.
+  // Reconcile the `/dashboard` route first, independent of the session change below — Back/Forward
+  // must open/close the route on its own.
   dashboard.reconcileFromUrl();
+  // On the `/dashboard` route the URL carries no `?sessionId=`, but the conversation underneath
+  // must be preserved (closing returns to it). Skip the session reconcile here so navigating onto
+  // the route doesn't clobber state.currentSessionId to "" and lose the session.
+  if (readDashboardViewFromUrl()) return;
   const nextSessionId = readActiveSessionIdFromUrl();
   if (nextSessionId === state.currentSessionId) return;
   state.currentSessionId = nextSessionId;
@@ -315,9 +320,9 @@ window.addEventListener("popstate", () => {
 });
 composer.updatePrimaryAction();
 
-// Deep-link: `?view=dashboard` opens the rollups overlay on load. Use `replace` so reload
-// doesn't push a spurious history entry (the param is already in the URL). This fires before
-// the settings-driven launch default so an explicit deep-link always wins.
+// Route: a hard load of `/dashboard` renders the dashboard as the PRIMARY view. Use `replace` so
+// reload doesn't push a spurious history entry (the path is already `/dashboard`). This fires
+// before the settings-driven launch default so an explicit route always wins.
 const dashboardDeepLinked = readDashboardViewFromUrl();
 if (dashboardDeepLinked) dashboard.open({ mode: "replace" });
 

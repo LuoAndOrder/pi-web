@@ -269,9 +269,11 @@ test.describe("Project Rollups dashboard", () => {
     await expect(review).toBeVisible();
     await review.click();
 
-    // The overlay hides and the REAL conversation loads: composer present, URL carries the session id.
+    // The overlay hides and the REAL conversation loads: composer present, and the URL LEAVES
+    // `/dashboard` to `/?sessionId=mock-current` (opening a session navigates off the route).
     await expect(view).toBeHidden();
     await expect(page.locator("#prompt")).toBeVisible();
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/");
     await expect.poll(() => new URL(page.url()).searchParams.get("sessionId")).toBe("mock-current");
 
     expect(pageErrors).toEqual([]);
@@ -323,59 +325,69 @@ test.describe("Project Rollups dashboard", () => {
     expect(pageErrors).toEqual([]);
   });
 
-  // M2 — deep-linkable route. The overlay is reachable via `?view=dashboard`, mirroring
-  // how `?sessionId=` works: opening pushes the param, closing removes it, and reload
-  // preserves the open state. These cases mutate nothing (no projects), so they ride the
+  // M2 — the dashboard is a REAL top-level route at `/dashboard` (NOT a `?view=` query param,
+  // NOT a modal): a hard GET loads it as the page, reload preserves it, the statusBar button
+  // navigates there (pushState), opening a session leaves to `/?sessionId=`, and an outside
+  // (background) click does NOT dismiss it. These cases mutate nothing, so they ride the
   // shared playwright server safely.
-  test.describe("M2: ?view=dashboard route", () => {
-    test("deep-link opens the overlay on load", async ({ page }) => {
+  test.describe("M2: /dashboard route", () => {
+    test("hard GET /dashboard loads the dashboard as the page; reload stays on /dashboard", async ({ page }) => {
       const pageErrors = trackPageErrors(page);
-      await page.goto("/?view=dashboard");
+      await page.goto("/dashboard");
       await expect(page.locator("#connectionStatus")).toBeHidden();
 
-      // The overlay is open straight from the URL — no click needed.
+      // The dashboard is the primary view straight from the URL — no click, no modal over a session.
       await expect(page.locator("#dashboardView")).toBeVisible();
-      // The deep-link uses `replace` on load, so the param is still present (reload-safe).
-      expect(new URL(page.url()).searchParams.get("view")).toBe("dashboard");
+      // It is a real route: the path stays `/dashboard`, with no `?view=` param and no rewrite to `/`.
+      expect(new URL(page.url()).pathname).toBe("/dashboard");
+      expect(new URL(page.url()).searchParams.get("view")).toBeNull();
+
+      // Reload stays on `/dashboard` — the route survives a hard reload (server SPA fallback).
+      await page.reload();
+      await expect(page.locator("#connectionStatus")).toBeHidden();
+      await expect(page.locator("#dashboardView")).toBeVisible();
+      expect(new URL(page.url()).pathname).toBe("/dashboard");
 
       expect(pageErrors).toEqual([]);
     });
 
-    test("opening via the button adds view=dashboard; closing removes it", async ({ page }) => {
+    test("the statusBar button navigates to /dashboard; ESC returns to the conversation; Back restores it", async ({ page }) => {
       const pageErrors = trackPageErrors(page);
       const view = page.locator("#dashboardView");
       await expect(view).toBeHidden();
-      expect(new URL(page.url()).searchParams.get("view")).toBeNull();
+      expect(new URL(page.url()).pathname).toBe("/");
 
-      // Opening via the statusBar button pushes the param into the URL.
+      // Opening via the statusBar button navigates (pushState) to `/dashboard`.
       await page.locator("#dashboardButton").click();
       await expect(view).toBeVisible();
-      await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("dashboard");
+      await expect.poll(() => new URL(page.url()).pathname).toBe("/dashboard");
 
-      // Closing (Escape) removes the param.
+      // ESC leaves the route back to the conversation at `/`.
       await page.keyboard.press("Escape");
       await expect(view).toBeHidden();
-      await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBeNull();
+      await expect.poll(() => new URL(page.url()).pathname).toBe("/");
 
-      // Back navigation restores the open overlay (the open was a pushState entry).
+      // Back navigation restores the dashboard route (the open was a pushState entry).
       await page.goBack();
       await expect(view).toBeVisible();
-      await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("dashboard");
+      await expect.poll(() => new URL(page.url()).pathname).toBe("/dashboard");
 
       expect(pageErrors).toEqual([]);
     });
 
-    test("reload preserves the open overlay", async ({ page }) => {
+    test("clicking the background does NOT dismiss to a session (no outside-click dismiss)", async ({ page }) => {
       const pageErrors = trackPageErrors(page);
-      await page.locator("#dashboardButton").click();
-      await expect(page.locator("#dashboardView")).toBeVisible();
-      await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("dashboard");
-
-      await page.reload();
+      await page.goto("/dashboard");
       await expect(page.locator("#connectionStatus")).toBeHidden();
-      // Still open after reload — the route survives, not just the in-memory toggle.
-      await expect(page.locator("#dashboardView")).toBeVisible();
-      expect(new URL(page.url()).searchParams.get("view")).toBe("dashboard");
+      const view = page.locator("#dashboardView");
+      await expect(view).toBeVisible();
+
+      // Click the opaque background gutter (the #dashboardView itself, left of the centered .wrap).
+      // The old modal behavior cut to the session on such a click; the route must stay put — the
+      // dashboard stays visible and the URL stays `/dashboard` (no navigation off the route).
+      await view.click({ position: { x: 4, y: 240 } });
+      await expect(view).toBeVisible();
+      expect(new URL(page.url()).pathname).toBe("/dashboard");
 
       expect(pageErrors).toEqual([]);
     });

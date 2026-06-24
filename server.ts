@@ -191,6 +191,23 @@ function serveArtifact(req: IncomingMessage, res: ServerResponse) {
   pipeReadStream(res, resolvedFile);
 }
 
+// A "shell route" is a GET/HEAD request for a CLIENT-SIDE route (no file extension on the
+// final path segment) that isn't an API call or the WebSocket endpoint. These must load the
+// SPA shell (index.html) so client routes like `/dashboard` are bookmarkable + reload-stable
+// (a hard GET http://host/dashboard loads the app instead of 404ing). Asset requests (which
+// carry a file extension) and `/api/*` / `/ws` are excluded so a genuinely missing asset still
+// 404s rather than silently returning HTML.
+function isSpaShellRoute(req: IncomingMessage, url: URL): boolean {
+  const method = req.method || "GET";
+  if (method !== "GET" && method !== "HEAD") return false;
+  const pathname = url.pathname;
+  if (pathname.startsWith("/api/") || pathname === "/ws") return false;
+  const accept = String(req.headers.accept || "");
+  if (accept && !accept.includes("text/html") && !accept.includes("*/*")) return false;
+  const lastSegment = pathname.slice(pathname.lastIndexOf("/") + 1);
+  return !lastSegment.includes("."); // a route, not an asset file
+}
+
 function serveStatic(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
   const pathname = decodeURIComponent(url.pathname);
@@ -198,6 +215,14 @@ function serveStatic(req: IncomingMessage, res: ServerResponse) {
   const file = resolve(staticDir, relative);
 
   if (!file.startsWith(staticDir) || !existsSync(file)) {
+    // SPA fallback: a client-side route (e.g. /dashboard) loads the app shell so a hard GET /
+    // reload is bookmarkable + reload-stable, instead of 404ing the route as a missing file.
+    const indexFile = resolve(staticDir, "index.html");
+    if (isSpaShellRoute(req, url) && existsSync(indexFile)) {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      pipeReadStream(res, indexFile);
+      return;
+    }
     sendJson(res, 404, { ok: false, error: "Not found" });
     return;
   }
@@ -3520,7 +3545,21 @@ const server = createServer(async (req, res) => {
     }
 
     if (viteDevServer) {
-      viteDevServer.middlewares(req, res, () => {
+      viteDevServer.middlewares(req, res, async () => {
+        if (res.writableEnded) return;
+        // SPA fallback for a client-side route (e.g. /dashboard) that Vite's own middleware
+        // declined: serve the HMR-transformed app shell so a hard GET / reload loads the app.
+        if (isSpaShellRoute(req, url)) {
+          try {
+            const template = readFileSync(join(appDir, "index.html"), "utf-8");
+            const html = await viteDevServer!.transformIndexHtml(req.url || "/", template);
+            res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+            res.end(html);
+            return;
+          } catch (error) {
+            viteDevServer!.ssrFixStacktrace?.(error as Error);
+          }
+        }
         if (!res.writableEnded) sendJson(res, 404, { ok: false, error: "Not found" });
       });
       return;

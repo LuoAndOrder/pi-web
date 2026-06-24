@@ -17,11 +17,12 @@ import type { ProjectRollup } from "./types.js";
 import { createRenderer, type RenderState, type VArchivedProject } from "./render.js";
 import { toViewModel } from "./rollupAdapter.js";
 
-// Open/close can be driven either by a user gesture (push `?view=dashboard` onto
-// history so Back/reload behave), by an explicit deep-link or launch default (replace,
-// so the route isn't a spurious extra history entry), or by a `popstate` reconcile —
-// where the URL is ALREADY the source of truth and must NOT be re-written (that would
-// loop / corrupt the history stack).
+// Open/close can be driven either by a user gesture (push `/dashboard` onto history so
+// Back/reload behave), by a hard load / launch default (replace, so the route isn't a
+// spurious extra history entry), or by a `popstate` reconcile — where the URL is ALREADY
+// the source of truth and must NOT be re-written (that would loop / corrupt the history
+// stack). A drill-in into a session also passes `syncUrl:false`, handing navigation to the
+// session-open flow (which writes `/?sessionId=...`).
 type ViewSyncOptions = { syncUrl?: boolean; mode?: "push" | "replace" };
 
 export type DashboardController = {
@@ -31,7 +32,7 @@ export type DashboardController = {
   isOpen: () => boolean;
   toggle: () => void;
   applyRollupChange: (projectId?: string) => void; // debounced refetch on realtime
-  // Reconcile the overlay's open/closed state to match `?view=dashboard` in the URL,
+  // Reconcile the view's open/closed state to match the `/dashboard` route in the URL,
   // called from the app's `popstate` handler. Never writes the URL back.
   reconcileFromUrl: () => void;
 };
@@ -90,8 +91,11 @@ export function createDashboard(options: {
   api: ApiClient;
   sessions: SessionsController;
   addMessage: (role: "system", text: string, extraClass?: string) => HTMLDivElement;
+  // The currently-focused session id, so closing the dashboard route returns to `/?sessionId=...`
+  // (the conversation that was underneath) instead of a bare `/`.
+  getSessionId: () => string;
 }): DashboardController {
-  const { elements, api, sessions, addMessage } = options;
+  const { elements, api, sessions, addMessage, getSessionId } = options;
 
   let open = false;
   let fetchToken = 0;
@@ -206,7 +210,7 @@ export function createDashboard(options: {
   // Start the user's first pi session, then close the overlay so they land in the live composer.
   // The next rollup folds the new session into a project by cwd-prefix.
   async function startFirstSession() {
-    closeDashboard();
+    closeDashboard({ syncUrl: false }); // startNewSession owns the navigation to /?sessionId=
     try {
       await sessions.startNewSession();
     } catch (error) {
@@ -398,12 +402,14 @@ export function createDashboard(options: {
     elements.dashboardView.hidden = true;
   }
 
-  // Mirror the overlay's open/closed state into the URL (`?view=dashboard`) so the route is
-  // deep-linkable and survives reload + Back — exactly as `?sessionId=` works. `syncUrl:false`
-  // (the popstate path) skips the write because the URL is already the source of truth.
+  // Navigate the `/dashboard` route to match the view's open/closed state, so it is bookmarkable
+  // and survives reload + Back — opening pushes `/dashboard`, closing returns to the conversation
+  // at `/?sessionId=...` (the session that was underneath). `syncUrl:false` (the popstate path, or
+  // a drill-in that hands navigation to the session open) skips the write because the URL is
+  // already — or about to be — the source of truth.
   function syncUrl(isOpen: boolean, opts?: ViewSyncOptions) {
     if (opts?.syncUrl === false) return;
-    writeDashboardViewToUrl(isOpen, opts?.mode ?? "push");
+    writeDashboardViewToUrl(isOpen, opts?.mode ?? "push", isOpen ? "" : getSessionId());
   }
 
   function openDashboard(opts?: ViewSyncOptions) {
@@ -433,7 +439,7 @@ export function createDashboard(options: {
     else openDashboard();
   }
 
-  // Bring the overlay in line with `?view=dashboard` after a Back/Forward navigation.
+  // Bring the view in line with the `/dashboard` route after a Back/Forward navigation.
   // The URL already reflects the desired state, so neither branch re-writes it.
   function reconcileFromUrl() {
     const wantOpen = readDashboardViewFromUrl();
@@ -1095,7 +1101,7 @@ export function createDashboard(options: {
     }
     if (accepted) {
       showToast(`Replied to <b>${escText(ref?.s.name)}</b> — your answer continues the conversation.`);
-      closeDashboard();
+      closeDashboard({ syncUrl: false }); // openSession owns the navigation to /?sessionId=
       await sessions.openSession(sessionId, cwd);
       showContextBand(sessionId);
     } else {
@@ -1126,7 +1132,7 @@ export function createDashboard(options: {
     }
     if (accepted) {
       showToast(`Asked pi to merge <b>${escText(branch || "the branch")}</b> → main — watch it land in the conversation.`);
-      closeDashboard();
+      closeDashboard({ syncUrl: false }); // openSession owns the navigation to /?sessionId=
       await sessions.openSession(sessionId, cwd);
       showContextBand(sessionId);
     } else {
@@ -1798,7 +1804,7 @@ export function createDashboard(options: {
   async function openSessionFromCard(sessionId: string) {
     const ref = view.SESS[sessionId];
     const cwd = ref?.s.cwd ?? "";
-    closeDashboard();
+    closeDashboard({ syncUrl: false }); // openSession owns the navigation to /?sessionId=
     await sessions.openSession(sessionId, cwd);
     // Keep the oversight frame on the drill: render a compact context band (project › workstream
     // breadcrumb + k-of-n ring + DoD criteria) ABOVE the real conversation, so opening a session
@@ -2065,10 +2071,12 @@ export function createDashboard(options: {
 
   function init() {
     elements.dashboardCloseButton.addEventListener("click", () => closeDashboard());
-    // The opaque full-screen #dashboardView is the click target; clicking its scroll
-    // surface (outside the centered .wrap) closes — no separate backdrop node needed.
+    // The dashboard is a real top-level route, NOT a modal — clicking its background does NOT
+    // dismiss it (that "outside-click cuts to the session" behavior is gone). A background click
+    // only dismisses any open kebab menu; the route is left via the × button, ESC, the statusBar
+    // toggle, or opening a session.
     elements.dashboardView.addEventListener("click", (event) => {
-      if (event.target === elements.dashboardView) { closeWsMenus(); closeProjMenus(); closeDashboard(); }
+      if (event.target === elements.dashboardView) { closeWsMenus(); closeProjMenus(); }
     });
     // ESC dismisses an open kebab menu first (before the app's ESC closes the overlay), so
     // the menu can be escaped without losing the whole dashboard.
