@@ -465,6 +465,102 @@ export function createDashboard(options: {
     }, REFETCH_DEBOUNCE_MS);
   }
 
+  // ── in-overlay prompt / confirm modal (replaces native window.prompt/confirm) ──
+  // Native prompt()/confirm() render OS chrome (light, system font, centered) on top of the
+  // dark overlay — the one place the surface broke the "calm, native pi-web" bar, exactly at
+  // the highest-intent moments (naming a workstream, confirming a delete). These two helpers
+  // mount a small modal INSIDE #dashboardView (so the .mnmodal CSS — reusing the --panel-2 /
+  // --border / --accent / --danger token palette — is scoped there and rides above the grid)
+  // and resolve a Promise, keeping every create/rename/destructive-confirm flow on-theme while
+  // leaving the lifecycle logic (Undo, snapshots) untouched.
+  //
+  // Self-contained event wiring: the modal owns its scrim/cancel/confirm clicks + Enter/ESC and
+  // stops propagation, so the host overlay's own click-to-close (L1931) and ESC-closes-overlay
+  // (the app keydown) never fire while a modal is up. Only ONE modal is ever open at a time
+  // (all nine call sites await sequentially), so a single host node is reused.
+  function mnModalHost(): HTMLDivElement {
+    let el = elements.dashboardView.querySelector<HTMLDivElement>("#dashboardModal");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "dashboardModal";
+      el.className = "mnmodal";
+      el.hidden = true;
+      elements.dashboardView.appendChild(el);
+    }
+    return el;
+  }
+  // Resolve a still-open modal (defensive — call sites await sequentially, but a stray second
+  // open must settle the first rather than orphan its promise).
+  let mnModalResolve: ((value: unknown) => void) | null = null;
+  function settleModal(value: unknown) {
+    const resolve = mnModalResolve;
+    mnModalResolve = null;
+    const el = mnModalHost();
+    el.classList.remove("open");
+    el.hidden = true;
+    el.innerHTML = "";
+    if (resolve) resolve(value);
+  }
+
+  // A confirm dialog. `danger` paints the confirm button red (delete/cancel). Resolves true on
+  // confirm, false on cancel / scrim / ESC. Body is treated as trusted markup (callers pass only
+  // escaped values), the title/labels are escaped.
+  function confirmModal(opts: { title: string; body?: string; confirmLabel?: string; cancelLabel?: string; danger?: boolean }): Promise<boolean> {
+    settleModal(false); // close any leftover modal first
+    const el = mnModalHost();
+    const confirmLabel = opts.confirmLabel || (opts.danger ? "Delete" : "Confirm");
+    const cancelLabel = opts.cancelLabel || "Cancel";
+    el.innerHTML = `
+      <div class="mnmodal-scrim" data-mnmodal-cancel></div>
+      <div class="mnmodal-panel" role="alertdialog" aria-modal="true" aria-label="${escText(opts.title)}">
+        <div class="mnmodal-title">${escText(opts.title)}</div>
+        ${opts.body ? `<div class="mnmodal-body">${opts.body}</div>` : ""}
+        <div class="mnmodal-actions">
+          <button class="btn ghost sm" data-mnmodal-cancel>${escText(cancelLabel)}</button>
+          <button class="btn ${opts.danger ? "danger" : "primary"} sm" data-mnmodal-confirm>${escText(confirmLabel)}</button>
+        </div>
+      </div>`;
+    el.hidden = false;
+    requestAnimationFrame(() => el.classList.add("open"));
+    const confirmBtn = el.querySelector<HTMLButtonElement>("[data-mnmodal-confirm]");
+    confirmBtn?.focus();
+    return new Promise<boolean>((resolve) => {
+      mnModalResolve = resolve as (value: unknown) => void;
+    });
+  }
+
+  // A prompt dialog. Resolves the trimmed text on submit, or null on cancel / scrim / ESC /
+  // empty submit (matching the call sites' "cancelled / empty → no-op" guard).
+  function promptModal(opts: { title: string; body?: string; value?: string; placeholder?: string; confirmLabel?: string }): Promise<string | null> {
+    settleModal(null);
+    const el = mnModalHost();
+    el.innerHTML = `
+      <div class="mnmodal-scrim" data-mnmodal-cancel></div>
+      <div class="mnmodal-panel" role="dialog" aria-modal="true" aria-label="${escText(opts.title)}">
+        <div class="mnmodal-title">${escText(opts.title)}</div>
+        ${opts.body ? `<div class="mnmodal-body">${opts.body}</div>` : ""}
+        <input type="text" class="mnmodal-input" id="dashboardModalInput" value="${escText(opts.value ?? "")}" placeholder="${escText(opts.placeholder ?? "")}" spellcheck="false" autocomplete="off">
+        <div class="mnmodal-actions">
+          <button class="btn ghost sm" data-mnmodal-cancel>Cancel</button>
+          <button class="btn primary sm" data-mnmodal-submit>${escText(opts.confirmLabel || "OK")}</button>
+        </div>
+      </div>`;
+    el.hidden = false;
+    requestAnimationFrame(() => el.classList.add("open"));
+    const input = el.querySelector<HTMLInputElement>("#dashboardModalInput");
+    if (input) { input.focus(); input.select(); }
+    return new Promise<string | null>((resolve) => {
+      mnModalResolve = resolve as (value: unknown) => void;
+    });
+  }
+  // Read the prompt input's trimmed value (null when no prompt is open).
+  function modalInputValue(): string {
+    return (mnModalHost().querySelector<HTMLInputElement>("#dashboardModalInput")?.value ?? "").trim();
+  }
+  function isModalOpen(): boolean {
+    return !mnModalHost().hidden;
+  }
+
   // ── undo toast (ported from the mockup showToast L2249-2256) ──
   // Mounted INSIDE #dashboardView (the `.toast` CSS is scoped under it), so it rides above the
   // overlay and disappears when the overlay closes. `undoFn` renders an Undo button that fires the
@@ -1086,7 +1182,12 @@ export function createDashboard(options: {
     const ids = selectionIds();
     if (!ids.length) { showToast("Select at least one session first."); return; }
     const suggested = ids.length === 1 ? (view.SESS[ids[0]]?.s.name || "New workstream") : "New workstream";
-    const name = (window.prompt(`Name the new workstream for ${ids.length} session${ids.length === 1 ? "" : "s"}:`, suggested) || "").trim();
+    const name = (await promptModal({
+      title: `New workstream from ${ids.length} session${ids.length === 1 ? "" : "s"}`,
+      body: "Name it — the selected sessions move out of Unfiled and roll up under it.",
+      value: suggested,
+      confirmLabel: "Create",
+    }) || "").trim();
     if (!name) return; // cancelled / empty → no-op (no fabricated default)
     const ok = await createWorkstreamWithSessions(projectId, name, ids);
     if (ok) {
@@ -1106,7 +1207,12 @@ export function createDashboard(options: {
   // to the project's first root so git/command criteria have a sensible base.
   async function newWorkstreamForProject(projectId: string) {
     const ctx = findProjectContext(projectId);
-    const name = (window.prompt("Name the new workstream:", "") || "").trim();
+    const name = (await promptModal({
+      title: "New workstream",
+      body: "Name it, then set its Definition of Done to start tracking honest k-of-n progress.",
+      placeholder: "e.g. Auth refactor",
+      confirmLabel: "Create",
+    }) || "").trim();
     if (!name) return; // cancelled / empty → no-op (no fabricated default)
     let createdId: string | null = null;
     try {
@@ -1337,7 +1443,13 @@ export function createDashboard(options: {
   async function cancelWs(workstreamId: string) {
     const ctx = findWsContext(workstreamId);
     const name = ctx?.wsName || "this workstream";
-    if (!window.confirm(`Cancel "${name}" as no longer relevant? It moves to Archived and drops out of active counts. You can re-open it later.`)) return;
+    if (!(await confirmModal({
+      title: `Cancel ${name}?`,
+      body: `<b>${escText(name)}</b> is no longer relevant. It moves to Archived and drops out of active counts — you can re-open it later.`,
+      confirmLabel: "Cancel workstream",
+      cancelLabel: "Keep it",
+      danger: true,
+    }))) return;
     // Capture the PRIOR status so Undo restores it faithfully — a workstream cancelled while
     // `done` returns to `done` (not silently demoted to in_progress, which would lose its
     // place in the project ring's k-of-n-done numerator). Default to in_progress for anything
@@ -1374,7 +1486,12 @@ export function createDashboard(options: {
   async function deleteWs(workstreamId: string) {
     const ctx = findWsContext(workstreamId);
     const name = ctx?.wsName || "this workstream";
-    if (!window.confirm(`Delete "${name}"? This removes the workstream and its Definition of Done. Undo re-creates it from a snapshot (a new id).`)) return;
+    if (!(await confirmModal({
+      title: `Delete ${name}?`,
+      body: `This removes <b>${escText(name)}</b> and its Definition of Done. Undo re-creates it from a snapshot (a new id).`,
+      confirmLabel: "Delete",
+      danger: true,
+    }))) return;
     // Snapshot BEFORE the DELETE — the raw DoD (with intact command/git `source`) only exists
     // in the registry until the workstream is gone. Reads `GET /api/projects` so Undo restores
     // the exact stored criteria, never a fabricated `npm test` (round-4 high finding).
@@ -1447,15 +1564,23 @@ export function createDashboard(options: {
     await refreshCandidates();
     const cands = view.candidates || [];
     const suggestedRoot = cands[0]?.path || "";
-    const root = (window.prompt(
-      cands.length
-        ? `Register a project folder (absolute path). pi found ${cands.length} unregistered folder${cands.length === 1 ? "" : "s"} with sessions — the busiest is pre-filled:`
-        : "Register a project folder — paste its absolute path:",
-      suggestedRoot,
-    ) || "").trim();
+    const root = (await promptModal({
+      title: "Register a project folder",
+      body: cands.length
+        ? `pi found <b>${cands.length}</b> unregistered folder${cands.length === 1 ? "" : "s"} with sessions — the busiest is pre-filled. Edit to any absolute path.`
+        : "Paste the absolute path of the folder to track.",
+      value: suggestedRoot,
+      placeholder: "/Users/you/project",
+      confirmLabel: "Next",
+    }) || "").trim();
     if (!root) return; // cancelled / empty → no-op (no fabricated default)
     const defaultName = cands.find((c) => c.path === root)?.name || basename(root) || "New project";
-    const name = (window.prompt(`Name this project:`, defaultName) || "").trim();
+    const name = (await promptModal({
+      title: "Name this project",
+      body: `Tracking <span class="mono">${escText(prettyPath(root))}</span> — its sessions roll up by cwd-prefix.`,
+      value: defaultName,
+      confirmLabel: "Register",
+    }) || "").trim();
     if (!name) return;
     await registerProject(name, root); // POSTs /api/projects, toasts, refetches
   }
@@ -1476,7 +1601,11 @@ export function createDashboard(options: {
   async function renameProject(projectId: string) {
     const ctx = findProjectContext(projectId);
     const current = ctx?.name || "this project";
-    const next = (window.prompt(`Rename project:`, ctx?.name || "") || "").trim();
+    const next = (await promptModal({
+      title: "Rename project",
+      value: ctx?.name || "",
+      confirmLabel: "Rename",
+    }) || "").trim();
     if (!next || next === ctx?.name) return; // cancelled / unchanged → no-op
     const ok = await patchProject(projectId, { name: next });
     if (ok) { showToast(`Renamed <b>${escText(current)}</b> → <b>${escText(next)}</b>.`); await refetch(); }
@@ -1486,7 +1615,12 @@ export function createDashboard(options: {
   async function archiveProject(projectId: string) {
     const ctx = findProjectContext(projectId);
     const name = ctx?.name || "this project";
-    if (!window.confirm(`Archive "${name}"? Its rollup drops out of the active dashboard. You can Restore it any time from the "Archived projects" section below.`)) return;
+    if (!(await confirmModal({
+      title: `Archive ${name}?`,
+      body: `<b>${escText(name)}</b>'s rollup drops out of the active dashboard. Restore it any time from the "Archived projects" section below.`,
+      confirmLabel: "Archive",
+      cancelLabel: "Keep active",
+    }))) return;
     const ok = await patchProject(projectId, { archived: true });
     if (ok) {
       showToast(`<b>${escText(name)}</b> archived — removed from the active dashboard.`, () => {
@@ -1514,8 +1648,13 @@ export function createDashboard(options: {
     // ACTIVE projects (in state.rollups) but not for an ARCHIVED one deleted from the collapsed
     // surface (the summary carries no roots). Keep the confirm copy honest about that.
     const canUndo = !!(ctx && ctx.roots.length);
-    const undoNote = canUndo ? " Undo re-registers it (a new id)." : " This cannot be undone.";
-    if (!window.confirm(`Delete "${name}"? This removes the project registration and its workstreams. Sessions are untouched (they revert to Unfiled).${undoNote}`)) return;
+    const undoNote = canUndo ? "Undo re-registers it (a new id)." : "This cannot be undone.";
+    if (!(await confirmModal({
+      title: `Delete ${name}?`,
+      body: `This removes the project registration and its workstreams. Sessions are untouched — they revert to Unfiled. ${undoNote}`,
+      confirmLabel: "Delete",
+      danger: true,
+    }))) return;
     let ok = false;
     try {
       const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE", headers: api.headers() });
@@ -1817,15 +1956,19 @@ export function createDashboard(options: {
       return;
     }
 
-    // Manual sign-off (optimistic). data-signoff carries the GATE CRITERION id; we resolve the
-    // owning session via the SESS index so the optimistic flip + PATCH target the right criterion.
+    // Manual sign-off (optimistic). The CLICKED row carries its own session id in
+    // data-signoff-session, so we target it directly. We must NOT reverse-map data-signoff's
+    // shared GATE CRITERION id back to a session: a workstream/project-level DoD is inherited
+    // by every session under it, so all N rows render the SAME critId, and the reverse lookup
+    // always resolved the FIRST match — clicking the 2nd/3rd row flipped the wrong row (review
+    // finding). Read the row's session id directly so the optimistic flip lands on the clicked
+    // row; the PATCH still settles the shared criterion for the whole inherited DoD.
     const so = target.closest<HTMLElement>("[data-signoff]");
     if (so) {
       event.preventDefault();
       event.stopPropagation();
-      const critId = so.getAttribute("data-signoff") || "";
-      const sessionId = Object.values(view.SESS).find(({ s }) => s._gate?.id === critId)?.s.id;
-      if (sessionId) signOff(sessionId);
+      const sessionId = so.getAttribute("data-signoff-session") || "";
+      if (sessionId && view.SESS[sessionId]) signOff(sessionId);
       return;
     }
 
@@ -1988,6 +2131,39 @@ export function createDashboard(options: {
       const target = event.target as HTMLElement | null;
       const into = target?.closest<HTMLInputElement>("[data-critinto]");
       if (into) setDraftMergeTarget(Number.parseInt(into.getAttribute("data-critinto") || "-1", 10), into.value);
+    });
+    // In-overlay prompt/confirm modal — its own delegated click + key handling. Cancel/scrim
+    // resolves the negative (false / null); confirm/submit resolves the value. stopPropagation
+    // keeps the host overlay's click-to-close and the kebab ESC handler from firing underneath.
+    const modalHost = mnModalHost();
+    modalHost.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest("[data-mnmodal-confirm]")) { event.stopPropagation(); settleModal(true); return; }
+      if (target.closest("[data-mnmodal-submit]")) { event.stopPropagation(); const v = modalInputValue(); settleModal(v || null); return; }
+      if (target.closest("[data-mnmodal-cancel]")) {
+        event.stopPropagation();
+        // A prompt resolves null on cancel; a confirm resolves false. The submit/confirm buttons
+        // disambiguate which kind is open, but on cancel we resolve the universal "no" — null is
+        // falsy and false is falsy, so either call site reads it as "cancelled".
+        settleModal(modalHost.querySelector("#dashboardModalInput") ? null : false);
+      }
+    });
+    // Enter submits a prompt; ESC cancels either kind. Capture + stopPropagation so the dashboard's
+    // own ESC (which would close the whole overlay) never fires while a modal is up.
+    modalHost.addEventListener("keydown", (event) => {
+      const ke = event as KeyboardEvent;
+      if (!isModalOpen()) return;
+      if (ke.key === "Enter" && modalHost.querySelector("#dashboardModalInput")) {
+        ke.preventDefault();
+        ke.stopPropagation();
+        const v = modalInputValue();
+        settleModal(v || null);
+      } else if (ke.key === "Escape") {
+        ke.preventDefault();
+        ke.stopPropagation();
+        settleModal(modalHost.querySelector("#dashboardModalInput") ? null : false);
+      }
     });
     // Drill-in context band: dismiss (×) or expand/collapse the DoD criteria list.
     elements.rollupContextBand.addEventListener("click", (event) => {

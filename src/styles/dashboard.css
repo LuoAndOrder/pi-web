@@ -533,6 +533,28 @@
 #dashboardView .toast .undo { border: 1px solid var(--border); background: transparent; color: var(--accent); border-radius: 8px; padding: 5px 11px; font-weight: 650; font-size: 12px; }
 #dashboardView .toast .undo:hover { border-color: var(--accent); }
 
+/* in-overlay prompt / confirm modal — replaces native window.prompt/confirm so the highest-intent
+   create/rename/delete moments stay on the dark pi-web theme (scoped here, reusing the token palette) */
+#dashboardView .mnmodal { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; }
+#dashboardView .mnmodal[hidden] { display: none; }
+#dashboardView .mnmodal-scrim { position: absolute; inset: 0; background: rgba(3, 6, 11, .58); opacity: 0; transition: opacity .16s ease; }
+#dashboardView .mnmodal.open .mnmodal-scrim { opacity: 1; }
+#dashboardView .mnmodal-panel {
+  position: relative; width: min(440px, 92vw); padding: 20px 22px 18px; border-radius: 14px;
+  background: var(--panel-2); border: 1px solid var(--border); box-shadow: 0 24px 64px rgba(0, 0, 0, .55);
+  transform: translateY(8px) scale(.98); opacity: 0; transition: transform .16s ease, opacity .16s ease;
+}
+#dashboardView .mnmodal.open .mnmodal-panel { transform: translateY(0) scale(1); opacity: 1; }
+#dashboardView .mnmodal-title { font-size: 16px; font-weight: 800; letter-spacing: -.01em; color: var(--text); }
+#dashboardView .mnmodal-body { margin-top: 8px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+#dashboardView .mnmodal-body b { color: var(--text); font-weight: 650; }
+#dashboardView .mnmodal-body .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+#dashboardView .mnmodal-input { margin-top: 14px; width: 100%; height: 36px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); color: var(--text); font: inherit; font-size: 13px; padding: 0 12px; outline: none; }
+#dashboardView .mnmodal-input:focus { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+#dashboardView .mnmodal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+#dashboardView .btn.danger { background: color-mix(in srgb, var(--danger) 16%, var(--panel-2)); border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); color: color-mix(in srgb, var(--danger) 92%, #fff); font-weight: 800; }
+#dashboardView .btn.danger:hover { background: color-mix(in srgb, var(--danger) 26%, var(--panel-2)); border-color: var(--danger); }
+
 /* DoD authoring drawer (S10) — a modal panel scoped under #dashboardView */
 #dashboardView .dodDrawer { position: fixed; inset: 0; z-index: 70; }
 #dashboardView .dodDrawer[hidden] { display: none; }

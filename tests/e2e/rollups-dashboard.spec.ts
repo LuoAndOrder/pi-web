@@ -78,6 +78,32 @@ function trackPageErrors(page: Page): string[] {
   return errors;
 }
 
+// Create/rename/destructive-confirm flows now use an IN-OVERLAY modal (#dashboardModal) styled
+// on the dark pi-web theme — NOT native window.prompt/confirm — so these helpers drive that modal
+// instead of page.on("dialog"). The modal is scoped under #dashboardView and resolves a Promise on
+// confirm/submit (its click is awaited by the call site), so the assertions that poll the registry
+// afterward stay race-free.
+async function confirmModalAccept(page: Page): Promise<void> {
+  const modal = page.locator("#dashboardModal");
+  await expect(modal).toBeVisible();
+  await modal.locator("[data-mnmodal-confirm]").click();
+  await expect(modal).toBeHidden();
+}
+async function confirmModalDismiss(page: Page): Promise<void> {
+  const modal = page.locator("#dashboardModal");
+  await expect(modal).toBeVisible();
+  // The cancel BUTTON (not the scrim, which shares the data attribute) declines the confirm.
+  await modal.locator("button[data-mnmodal-cancel]").click();
+  await expect(modal).toBeHidden();
+}
+async function promptModalSubmit(page: Page, value: string): Promise<void> {
+  const modal = page.locator("#dashboardModal");
+  await expect(modal).toBeVisible();
+  await modal.locator("#dashboardModalInput").fill(value);
+  await modal.locator("[data-mnmodal-submit]").click();
+  await expect(modal).toBeHidden();
+}
+
 test.beforeEach(async ({ page }) => {
   await page.request.post("/api/mock/reset");
   await page.goto("/");
@@ -163,6 +189,68 @@ test.describe("Project Rollups dashboard", () => {
       const n = Number(p);
       expect(Number.isInteger(n) && n >= 0 && n <= 100).toBe(true);
     }
+
+    expect(pageErrors).toEqual([]);
+  });
+
+  // Regression for the sign-off-targets-wrong-row finding: a workstream- (or project-) level
+  // DoD is INHERITED by every session under it, so all N sessions render the SAME gate criterion
+  // id. The old click handler reverse-mapped that shared critId back to a session and always
+  // resolved the FIRST match, so clicking the 2nd row signed off the 1st. The fix carries each
+  // row's own session id in data-signoff-session; this test seeds TWO sessions sharing one
+  // workstream DoD gate, clicks the SECOND row, and asserts the SECOND row (not the first)
+  // optimistically flips to "✓ Signed off".
+  test("sign-off targets the CLICKED row when sessions share a workstream-level DoD gate", async ({ page }) => {
+    const pageErrors = trackPageErrors(page);
+    // Both mock sessions live in the repo-root cwd; register a project there so they roll up.
+    const sres = await page.request.get("/api/sessions");
+    const sessions = (await sres.json()).sessions as Array<{ id: string; cwd?: string }>;
+    const root = sessions.find((s) => s.id === "mock-current")?.cwd as string;
+    expect(root, "mock-current must have a cwd").toBeTruthy();
+
+    const name = `E2E SharedGate ${Date.now()}`;
+    const pRes = await page.request.post("/api/projects", { data: { name, roots: [root] } });
+    expect(pRes.status(), await pRes.text()).toBe(201);
+    const projectId = (await pRes.json()).project.id as string;
+    createdProjectIds.push(projectId);
+
+    const wRes = await page.request.post(`/api/projects/${projectId}/workstreams`, { data: { name: "Shared-gate workstream" } });
+    expect(wRes.status(), await wRes.text()).toBe(201);
+    const workstreamId = (await wRes.json()).workstream.id as string;
+    // One met scorable criterion (ring → 100%) + one unmet manual GATE → each attached session
+    // inherits this DoD and rolls up to uiStatus "sign".
+    await page.request.put(`/api/workstreams/${workstreamId}/dod`, { data: { criteria: SIGN_DOD } });
+    // Attach BOTH mock sessions to this one workstream so they share the inherited gate.
+    await page.request.put(`/api/workstreams/${workstreamId}/sessions`, { data: { sessionIds: ["mock-current", "mock-older"] } });
+
+    await page.locator("#dashboardButton").click();
+    const view = page.locator("#dashboardView");
+    await expect(view).toBeVisible();
+
+    // The fleet sign-off rail renders one row per session. Both rows carry the SAME data-signoff
+    // (the inherited gate critId) but DISTINCT data-signoff-session.
+    const signoff = view.locator('[data-testid="signoff"]');
+    await expect(signoff).toBeVisible();
+    const olderBtn = signoff.locator('.soff button[data-signoff-session="mock-older"]');
+    const currentBtn = signoff.locator('.soff button[data-signoff-session="mock-current"]');
+    await expect(olderBtn).toBeVisible();
+    await expect(currentBtn).toBeVisible();
+    // Sanity: both buttons share the same gate criterion id (the inherited DoD) — the exact
+    // condition the old reverse-map mishandled.
+    const olderCrit = await olderBtn.getAttribute("data-signoff");
+    const currentCrit = await currentBtn.getAttribute("data-signoff");
+    expect(olderCrit).toBeTruthy();
+    expect(olderCrit).toBe(currentCrit);
+
+    // Click the SECOND row (mock-older). After the optimistic flip + re-render its sign-off
+    // button is GONE (replaced by "✓ Signed off") while mock-current's sign-off button REMAINS
+    // actionable. The bug flipped the FIRST row, which would leave mock-older's button present
+    // and mock-current's gone — so asserting exactly the inverse proves the clicked row won.
+    await olderBtn.click();
+    await expect(signoff.locator('button[data-signoff-session="mock-older"]')).toHaveCount(0);
+    await expect(signoff.locator('button[data-signoff-session="mock-current"]')).toBeVisible();
+    // And the signed-off row sits where mock-older's row was — exactly one "✓ Signed off" marker.
+    await expect(signoff.locator('.soff', { hasText: "Signed off" })).toHaveCount(1);
 
     expect(pageErrors).toEqual([]);
   });
@@ -362,11 +450,11 @@ test.describe("Project Rollups dashboard", () => {
       await archived.locator(`.archrow[data-ws-id="${workstreamId}"] [data-wsaction="restore"]`).click();
       await expect.poll(async () => (await rollupFor(page, projectId))?.workstreams[0]?.inactive ?? false).toBe(false);
 
-      // Cancel confirms via window.confirm → accept it.
-      page.once("dialog", (d) => d.accept());
+      // Cancel confirms via the in-overlay modal → accept it.
       const cardMenu2 = pcard.locator(".pcard-head .wsmenu").first();
       await cardMenu2.locator("[data-wsmenu-toggle]").click();
       await cardMenu2.locator(`[data-wsaction="cancel"]`).click();
+      await confirmModalAccept(page);
       // Persisted as abandoned → inactive again, surfaced as "Cancelled" in Archived.
       await expect.poll(async () => (await rollupFor(page, projectId))?.workstreams[0]?.workstream.status).toBe("abandoned");
       const archived2 = view.locator('[data-testid="archived"]');
@@ -374,9 +462,9 @@ test.describe("Project Rollups dashboard", () => {
       await archived2.locator(".done-head").click(); // expand (re-rendered collapsed)
       await expect(archived2.locator(`.archrow[data-ws-id="${workstreamId}"]`)).toContainText("Cancelled");
 
-      // ── Delete ── from the Archived row; confirm dialog accepted. The workstream is gone.
-      page.once("dialog", (d) => d.accept());
+      // ── Delete ── from the Archived row; confirm modal accepted. The workstream is gone.
       await archived2.locator(`.archrow[data-ws-id="${workstreamId}"] [data-wsaction="delete"]`).click();
+      await confirmModalAccept(page);
       await expect.poll(async () => (await rollupFor(page, projectId))?.workstreams.length ?? 0).toBe(0);
 
       expect(pageErrors).toEqual([]);
@@ -394,10 +482,10 @@ test.describe("Project Rollups dashboard", () => {
       await expect(pcard).toBeVisible();
 
       // Decline the confirm → no mutation.
-      page.once("dialog", (d) => d.dismiss());
       const cardMenu = pcard.locator(".pcard-head .wsmenu").first();
       await cardMenu.locator("[data-wsmenu-toggle]").click();
       await cardMenu.locator(`[data-wsaction="cancel"]`).click();
+      await confirmModalDismiss(page);
       // Still active (not abandoned, not inactive).
       const r = await rollupFor(page, projectId);
       expect(r?.workstreams[0]?.workstream.status).not.toBe("abandoned");
@@ -442,10 +530,10 @@ test.describe("Project Rollups dashboard", () => {
       const wsMenu = view.locator(`.wsmenu[data-wsmenu="${workstreamId}"]`).first();
       await expect(wsMenu).toBeVisible();
 
-      // Delete via the workstream kebab; accept the confirm.
-      page.once("dialog", (d) => d.accept());
+      // Delete via the workstream kebab; accept the confirm modal.
       await wsMenu.locator("[data-wsmenu-toggle]").click();
       await wsMenu.locator(`[data-wsaction="delete"]`).click();
+      await confirmModalAccept(page);
       // The original workstream is gone.
       await expect.poll(async () => (await rollupFor(page, projectId))?.workstreams.length ?? 0).toBe(0);
 
@@ -487,7 +575,7 @@ test.describe("Project Rollups dashboard", () => {
       await expect(pcard).toBeVisible();
 
       // ── Archive ── open the project kebab; its popover must be fully visible (position:fixed,
-      // escaping the card clip) so the Archive item is clickable. Accept the confirm dialog.
+      // escaping the card clip) so the Archive item is clickable. Accept the confirm modal.
       const projMenu = pcard.locator(".pcard-head .projmenu").first();
       await projMenu.locator("[data-projmenu-toggle]").click();
       const projPop = projMenu.locator(".projmenu-pop");
@@ -496,8 +584,8 @@ test.describe("Project Rollups dashboard", () => {
       await expect(projPop).toHaveClass(/pop-fixed/);
       const archiveItem = projMenu.locator('[data-projaction="archive"]');
       await expect(archiveItem).toBeVisible();
-      page.once("dialog", (d) => d.accept());
       await archiveItem.click();
+      await confirmModalAccept(page);
 
       // The project leaves the active grid and the feed's rollups[] (archivedProjects[] carries it).
       await expect.poll(async () => {
@@ -594,10 +682,10 @@ test.describe("Project Rollups dashboard", () => {
       await expect(unfiledWs.locator(".mn-count")).toContainText("2 selected");
       await expect(newBtn).toBeEnabled();
 
-      // Name the new workstream via the prompt, then create it.
+      // Name the new workstream via the in-overlay prompt modal, then create it.
       const wsName = `Image attachments ${Date.now()}`;
-      page.once("dialog", (d) => d.accept(wsName));
       await newBtn.click();
+      await promptModalSubmit(page, wsName);
 
       // Persisted: a real workstream now carries both sessions, and the Unfiled bucket is gone.
       await expect.poll(async () => {

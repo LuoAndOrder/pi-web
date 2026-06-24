@@ -1032,8 +1032,12 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
     const rowHtml = ({ s, w, p }: { s: VSession; w: VWorkstream; p: VProject }) => {
       const gate = s._gate, gone = !!state.signed[s.id], pending = signPending(s);
       // S5 DOM contract: data-signoff carries the GATE CRITERION id (what S7 PATCHes via
-      // /api/dod/criterion/:id), not the session id. data-recheckcard stays the session id
-      // (the recheck handler resolves the stale criterion via SESS[id]._gate).
+      // /api/dod/criterion/:id). data-signoff-session carries THIS row's session id so the
+      // click handler targets the clicked row directly — a workstream/project-level DoD is
+      // inherited by every session, so all N rows render the SAME criterion id; reverse-mapping
+      // the shared critId back to a session always resolved the FIRST match and flipped the
+      // wrong row (review finding). data-recheckcard stays the session id (the recheck handler
+      // resolves the stale criterion via SESS[id]._gate).
       const critId = gate?.id ?? "";
       const lineage = p.nest ? ` <span class="nest" title="own project root nested inside its parent — not counted toward the parent">⤷ ${esc(p.nest)}</span>` : "";
       const crit = pending
@@ -1050,7 +1054,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
           // "Cancel — no longer relevant" abandons the owning workstream (PATCH status:
           // "abandoned", confirm) — a first-class lifecycle exit beside sign-off (M3): a
           // done-per-DoD item the user has decided to shelve rather than ship.
-          : `<button class="btn sign sm" data-signoff="${esc(critId)}"${deferTip("Sign off — merge stays a separate step")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off</button><button class="btn ghost sm" data-open="${s.id}">Review</button>${w._synthetic ? "" : `<button class="btn ghost danger sm wscancel" data-wscancel="${esc(w.id)}" title="No longer relevant — abandon this whole workstream instead of signing it off (it moves to Archived, out of active counts)">Not relevant</button>`}`;
+          : `<button class="btn sign sm" data-signoff="${esc(critId)}" data-signoff-session="${esc(s.id)}"${deferTip("Sign off — merge stays a separate step")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg> Sign off</button><button class="btn ghost sm" data-open="${s.id}">Review</button>${w._synthetic ? "" : `<button class="btn ghost danger sm wscancel" data-wscancel="${esc(w.id)}" title="No longer relevant — abandon this whole workstream instead of signing it off (it moves to Archived, out of active counts)">Not relevant</button>`}`;
       return `<article class="soff ${gone ? "gone" : ""}">
         <div class="sleft">
           <div class="scrumb"><b>${esc(p.name)}</b>${lineage} › ${esc(w.name)} · <span class="sn">${esc(s.name)}</span></div>
@@ -1442,7 +1446,7 @@ export function createRenderer(options: { wrap: HTMLElement; state: RenderState;
       : s.status === "merge" ? "View" : (s.status === "run" || s.status === "loop") ? "Open" : s.status === "unset" ? "Define done" : "Continue";
     const primary = `<button class="btn primary sm" data-open="${s.id}">${continueIcon()} ${verb}</button>`;
     let secondary = "";
-    if (s.status === "sign" && !navOnly) secondary = `<button class="btn sign sm" data-signoff="${esc(s._gate?.id ?? "")}"${deferTip("Sign off — merge stays a separate step")}>✓ Sign off</button>`;
+    if (s.status === "sign" && !navOnly) secondary = `<button class="btn sign sm" data-signoff="${esc(s._gate?.id ?? "")}" data-signoff-session="${esc(s.id)}"${deferTip("Sign off — merge stays a separate step")}>✓ Sign off</button>`;
     else if (s.status === "fail") secondary = `<button class="btn ghost sm" data-open="${s.id}">${esc(s.failAction || "Re-run")}</button>`;
 
     const dodTxt = s.status === "unset" ? `<span style="color:var(--st-sign)">no criterion set — define what done means</span> ${srcTag(s.dodSrc)}`
